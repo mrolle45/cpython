@@ -124,6 +124,7 @@ python_parser.add_argument(
 def main() -> None:
     from pegen.testutil import print_memstats
 
+    print('Running pegen.__main__.')
     args = argparser.parse_args()
     if "func" not in args:
         argparser.error("Must specify the target language mode ('c' or 'python')")
@@ -185,4 +186,9 @@ if __name__ == "__main__":
     if sys.version_info < (3, 8):
         print("ERROR: using pegen requires at least Python 3.8!", file=sys.stderr)
         sys.exit(1)
-    main()
+    try: main()
+    except:
+        sys.stderr.write('Traceback...')
+        traceback.print_exc()
+        raise
+

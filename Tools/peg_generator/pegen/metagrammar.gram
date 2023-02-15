@@ -25,6 +25,7 @@ from pegen.grammar import (
     Rule,
     RuleList,
     RuleName,
+    TypedName,
     Grammar,
     StringLeaf,
 )
@@ -57,8 +58,13 @@ rule[Rule]:
     | rulename memoflag? ":" alts NEWLINE { Rule(rulename[0], rulename[1], alts, memo=opt) }
 
 rulename[RuleName]:
-    | NAME annotation { (name.string, annotation) }
-    | NAME { (name.string, None) }
+    | typed_name args=rule_args? { typed_name }
+
+rule_args:
+    | '(' typed_name+ ')'
+
+typed_name:
+    | NAME a=annotation? { (name.string, a) }
 
 # In the future this may return something more complicated
 memoflag[str]:

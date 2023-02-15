@@ -66,6 +66,21 @@ class Grammar:
 SIMPLE_STR = True
 
 
+class TypedName:
+    def __init__(self, name: Optional[str], type: Optional[str] = None):
+        self.name = name
+        self.type = type
+
+    def __str__(self) -> str:
+        if not SIMPLE_STR and self.type:
+            return f"{self.name}[{self.type}]"
+        else:
+            return str(self.name)
+
+    def __repr__(self) -> str:
+        return f"TypedName({self.name!r}, {self.type!r})"
+
+
 class Rule:
     def __init__(self, name: str, type: Optional[str], rhs: Rhs, memo: Optional[object] = None):
         self.name = name
@@ -360,5 +375,6 @@ RuleName = Tuple[str, str]
 MetaTuple = Tuple[str, Optional[str]]
 MetaList = List[MetaTuple]
 RuleList = List[Rule]
+TypedNameList = List[TypedName]
 NamedItemList = List[NamedItem]
 LookaheadOrCut = Union[Lookahead, Cut]
