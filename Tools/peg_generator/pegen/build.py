@@ -1,3 +1,4 @@
+import io
 import itertools
 import pathlib
 import sys
@@ -240,12 +241,11 @@ def build_c_generator(
 def build_python_generator(
     grammar: Grammar,
     grammar_file: str,
-    output_file: str,
+    output_file: io.StringIO,
     skip_actions: bool = False,
 ) -> ParserGenerator:
-    with open(output_file, "w") as file:
-        gen: ParserGenerator = PythonParserGenerator(grammar, file)  # TODO: skip_actions
-        gen.generate(grammar_file)
+    gen: ParserGenerator = PythonParserGenerator(grammar, output_file)  # TODO: skip_actions
+    gen.generate(grammar_file)
     return gen
 
 
@@ -311,11 +311,29 @@ def build_python_parser_and_generator(
           when generating the parser. Defaults to False.
         skip_actions (bool, optional): Whether to pretend no rule has any actions.
     """
-    grammar, parser, tokenizer = build_parser(grammar_file, verbose_tokenizer, verbose_parser)
-    gen = build_python_generator(
-        grammar,
-        grammar_file,
-        output_file,
-        skip_actions=skip_actions,
-    )
+    # Create the result as a str, twice:
+    # First, using the existing grammar_parser module.
+    # Second, using the parser class defined in the first result.
+    def genparser(parser_class: type) -> Tuple[str, Grammar, Parser, Tokenizer, ParserGenerator]:
+        result = io.StringIO()
+        with open(grammar_file) as file:
+            tokenizer = Tokenizer(tokenize.generate_tokens(file.readline))
+            parser = parser_class(tokenizer)
+            grammar = parser.start()
+            gen: ParserGenerator = PythonParserGenerator(grammar, result)
+            gen.generate(grammar_file)
+
+        return result.getvalue(), grammar, parser, tokenizer, gen
+
+    result1, grammar, parser, tokenizer, gen = genparser(GrammarParser)
+
+    d = dict()
+    exec(result1, d)
+    result2, _, _, _, _ = genparser(d['GeneratedParser'])
+
+    if result1 == result2:
+        print(f'Writing {output_file}.')
+        with open(output_file, 'w') as f:
+            f.write(result1)
+
     return grammar, parser, tokenizer, gen
