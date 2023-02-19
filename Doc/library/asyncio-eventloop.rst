@@ -48,7 +48,7 @@ an event loop:
    running event loop.
 
    If there is no running event loop set, the function will return
-   the result of ``get_event_loop_policy().get_event_loop()`` call.
+   the result of the ``get_event_loop_policy().get_event_loop()`` call.
 
    Because this function has rather complex behavior (especially
    when custom event loop policies are in use), using the
@@ -59,15 +59,15 @@ an event loop:
    instead of using these lower level functions to manually create and close an
    event loop.
 
-   .. deprecated:: 3.10
-      Deprecation warning is emitted if there is no current event loop.
-      In Python 3.12 it will be an error.
-
    .. note::
       In Python versions 3.10.0--3.10.8 and 3.11.0 this function
-      (and other functions which used it implicitly) emitted a
+      (and other functions which use it implicitly) emitted a
       :exc:`DeprecationWarning` if there was no running event loop, even if
-      the current loop was set.
+      the current loop was set on the policy.
+      In Python versions 3.10.9, 3.11.1 and 3.12 they emit a
+      :exc:`DeprecationWarning` if there is no running event loop and no
+      current loop is set.
+      In some future Python release this will become an error.
 
 .. function:: set_event_loop(loop)
 
@@ -192,12 +192,15 @@ Running and stopping the loop
 .. coroutinemethod:: loop.shutdown_default_executor()
 
    Schedule the closure of the default executor and wait for it to join all of
-   the threads in the :class:`ThreadPoolExecutor`. After calling this method, a
-   :exc:`RuntimeError` will be raised if :meth:`loop.run_in_executor` is called
-   while using the default executor.
+   the threads in the :class:`~concurrent.futures.ThreadPoolExecutor`.
+   Once this method has been called,
+   using the default executor with :meth:`loop.run_in_executor`
+   will raise a :exc:`RuntimeError`.
 
-   Note that there is no need to call this function when
-   :func:`asyncio.run` is used.
+   .. note::
+
+      Do not call this method when using :func:`asyncio.run`,
+      as the latter handles default executor shutdown automatically.
 
    .. versionadded:: 3.9
 
@@ -210,22 +213,23 @@ Scheduling callbacks
    Schedule the *callback* :term:`callback` to be called with
    *args* arguments at the next iteration of the event loop.
 
+   Return an instance of :class:`asyncio.Handle`,
+   which can be used later to cancel the callback.
+
    Callbacks are called in the order in which they are registered.
    Each callback will be called exactly once.
 
-   An optional keyword-only *context* argument allows specifying a
+   The optional keyword-only *context* argument specifies a
    custom :class:`contextvars.Context` for the *callback* to run in.
-   The current context is used when no *context* is provided.
+   Callbacks use the current context when no *context* is provided.
 
-   An instance of :class:`asyncio.Handle` is returned, which can be
-   used later to cancel the callback.
-
-   This method is not thread-safe.
+   Unlike :meth:`call_soon_threadsafe`, this method is not thread-safe.
 
 .. method:: loop.call_soon_threadsafe(callback, *args, context=None)
 
-   A thread-safe variant of :meth:`call_soon`.  Must be used to
-   schedule callbacks *from another thread*.
+   A thread-safe variant of :meth:`call_soon`. When scheduling callbacks from
+   another thread, this function *must* be used, since :meth:`call_soon` is not
+   thread-safe.
 
    Raises :exc:`RuntimeError` if called on a loop that's been closed.
    This can happen on a secondary thread when the main application is
@@ -915,7 +919,8 @@ Watching file descriptors
 
 .. method:: loop.remove_reader(fd)
 
-   Stop monitoring the *fd* file descriptor for read availability.
+   Stop monitoring the *fd* file descriptor for read availability. Returns
+   ``True`` if *fd* was previously being monitored for reads.
 
 .. method:: loop.add_writer(fd, callback, *args)
 
@@ -928,7 +933,8 @@ Watching file descriptors
 
 .. method:: loop.remove_writer(fd)
 
-   Stop monitoring the *fd* file descriptor for write availability.
+   Stop monitoring the *fd* file descriptor for write availability. Returns
+   ``True`` if *fd* was previously being monitored for writes.
 
 See also :ref:`Platform Support <asyncio-platform-support>` section
 for some limitations of these methods.
