@@ -2,9 +2,7 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <_PegenSources Include="$(PySourcePath)Grammar\python.gram;$(PySourcePath)Grammar\Tokens" />
-    <_PegenSources Include="$(PySourcePath)Tools\peg_generator\pegen\metagrammar.gram" />
     <_PegenOutputs Include="$(PySourcePath)Parser\parser.c" />
-    <_PegenOutputs Include="$(PySourcePath)Tools\peg_generator\pegen\grammar_parser.py" />
     <_ASTSources Include="$(PySourcePath)Parser\Python.asdl" />
     <_ASTOutputs Include="$(PySourcePath)Include\internal\pycore_ast.h">
       <Argument>-H</Argument>
@@ -45,8 +43,6 @@
           DependsOnTargets="FindPythonForBuild">
     <Message Text="Regenerate @(_PegenOutputs->'%(Filename)%(Extension)',' ')" Importance="high" />
     <!-- Specify python.gram with POSIX-like path because the argument gets written into the file verbatim -->
-    <Exec Command="set PYTHONPATH=Tools\peg_generator%0D%0A$(PythonForBuild) -m pegen -q python ./Tools\peg_generator\pegen\metagrammar.gram -o Tools\peg_generator\pegen\grammar_parser.py"
-          WorkingDirectory="$(PySourcePath)" />
     <Exec Command="set PYTHONPATH=Tools\peg_generator%0D%0A$(PythonForBuild) -m pegen -q c ./Grammar/python.gram Grammar\Tokens -o Parser\parser.c"
           WorkingDirectory="$(PySourcePath)" />
   </Target>
