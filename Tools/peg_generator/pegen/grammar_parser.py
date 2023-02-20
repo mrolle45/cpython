@@ -34,6 +34,7 @@ from pegen.grammar import (
     Rule,
     RuleList,
     RuleName,
+    RuleParams,
     TypedName,
     Grammar,
     StringLeaf,
@@ -167,7 +168,7 @@ class GeneratedParser(Parser):
             and
             (_dedent := self.expect('DEDENT'))
         ):
-            return Rule (rulename . name , rulename . type , Rhs (alts . alts + more_alts . alts) , memo = opt)
+            return Rule (rulename , Rhs (alts . alts + more_alts . alts) , memo = opt)
         self._reset(mark)
         if (
             (rulename := self.rulename())
@@ -184,7 +185,7 @@ class GeneratedParser(Parser):
             and
             (_dedent := self.expect('DEDENT'))
         ):
-            return Rule (rulename . name , rulename . type , more_alts , memo = opt)
+            return Rule (rulename , more_alts , memo = opt)
         self._reset(mark)
         if (
             (rulename := self.rulename())
@@ -197,35 +198,37 @@ class GeneratedParser(Parser):
             and
             (_newline := self.expect('NEWLINE'))
         ):
-            return Rule (rulename . name , rulename . type , alts , memo = opt)
+            return Rule (rulename , alts , memo = opt)
         self._reset(mark)
         return None
 
     @memoize
     def rulename(self) -> Optional[RuleName]:
-        # rulename: typed_name rule_params?
+        # rulename: NAME rule_params? annotation?
         mark = self._mark()
         if (
-            (typed_name := self.typed_name())
+            (name := self.name())
             and
-            (args := self.rule_params(),)
+            (p := self.rule_params(),)
+            and
+            (a := self.annotation(),)
         ):
-            return typed_name
+            return RuleName (TypedName (name . string , a) , p)
         self._reset(mark)
         return None
 
     @memoize
-    def rule_params(self) -> Optional[Any]:
+    def rule_params(self) -> Optional[RuleParams]:
         # rule_params: '(' typed_name+ ')'
         mark = self._mark()
         if (
             (literal := self.expect('('))
             and
-            (_loop1_1 := self._loop1_1())
+            (names := self._loop1_1())
             and
             (literal_1 := self.expect(')'))
         ):
-            return [literal, _loop1_1, literal_1]
+            return RuleParams (names)
         self._reset(mark)
         return None
 

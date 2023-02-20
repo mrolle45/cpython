@@ -25,6 +25,7 @@ from pegen.grammar import (
     Rule,
     RuleList,
     RuleName,
+    RuleParams,
     TypedName,
     Grammar,
     StringLeaf,
@@ -52,19 +53,19 @@ rules[RuleList]:
 
 rule[Rule]:
     | rulename memoflag? ":" alts NEWLINE INDENT more_alts DEDENT {
-          Rule(rulename[0], rulename[1], Rhs(alts.alts + more_alts.alts), memo=opt) }
+          Rule(rulename, Rhs(alts.alts + more_alts.alts), memo=opt) }
     | rulename memoflag? ":" NEWLINE INDENT more_alts DEDENT {
-          Rule(rulename[0], rulename[1], more_alts, memo=opt) }
-    | rulename memoflag? ":" alts NEWLINE { Rule(rulename[0], rulename[1], alts, memo=opt) }
+          Rule(rulename, more_alts, memo=opt) }
+    | rulename memoflag? ":" alts NEWLINE { Rule(rulename, alts, memo=opt) }
 
 rulename[RuleName]:
-    | typed_name args=rule_args? { typed_name }
+    | NAME p=rule_params? a=annotation? { RuleName(TypedName(name.string, a), p) }
 
-rule_args:
-    | '(' typed_name+ ')'
+rule_params[RuleParams]:
+    | '(' names=typed_name+ ')' { RuleParams(names) }
 
-typed_name:
-    | NAME a=annotation? { (name.string, a) }
+typed_name[TypedName]:
+    | NAME a=annotation? { TypedName(name.string, a) }
 
 # In the future this may return something more complicated
 memoflag[str]:
@@ -126,6 +127,7 @@ target_atoms[str]:
     | target_atom { target_atom }
 
 target_atom[str]:
+    | "(" ~ atoms=target_atoms? ")" { "(" + (atoms or "") + ")" }
     | "{" ~ atoms=target_atoms? "}" { "{" + (atoms or "") + "}" }
     | "[" ~ atoms=target_atoms? "]" { "[" + (atoms or "") + "]" }
     | NAME "*" { name.string + "*" }
@@ -134,4 +136,4 @@ target_atom[str]:
     | STRING { string.string }
     | "?" { "?" }
     | ":" { ":" }
-    | !"}" !"]" OP { op.string }
+    | !")" !"}" !"]" OP { op.string }

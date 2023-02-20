@@ -66,14 +66,37 @@ class Grammar:
 SIMPLE_STR = True
 
 
-class Rule:
-    def __init__(self, name: str, type: Optional[str], rhs: Rhs, memo: Optional[object] = None):
+class TypedName:
+    def __init__(self, name: Optional[str], type: Optional[str] = None):
         self.name = name
         self.type = type
+
+    def __str__(self) -> str:
+        if not SIMPLE_STR and self.type:
+            return f"{self.name}[{self.type}]"
+        else:
+            return str(self.name)
+
+    def __repr__(self) -> str:
+        return f"TypedName({self.name!r}, {self.type!r})"
+
+
+class Rule:
+    def __init__(self, rulename: RuleName, rhs: Rhs, memo: Optional[object] = None):
+        self.rulename = rulename
         self.rhs = rhs
         self.memo = bool(memo)
         self.left_recursive = False
         self.leader = False
+
+    @property
+    def name(self): return self.rulename.name
+
+    @property
+    def type(self): return self.rulename.type
+
+    @property
+    def params(self): return self.rulename.params
 
     def is_loop(self) -> bool:
         return self.name.startswith("_loop")
@@ -109,6 +132,21 @@ class Rule:
         ):
             rhs = rhs.alts[0].items[0].item.rhs
         return rhs
+
+    @classmethod
+    def simple(cls, name: str, *args, **kwds) -> Rule:
+        # Make Rule from just the name.
+        return cls(RuleName(TypedName(name)), *args, **kwds)
+
+
+class RuleParams(List[TypedName]):
+    pass
+
+
+class RuleName(TypedName):
+    def __init__(self, name: TypedName, params: Optional[RuleParams] = None):
+        super().__init__(name.name, name.type)
+        self.params = params
 
 
 class Leaf:
@@ -356,7 +394,6 @@ class Cut:
 
 Plain = Union[Leaf, Group]
 Item = Union[Plain, Opt, Repeat, Forced, Lookahead, Rhs, Cut]
-RuleName = Tuple[str, str]
 MetaTuple = Tuple[str, Optional[str]]
 MetaList = List[MetaTuple]
 RuleList = List[Rule]
