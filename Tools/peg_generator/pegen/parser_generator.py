@@ -171,7 +171,7 @@ class ParserGenerator:
     def artifical_rule_from_rhs(self, rhs: Rhs) -> str:
         self.counter += 1
         name = f"_tmp_{self.counter}"  # TODO: Pick a nicer name.
-        self.all_rules[name] = Rule(name, None, rhs)
+        self.all_rules[name] = Rule.simple(name, rhs)
         return name
 
     def artificial_rule_from_repeat(self, node: Plain, is_repeat1: bool) -> str:
@@ -181,7 +181,7 @@ class ParserGenerator:
         else:
             prefix = "_loop0_"
         name = f"{prefix}{self.counter}"
-        self.all_rules[name] = Rule(name, None, Rhs([Alt([NamedItem(None, node)])]))
+        self.all_rules[name] = Rule.simple(name, Rhs([Alt([NamedItem(None, node)])]))
         return name
 
     def artifical_rule_from_gather(self, node: Gather) -> str:
@@ -193,17 +193,15 @@ class ParserGenerator:
             [NamedItem(None, node.separator), NamedItem("elem", node.node)],
             action="elem",
         )
-        self.all_rules[extra_function_name] = Rule(
+        self.all_rules[extra_function_name] = Rule.simple(
             extra_function_name,
-            None,
             Rhs([extra_function_alt]),
         )
         alt = Alt(
             [NamedItem("elem", node.node), NamedItem("seq", NameLeaf(extra_function_name))],
         )
-        self.all_rules[name] = Rule(
+        self.all_rules[name] = Rule.simple(
             name,
-            None,
             Rhs([alt]),
         )
         return name
