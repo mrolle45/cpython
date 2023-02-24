@@ -452,7 +452,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
                 type = rule.type + " "
             else:
                 type = "void *"
-            self.print(f"static {type}{rulename}_rule(Parser *p);")
+            self.print(f"static {type}{rulename}_rule{self.rule_params(rule)};")
         self.print()
         for rulename, rule in list(self.all_rules.items()):
             self.print()
@@ -570,7 +570,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
             self.add_return("_res")
         self.print("}")
         self.print(f"static {result_type}")
-        self.print(f"{node.name}_raw(Parser *p)")
+        self.print(f"{node.name}_raw{self.rule_params(node)}")
 
     def _should_memoize(self, node: Rule) -> bool:
         return node.memo and not node.left_recursive
@@ -646,6 +646,10 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
                 self.print(f"_PyPegen_insert_memo(p, _start_mark, {node.name}_type, _seq);")
             self.add_return("_seq")
 
+    def rule_params(self, rule: Rule, parser_name: str = 'p') -> str:
+        """ The text for parameters to declare a rule.  The name 'p' can be suppressed. """
+        return f"(Parser *{parser_name}{''.join([f', {param.name}' for param in (rule.params or ())])})"
+
     def visit_Rule(self, node: Rule) -> None:
         is_loop = node.is_loop()
         is_gather = node.is_gather()
@@ -660,10 +664,10 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
         for line in str(node).splitlines():
             self.print(f"// {line}")
         if node.left_recursive and node.leader:
-            self.print(f"static {result_type} {node.name}_raw(Parser *);")
+            self.print(f"static {result_type} {node.name}_raw{self.rule_params(node, '')};")
 
         self.print(f"static {result_type}")
-        self.print(f"{node.name}_rule(Parser *p)")
+        self.print(f"{node.name}_rule{self.rule_params(node)}")
 
         if node.left_recursive and node.leader:
             self._set_up_rule_memoization(node, result_type)

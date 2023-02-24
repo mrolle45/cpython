@@ -219,9 +219,11 @@ class GeneratedParser(Parser):
 
     @memoize
     def rule_params(self) -> Optional[RuleParams]:
-        # rule_params: '(' typed_name+ ')'
+        # rule_params: !memoflag '(' typed_name+ ')'
         mark = self._mark()
         if (
+            self.negative_lookahead(self.memoflag, )
+            and
             (literal := self.expect('('))
             and
             (names := self._loop1_1())

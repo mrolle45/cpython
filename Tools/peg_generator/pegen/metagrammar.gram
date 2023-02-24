@@ -62,7 +62,7 @@ rulename[RuleName]:
     | NAME p=rule_params? a=annotation? { RuleName(TypedName(name.string, a), p) }
 
 rule_params[RuleParams]:
-    | '(' names=typed_name+ ')' { RuleParams(names) }
+    | !memoflag '(' names=typed_name+ ')' { RuleParams(names) }
 
 typed_name[TypedName]:
     | NAME a=annotation? { TypedName(name.string, a) }
