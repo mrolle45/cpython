@@ -299,6 +299,7 @@ def build_python_parser_and_generator(
     verbose_tokenizer: bool = False,
     verbose_parser: bool = False,
     skip_actions: bool = False,
+    verify: bool = True,
 ) -> Tuple[Grammar, Parser, Tokenizer, ParserGenerator]:
     """Generate rules, python parser, tokenizer, parser generator for a given grammar
 
@@ -327,9 +328,12 @@ def build_python_parser_and_generator(
 
     result1, grammar, parser, tokenizer, gen = genparser(GrammarParser)
 
-    d = dict()
-    exec(result1, d)
-    result2, _, _, _, _ = genparser(d['GeneratedParser'])
+    if verify:
+        d = dict()
+        exec(result1, d)
+        result2, _, _, _, _ = genparser(d['GeneratedParser'])
+    else:
+        result2 = result1
 
     if result1 == result2:
         print(f'Writing {output_file}.')
