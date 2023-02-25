@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional
 
 from pegen import grammar
 from pegen.grammar import Alt, GrammarVisitor, Rhs, Rule
@@ -21,24 +21,16 @@ class GrammarValidator(GrammarVisitor):
 
 class SubRuleValidator(GrammarValidator):
     def visit_Rhs(self, node: Rhs) -> None:
-        # Compare alts as lists of their items.
-        item_lists: List[Tuple[Alt, List[str]]] = [
-            (alt, [str(item) for item in alt.items]) for alt in node.alts]
-        for index, alt in enumerate(item_lists):
-            alts_to_consider = item_lists[index + 1 :]
+        for index, alt in enumerate(node.alts):
+            alts_to_consider = node.alts[index + 1 :]
             for other_alt in alts_to_consider:
-                self.check_intersection(*alt, *other_alt)
+                self.check_intersection(alt, other_alt)
 
-    def check_intersection(
-        self,
-        first_alt: Alt, first_items: List[str],
-        second_alt: Alt, second_items: List[str]
-        ) -> None:
-        if len(second_items) <= len(first_items): return
-        if first_items == second_items[: len(first_items)]:
+    def check_intersection(self, first_alt: Alt, second_alt: Alt) -> None:
+        if str(second_alt).startswith(str(first_alt)):
             raise ValidationError(
                 f"In {self.rulename} there is an alternative that will "
-                f"never be visited:\n{second_alt}, after {first_alt}"
+                f"never be visited:\n{second_alt}"
             )
 
 
