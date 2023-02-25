@@ -1,0 +1,50 @@
+@subheader """\
+from ast import literal_eval
+
+from pegen.grammar import (
+    Alt,
+    Cut,
+    Forced,
+    Gather,
+    Group,
+    Item,
+    Lookahead,
+    LookaheadOrCut,
+    MetaTuple,
+    MetaList,
+    NameLeaf,
+    NamedItem,
+    NamedItemList,
+    NegativeLookahead,
+    Opt,
+    Plain,
+    PositiveLookahead,
+    Repeat0,
+    Repeat1,
+    Rhs,
+    Rule,
+    RuleList,
+    RuleName,
+    RuleParams,
+    TypedName,
+    Grammar,
+    StringLeaf,
+)
+"""
+
+# Test parsing for rules with parameters.
+
+@trailer '' # required if there is no 'start' rule
+
+foo:
+    | bar()		# No args
+    | bar (bar)		# (bar) is NOT an arg list, but a Group.
+    | bar(1,)		# One arg, comma is required.
+    | bar(1, 2)		# Two args, comma is optional.
+    | bar(1, 2,)	# Two args, comma is optional.
+    | bar		# Last, so it doesn't hide the others.
+
+bar2(x[int], y) [list] (memo): NAME
+bar (memo): NAME			    # (memo) is NOT a parameter list
+
+
