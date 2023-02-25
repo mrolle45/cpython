@@ -12,6 +12,7 @@ from ast import literal_eval
 
 from pegen.grammar import (
     Alt,
+    ArgList,
     Cut,
     Forced,
     Gather,
@@ -219,14 +220,14 @@ class GeneratedParser(Parser):
 
     @memoize
     def rule_params(self) -> Optional[RuleParams]:
-        # rule_params: !memoflag '(' typed_name+ ')'
+        # rule_params: !memoflag '(' ','.typed_name+ ')'
         mark = self._mark()
         if (
             self.negative_lookahead(self.memoflag, )
             and
             (literal := self.expect('('))
             and
-            (names := self._loop1_1())
+            (names := self._gather_1())
             and
             (literal_1 := self.expect(')'))
         ):
@@ -519,7 +520,7 @@ class GeneratedParser(Parser):
 
     @memoize
     def atom(self) -> Optional[Plain]:
-        # atom: '(' ~ alts ')' | NAME | STRING
+        # atom: '(' ~ alts ')' | NAME arguments? | STRING
         mark = self._mark()
         cut = False
         if (
@@ -536,8 +537,10 @@ class GeneratedParser(Parser):
         if cut: return None
         if (
             (name := self.name())
+            and
+            (a := self.arguments(),)
         ):
-            return NameLeaf (name . string)
+            return NameLeaf (name . string , a)
         self._reset(mark)
         if (
             (string := self.string())
@@ -582,6 +585,69 @@ class GeneratedParser(Parser):
             return target_atoms
         self._reset(mark)
         if cut: return None
+        return None
+
+    @memoize
+    def arguments(self) -> Optional[ArgList]:
+        # arguments: '(' argument "," ",".argument+ ","? ')' | '(' argument "," ')' | '(' ')'
+        mark = self._mark()
+        if (
+            (literal := self.expect('('))
+            and
+            (a := self.argument())
+            and
+            (literal_1 := self.expect(","))
+            and
+            (b := self._gather_3())
+            and
+            (c := self.expect(","),)
+            and
+            (literal_2 := self.expect(')'))
+        ):
+            return ArgList ([a] + b , c and c . string)
+        self._reset(mark)
+        if (
+            (literal := self.expect('('))
+            and
+            (a := self.argument())
+            and
+            (literal_1 := self.expect(","))
+            and
+            (literal_2 := self.expect(')'))
+        ):
+            return ArgList ([a] , ",")
+        self._reset(mark)
+        if (
+            (literal := self.expect('('))
+            and
+            (literal_1 := self.expect(')'))
+        ):
+            return ArgList ()
+        self._reset(mark)
+        return None
+
+    @memoize
+    def argument(self) -> Optional[Any]:
+        # argument: arg_atom+
+        mark = self._mark()
+        if (
+            (a := self._loop1_5())
+        ):
+            return " " . join (a)
+        self._reset(mark)
+        return None
+
+    @memoize
+    def arg_atom(self) -> Optional[Any]:
+        # arg_atom: !"," target_atom
+        mark = self._mark()
+        if (
+            self.negative_lookahead(self.expect, ",")
+            and
+            (target_atom := self.target_atom())
+        ):
+            return target_atom
+        self._reset(mark)
         return None
 
     @memoize
@@ -691,14 +757,74 @@ class GeneratedParser(Parser):
         return None
 
     @memoize
-    def _loop1_1(self) -> Optional[Any]:
-        # _loop1_1: typed_name
+    def _loop0_2(self) -> Optional[Any]:
+        # _loop0_2: ',' typed_name
         mark = self._mark()
         children = []
         while (
-            (typed_name := self.typed_name())
+            (literal := self.expect(','))
+            and
+            (elem := self.typed_name())
         ):
-            children.append(typed_name)
+            children.append(elem)
+            mark = self._mark()
+        self._reset(mark)
+        return children
+
+    @memoize
+    def _gather_1(self) -> Optional[Any]:
+        # _gather_1: typed_name _loop0_2
+        mark = self._mark()
+        if (
+            (elem := self.typed_name())
+            is not None
+            and
+            (seq := self._loop0_2())
+            is not None
+        ):
+            return [elem] + seq
+        self._reset(mark)
+        return None
+
+    @memoize
+    def _loop0_4(self) -> Optional[Any]:
+        # _loop0_4: "," argument
+        mark = self._mark()
+        children = []
+        while (
+            (literal := self.expect(","))
+            and
+            (elem := self.argument())
+        ):
+            children.append(elem)
+            mark = self._mark()
+        self._reset(mark)
+        return children
+
+    @memoize
+    def _gather_3(self) -> Optional[Any]:
+        # _gather_3: argument _loop0_4
+        mark = self._mark()
+        if (
+            (elem := self.argument())
+            is not None
+            and
+            (seq := self._loop0_4())
+            is not None
+        ):
+            return [elem] + seq
+        self._reset(mark)
+        return None
+
+    @memoize
+    def _loop1_5(self) -> Optional[Any]:
+        # _loop1_5: arg_atom
+        mark = self._mark()
+        children = []
+        while (
+            (arg_atom := self.arg_atom())
+        ):
+            children.append(arg_atom)
             mark = self._mark()
         self._reset(mark)
         return children

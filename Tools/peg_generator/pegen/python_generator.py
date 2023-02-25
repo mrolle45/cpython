@@ -105,7 +105,7 @@ class PythonCallMakerVisitor(GrammarVisitor):
         if name in ("NEWLINE", "DEDENT", "INDENT", "ENDMARKER", "ASYNC", "AWAIT"):
             # Avoid using names that can be Python keywords
             return "_" + name.lower(), f"self.expect({name!r})"
-        return name, f"self.{name}()"
+        return name, f"self.{name}{node.args or '()'}"
 
     def visit_StringLeaf(self, node: StringLeaf) -> Tuple[str, str]:
         return "literal", f"self.expect({node.value})"
@@ -244,6 +244,11 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
                     return True
         return False
 
+    def rule_params(self, rule: Rule) -> str:
+        """ The text for parameters to declare a rule. """
+        params = ''.join([f', {param.name}: {param.type or "Any"}' for param in rule.params])
+        return f"(self{params})"
+
     def visit_Rule(self, node: Rule) -> None:
         is_loop = node.is_loop()
         is_gather = node.is_gather()
@@ -258,7 +263,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         else:
             self.print("@memoize")
         node_type = node.type or "Any"
-        self.print(f"def {node.name}(self) -> Optional[{node_type}]:")
+        self.print(f"def {node.name}{self.rule_params(node)} -> Optional[{node_type}]:")
         with self.indent():
             self.print(f"# {node.name}: {rhs}")
             self.print("mark = self._mark()")

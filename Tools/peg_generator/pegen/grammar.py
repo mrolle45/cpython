@@ -146,7 +146,7 @@ class RuleParams(List[TypedName]):
 class RuleName(TypedName):
     def __init__(self, name: TypedName, params: Optional[RuleParams] = None):
         super().__init__(name.name, name.type)
-        self.params = params
+        self.params = params or []
 
 
 class Leaf:
@@ -162,12 +162,15 @@ class Leaf:
 
 
 class NameLeaf(Leaf):
-    """The value is the name."""
+    """The value is the name, may also carry arguments."""
+    def __init__(self, name: str, args: Optional[ArgList[str]] = None):
+        super().__init__(name)
+        self.args = args
 
     def __str__(self) -> str:
         if self.value == "ENDMARKER":
             return "$"
-        return super().__str__()
+        return super().__str__() + (self.args and str(self.args) or "")
 
     def __repr__(self) -> str:
         return f"NameLeaf({self.value!r})"
@@ -179,6 +182,15 @@ class StringLeaf(Leaf):
     def __repr__(self) -> str:
         return f"StringLeaf({self.value!r})"
 
+
+class ArgList:
+    """ List of rule arguments, and optional trailing comma. """
+    def __init__(self, args: List[str] = [], comma: str = ''):
+        self.args = args
+        self.comma = comma or ''
+
+    def __repr__(self) -> str:
+        return f'({", ".join(self.args)}{self.comma})'
 
 class Rhs:
     def __init__(self, alts: List[Alt]):

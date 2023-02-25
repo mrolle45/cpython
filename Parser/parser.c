@@ -19512,6 +19512,10 @@ invalid_named_expression_rule(Parser *p)
         return NULL;
     }
     void * _res = NULL;
+    if (_PyPegen_is_memoized(p, invalid_named_expression_type, &_res)) {
+        p->level--;
+        return _res;
+    }
     int _mark = p->mark;
     { // expression ':=' expression
         if (p->error_indicator) {
@@ -19611,6 +19615,7 @@ invalid_named_expression_rule(Parser *p)
     }
     _res = NULL;
   done:
+    _PyPegen_insert_memo(p, _mark, invalid_named_expression_type, _res);
     p->level--;
     return _res;
 }

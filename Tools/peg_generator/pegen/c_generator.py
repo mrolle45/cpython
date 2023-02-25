@@ -177,7 +177,7 @@ class CCallMakerVisitor(GrammarVisitor):
         return FunctionCall(
             assigned_variable=f"{name}_var",
             function=f"{name}_rule",
-            arguments=["p"],
+            arguments=["p"] + (node.args and node.args.args or []),
             return_type=type,
             comment=f"{node}",
         )
@@ -648,7 +648,8 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
 
     def rule_params(self, rule: Rule, parser_name: str = 'p') -> str:
         """ The text for parameters to declare a rule.  The name 'p' can be suppressed. """
-        return f"(Parser *{parser_name}{''.join([f', {param.name}' for param in (rule.params or ())])})"
+        params = ''.join([f', {param.type or "void *"} {param.name}' for param in (rule.params or ())])
+        return f"(Parser *{parser_name}{params})"
 
     def visit_Rule(self, node: Rule) -> None:
         is_loop = node.is_loop()
