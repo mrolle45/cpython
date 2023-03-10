@@ -13,6 +13,7 @@ const char * const _PyParser_TokenNames[] = {
     "NEWLINE",
     "INDENT",
     "DEDENT",
+    "NOTHING",
     "LPAR",
     "RPAR",
     "LSQB",
