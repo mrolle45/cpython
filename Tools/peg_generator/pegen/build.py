@@ -319,19 +319,22 @@ def build_python_parser_and_generator(
         result = io.StringIO()
         with open(grammar_file) as file:
             tokenizer = Tokenizer(tokenize.generate_tokens(file.readline))
+            if verbose_tokenizer: tokenizer.dump()
             parser = parser_class(tokenizer)
             grammar = parser.start()
             gen: ParserGenerator = PythonParserGenerator(grammar, result)
             gen.generate(grammar_file)
-
         return result.getvalue(), grammar, parser, tokenizer, gen
 
     result1, grammar, parser, tokenizer, gen = genparser(GrammarParser)
 
     if verify:
-        d = dict()
-        exec(result1, d)
-        result2, _, _, _, _ = genparser(d['GeneratedParser'])
+        with open('temp.py', 'w') as f:
+            f.write(result1)
+        import importlib
+        temp = importlib.import_module('temp')
+        parser = temp.GeneratedParser
+        result2, _, _, _, _ = genparser(parser)
     else:
         result2 = result1
 
@@ -339,5 +342,15 @@ def build_python_parser_and_generator(
         print(f'Writing {output_file}.')
         with open(output_file, 'w') as f:
             f.write(result1)
+    else:
+        import os
+        print(f'NOT WRITING {output_file}.  Generated texts differ.')
+        filename = f'{os.path.dirname(output_file)}/result1.txt'
+        with open(filename, 'w') as f: f.write(result1)
+        print(f'  Writing {filename}.')
+        filename = f'{os.path.dirname(output_file)}/result2.txt'
+        if result2:
+            with open(filename, 'w') as f: f.write(result2)
+        print(f'  Writing {filename}.')
 
     return grammar, parser, tokenizer, gen
