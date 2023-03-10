@@ -13,6 +13,8 @@
 
 .. data:: DEDENT
 
+.. data:: NOTHING
+
 .. data:: LPAR
 
    Token value for ``"("``.
