@@ -8,7 +8,7 @@ exact_token_types = token.EXACT_TOKEN_TYPES
 
 
 def shorttok(tok: tokenize.TokenInfo) -> str:
-    return "%-25.25s" % f"{tok.start[0]}.{tok.start[1]}: {token.tok_name[tok.type]}:{tok.string!r}"
+    return "%-25.25s" % f"{tok.start[0]:2d}.{tok.start[1]:2d}: {token.tok_name[tok.type]}:{tok.string!r}"
 
 
 class Tokenizer:
@@ -116,3 +116,15 @@ class Tokenizer:
         else:
             tok = self._tokens[self._index - 1]
             print(f"{fill} {shorttok(tok)}")
+
+    def dump(self) -> None:
+        """ Prints all the tokens, without consuming any input or altering the index. """
+        index = self._index
+        size = len(self._tokens)
+        while True:
+            try: self.getnext()
+            except StopIteration: break
+        for i, tok in enumerate(self._tokens):
+            print(f'{i!s:>3} {shorttok(tok)}')
+        self._index = index
+        del self._tokens[size:]
