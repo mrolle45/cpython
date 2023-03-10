@@ -20,6 +20,7 @@ from typing import (
 from pegen import sccutils
 from pegen.grammar import (
     Alt,
+    Args,
     Cut,
     Forced,
     Gather,
@@ -31,20 +32,23 @@ from pegen.grammar import (
     NamedItem,
     NameLeaf,
     Opt,
+    Params,
     Plain,
     Repeat0,
     Repeat1,
     Rhs,
     Rule,
     StringLeaf,
+    TypedName,
 )
 
 
 class RuleCollectorVisitor(GrammarVisitor):
-    """Visitor that invokes a provieded callmaker visitor with just the NamedItem nodes"""
+    """Visitor that invokes a provided callmaker visitor with just the NamedItem nodes"""
 
-    def __init__(self, rules: Dict[str, Rule], callmakervisitor: GrammarVisitor) -> None:
-        self.rulses = rules
+    def __init__(self, gen: "ParserGenerator", callmakervisitor: GrammarVisitor) -> None:
+        self.gen = gen
+        self.rules: Dict[str, Rule] = gen.rules
         self.callmaker = callmakervisitor
 
     def visit_Rule(self, rule: Rule) -> None:
@@ -70,28 +74,92 @@ class KeywordCollectorVisitor(GrammarVisitor):
             else:
                 return self.soft_keywords.add(node.value.replace('"', ""))
 
+class DumpVisitor(GrammarVisitor):
+    def __init__(self):
+        self.level = 0
 
-class RuleCheckingVisitor(GrammarVisitor):
+    def visit(self, node) -> None:
+        print(f'{"    " * self.level}-- {type(node).__name__} = {node}')
+        self.level += 1
+        self.generic_visit(node)
+        self.level -= 1
+
+
+class ParserGeneratorBase: pass
+
+class RuleCheckingVisitor(GrammarVisitor, ParserGeneratorBase):
     def __init__(self, rules: Dict[str, Rule], tokens: Set[str]):
         self.rules = rules
         self.tokens = tokens
+        self.current_alt = None
+        self.current_item = None
+
+    def visit_Rule(self, node: Rule) -> None:
+        self.current_rule = node
+        self.generic_visit(node)
+        del self.current_rule
+
+    def visit_Alt(self, node: Alt) -> None:
+        save = self.current_alt, self.current_item
+        self.current_alt = node
+        self.current_item = None
+        self.generic_visit(node)
+        self.current_alt, self.current_item = save
 
     def visit_NameLeaf(self, node: NameLeaf) -> None:
-        if node.value not in self.rules and node.value not in self.tokens:
-            raise GrammarError(f"Dangling reference to rule {node.value!r}")
+        self.validate_rule_args(node)
 
     def visit_NamedItem(self, node: NamedItem) -> None:
         if node.name and node.name.startswith("_"):
             raise GrammarError(f"Variable names cannot start with underscore: '{node.name}'")
-        self.visit(node.item)
+        self.current_item = node
+        self.generic_visit(node)
+
+    def validate_rule_args(self, node: NameLeaf) -> None:
+        """ Verify that the name corresponds to a known Rule, and the arguments match.
+        This is called after the entire grammar is parsed.
+        """
+        name = node.value
+        if name in self.tokens:
+            return
+        def check(params: Optional[Params], is_rule: bool = False) -> None:
+            # If is_rule, then an empty args is same as not empty.
+
+            args = node.args
+            if params is None:
+                if args.empty: return
+                raise GrammarError(f"Calling {node}, no arguments allowed.")
+            if args.empty and not is_rule:
+                raise GrammarError(f"Calling {node}, arguments required.")
+            nparams = len(params)
+            if len (args) != nparams:
+                raise GrammarError(f"Calling {node}, requires exactly {nparams} arguments.")
+            return
+        # Try a rule name
+        rule = self.rules.get(name)
+        if rule:
+            return check(rule.params, is_rule=True)
+        # Try a parameter name in the current rule
+        param = self.current_rule.params.get(name)
+        if param:
+            return check(param.params)
+        # Try an earlier variable name in the current alt
+        # Check the named items in the alt until the current item is reached.
+        for item in self.current_alt.items:
+            if item is self.current_item: break     # Search failed.
+            if item.name == name:
+                return check(item.params)
+
+        raise GrammarError(f"Dangling reference to name {node.value!r}")
 
 
-class ParserGenerator:
+class ParserGenerator(ParserGeneratorBase):
 
     callmakervisitor: GrammarVisitor
 
     def __init__(self, grammar: Grammar, tokens: Set[str], file: Optional[IO[Text]]):
         self.grammar = grammar
+        tokens.add('NOTHING')
         self.tokens = tokens
         self.keywords: Dict[str, int] = {}
         self.soft_keywords: Set[str] = set()
@@ -153,7 +221,7 @@ class ParserGenerator:
         for rule in self.all_rules.values():
             keyword_collector.visit(rule)
 
-        rule_collector = RuleCollectorVisitor(self.rules, self.callmakervisitor)
+        rule_collector = RuleCollectorVisitor(self, self.callmakervisitor)
         done: Set[str] = set()
         while True:
             computed_rules = list(self.all_rules)
@@ -162,16 +230,18 @@ class ParserGenerator:
                 break
             done = set(self.all_rules)
             for rulename in todo:
-                rule_collector.visit(self.all_rules[rulename])
+                self.current_rule = self.all_rules[rulename]
+                rule_collector.visit(self.current_rule)
+            self.current_rule = None
 
     def keyword_type(self) -> int:
         self.keyword_counter += 1
         return self.keyword_counter
 
-    def artifical_rule_from_rhs(self, rhs: Rhs) -> str:
+    def artificial_rule_from_rhs(self, rhs: Rhs) -> str:
         self.counter += 1
-        name = f"_tmp_{self.counter}"  # TODO: Pick a nicer name.
-        self.all_rules[name] = Rule.simple(name, rhs)
+        name = f"_group_{self.counter}"
+        self.all_rules[name] = Rule.simple(name, self.current_rule.params, rhs)
         return name
 
     def artificial_rule_from_repeat(self, node: Plain, is_repeat1: bool) -> str:
@@ -181,35 +251,46 @@ class ParserGenerator:
         else:
             prefix = "_loop0_"
         name = f"{prefix}{self.counter}"
-        self.all_rules[name] = Rule.simple(name, Rhs([Alt([NamedItem(None, node)])]))
+        self.all_rules[name] = Rule.simple(
+            name,
+            self.current_rule.params,
+            Rhs([Alt([NamedItem(None, node)])])
+        )
         return name
 
-    def artifical_rule_from_gather(self, node: Gather) -> str:
+    def artificial_rule_from_gather(self, node: Gather) -> str:
         self.counter += 1
         name = f"_gather_{self.counter}"
         self.counter += 1
         extra_function_name = f"_loop0_{self.counter}"
+
+        extra_function_call = NameLeaf(extra_function_name, Args([param.name for param in self.current_rule.params]))
+        alt = Alt([NamedItem(TypedName("elem"), node.node), NamedItem(TypedName("seq"), extra_function_call)])
+        self.all_rules[name] = Rule.simple(
+            name,
+            self.current_rule.params,
+            Rhs([alt]),
+        )
+
         extra_function_alt = Alt(
-            [NamedItem(None, node.separator), NamedItem("elem", node.node)],
+            [NamedItem(None, node.separator), NamedItem(TypedName("elem"), node.node)],
             action="elem",
         )
         self.all_rules[extra_function_name] = Rule.simple(
             extra_function_name,
+            self.current_rule.params,
             Rhs([extra_function_alt]),
-        )
-        alt = Alt(
-            [NamedItem("elem", node.node), NamedItem("seq", NameLeaf(extra_function_name))],
-        )
-        self.all_rules[name] = Rule.simple(
-            name,
-            Rhs([alt]),
         )
         return name
 
     def dedupe(self, name: str) -> str:
+        """ Add a suffix to given name if it appears earlier.
+        Any parameter names are searched before current local variable names.
+        """
         origname = name
         counter = 0
-        while name in self.local_variable_names:
+        param_names = [param.name for param in self.current_rule.params]
+        while name in param_names + self.local_variable_names:
             counter += 1
             name = f"{origname}_{counter}"
         self.local_variable_names.append(name)

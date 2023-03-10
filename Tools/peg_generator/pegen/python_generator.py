@@ -5,6 +5,7 @@ from typing import IO, Any, Dict, Optional, Sequence, Set, Text, Tuple
 from pegen import grammar
 from pegen.grammar import (
     Alt,
+    Alts,
     Cut,
     Forced,
     Gather,
@@ -14,6 +15,7 @@ from pegen.grammar import (
     NamedItem,
     NameLeaf,
     NegativeLookahead,
+    Nothing,
     Opt,
     PositiveLookahead,
     Repeat0,
@@ -105,7 +107,10 @@ class PythonCallMakerVisitor(GrammarVisitor):
         if name in ("NEWLINE", "DEDENT", "INDENT", "ENDMARKER", "ASYNC", "AWAIT"):
             # Avoid using names that can be Python keywords
             return "_" + name.lower(), f"self.expect({name!r})"
-        return name, f"self.{name}{node.args or '()'}"
+        if name == "NOTHING":
+            return "nothing", "Nothing()"
+        #self.gen.validate_rule_args(node)
+        return name, f"self.{name}{node.args.show}"
 
     def visit_StringLeaf(self, node: StringLeaf) -> Tuple[str, str]:
         return "literal", f"self.expect({node.value})"
@@ -116,8 +121,18 @@ class PythonCallMakerVisitor(GrammarVisitor):
         if len(node.alts) == 1 and len(node.alts[0].items) == 1:
             self.cache[node] = self.visit(node.alts[0].items[0])
         else:
-            name = self.gen.artifical_rule_from_rhs(node)
-            self.cache[node] = name, f"self.{name}()"
+            name = self.gen.artificial_rule_from_rhs(node)
+            self.cache[node] = name, f"self.{name}{self.args_from_params()}"
+        return self.cache[node]
+
+    def visit_Alts(self, node: Alts) -> Tuple[Optional[str], str]:
+        if node in self.cache:
+            return self.cache[node]
+        if len(node) == 1 and len(node[0].items) == 1:
+            self.cache[node] = self.visit(node[0].items[0])
+        else:
+            name = self.gen.artificial_rule_from_rhs(Rhs(node))
+            self.cache[node] = name, f"self.{name}{self.args_from_params()}"
         return self.cache[node]
 
     def visit_NamedItem(self, node: NamedItem) -> Tuple[Optional[str], str]:
@@ -135,11 +150,11 @@ class PythonCallMakerVisitor(GrammarVisitor):
 
     def visit_PositiveLookahead(self, node: PositiveLookahead) -> Tuple[None, str]:
         head, tail = self.lookahead_call_helper(node)
-        return None, f"self.positive_lookahead({head}, {tail})"
+        return "_lookahead", f"self.positive_lookahead({head}, {tail})"
 
     def visit_NegativeLookahead(self, node: NegativeLookahead) -> Tuple[None, str]:
         head, tail = self.lookahead_call_helper(node)
-        return None, f"self.negative_lookahead({head}, {tail})"
+        return "_lookahead", f"self.negative_lookahead({head}, {tail})"
 
     def visit_Opt(self, node: Opt) -> Tuple[str, str]:
         name, call = self.visit(node.node)
@@ -155,21 +170,21 @@ class PythonCallMakerVisitor(GrammarVisitor):
         if node in self.cache:
             return self.cache[node]
         name = self.gen.artificial_rule_from_repeat(node.node, False)
-        self.cache[node] = name, f"self.{name}(),"  # Also a trailing comma!
+        self.cache[node] = name, f"self.{name}{self.args_from_params()},"  # Also a trailing comma!
         return self.cache[node]
 
     def visit_Repeat1(self, node: Repeat1) -> Tuple[str, str]:
         if node in self.cache:
             return self.cache[node]
         name = self.gen.artificial_rule_from_repeat(node.node, True)
-        self.cache[node] = name, f"self.{name}()"  # But no trailing comma here!
+        self.cache[node] = name, f"self.{name}{self.args_from_params()}"  # But no trailing comma here!
         return self.cache[node]
 
     def visit_Gather(self, node: Gather) -> Tuple[str, str]:
         if node in self.cache:
             return self.cache[node]
-        name = self.gen.artifical_rule_from_gather(node)
-        self.cache[node] = name, f"self.{name}()"  # No trailing comma here either!
+        name = self.gen.artificial_rule_from_gather(node)
+        self.cache[node] = name, f"self.{name}{self.args_from_params()}"  # No trailing comma here either!
         return self.cache[node]
 
     def visit_Group(self, node: Group) -> Tuple[Optional[str], str]:
@@ -188,6 +203,14 @@ class PythonCallMakerVisitor(GrammarVisitor):
                 f"self.expect_forced(self.expect({node.node.value}), {node.node.value!r})",
             )
 
+    def visit_Nothing(self, node: Nothing) -> Tuple[str, str]:
+        return "nothing", "Nothing()"
+
+    def args_from_params(self):
+        """ Argument list to call an artificial rule using names of main Rule parameters. """
+        params = self.gen.current_rule.params
+        if not params: return "()"
+        return f'({", ".join([param.name for param in params])})'
 
 class PythonParserGenerator(ParserGenerator, GrammarVisitor):
     def __init__(
@@ -221,7 +244,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         cls_name = self.grammar.metas.get("class", "GeneratedParser")
         self.print("# Keywords and soft keywords are listed at the end of the parser definition.")
         self.print(f"class {cls_name}(Parser):")
-        for rule in self.all_rules.values():
+        for rule in dict(self.all_rules).values():
             self.print()
             with self.indent():
                 self.visit(rule)
@@ -240,8 +263,11 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
             if alt.action and "LOCATIONS" in alt.action:
                 return True
             for n in alt.items:
-                if isinstance(n.item, Group) and self.alts_uses_locations(n.item.rhs.alts):
-                    return True
+                if isinstance(n.item, Group):
+                    if isinstance(n.item.rhs, Rhs):
+                        if self.alts_uses_locations(n.item.rhs.alts): return True
+                    else:
+                        if self.alts_uses_locations(n.item.rhs): return True
         return False
 
     def rule_params(self, rule: Rule) -> str:
@@ -250,6 +276,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         return f"(self{params})"
 
     def visit_Rule(self, node: Rule) -> None:
+        self.current_rule = node
         is_loop = node.is_loop()
         is_gather = node.is_gather()
         rhs = node.flatten()
@@ -277,6 +304,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
                 self.print("return children")
             else:
                 self.print("return None")
+        self.current_rule = None
 
     def visit_NamedItem(self, node: NamedItem) -> None:
         name, call = self.callmakervisitor.visit(node.item)

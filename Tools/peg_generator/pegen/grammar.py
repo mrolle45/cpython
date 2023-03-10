@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+import itertools
+
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -13,6 +15,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    TypeVar,
 )
 
 if TYPE_CHECKING:
@@ -66,14 +69,26 @@ class Grammar:
 SIMPLE_STR = True
 
 
+T = TypeVar('T')
+
+class TrueTuple(Tuple[T]):
+    """ Same as Tuple[T, ...] except that it is always true. """
+
+    def __bool__(self) -> bool: return True
+
+
 class TypedName:
-    def __init__(self, name: Optional[str], type: Optional[str] = None):
+    def __init__(self, name: Optional[str], params: Optional[Params] = None, type: Optional[str] = None):
         self.name = name
+        self.params = params
         self.type = type
 
     def __str__(self) -> str:
-        if not SIMPLE_STR and self.type:
-            return f"{self.name}[{self.type}]"
+        if not SIMPLE_STR and (self.params or self.type):
+            res = self.name
+            if self.params: res += f'({self.params})'
+            if self.type: res += f'[{self.type}]'
+            return res
         else:
             return str(self.name)
 
@@ -81,22 +96,13 @@ class TypedName:
         return f"TypedName({self.name!r}, {self.type!r})"
 
 
-class Rule:
-    def __init__(self, rulename: RuleName, rhs: Rhs, memo: Optional[object] = None):
-        self.rulename = rulename
+class Rule(TypedName):
+    def __init__(self, rulename: TypedName, rhs: Rhs, memo: Optional[object] = None):
+        super().__init__(rulename.name, rulename.params or [], rulename.type)
         self.rhs = rhs
         self.memo = bool(memo)
         self.left_recursive = False
         self.leader = False
-
-    @property
-    def name(self): return self.rulename.name
-
-    @property
-    def type(self): return self.rulename.type
-
-    @property
-    def params(self): return self.rulename.params
 
     def is_loop(self) -> bool:
         return self.name.startswith("_loop")
@@ -105,10 +111,7 @@ class Rule:
         return self.name.startswith("_gather")
 
     def __str__(self) -> str:
-        if SIMPLE_STR or self.type is None:
-            res = f"{self.name}: {self.rhs}"
-        else:
-            res = f"{self.name}[{self.type}]: {self.rhs}"
+        res = super().__str__() + f': {self.rhs}'
         if len(res) < 88:
             return res
         lines = [res.split(":")[0] + ":"]
@@ -134,19 +137,29 @@ class Rule:
         return rhs
 
     @classmethod
-    def simple(cls, name: str, *args, **kwds) -> Rule:
-        # Make Rule from just the name.
-        return cls(RuleName(TypedName(name)), *args, **kwds)
+    def simple(cls, name: str, params: Params, *args, **kwds) -> Rule:
+        # Make Rule from just the name and any parameters.
+        return cls(TypedName(name, params), *args, **kwds)
 
 
-class RuleParams(List[TypedName]):
-    pass
+class Params(TrueTuple[TypedName]):
+    """ Parameters for a Rule or other callable. """
 
+    def __init__(self, params: List[TypedName]):
+        if params:
+            # Verify that the names are unique.
+            unique_names = {param.name for param in params}
+            if len(unique_names) < len(params):
+                raise GrammarError(f'Parameter names must be different.')
 
-class RuleName(TypedName):
-    def __init__(self, name: TypedName, params: Optional[RuleParams] = None):
-        super().__init__(name.name, name.type)
-        self.params = params or []
+    def __str__(self) -> str:
+        """ String used in a call expression, including the parent. """
+        return f'({", ".join([param.name for param in self.params])})'
+
+    def get(self, name: str) -> Optional[TypedName]:
+        for param in self:
+            if param.name == name: return param
+        return None
 
 
 class Leaf:
@@ -161,16 +174,41 @@ class Leaf:
             yield
 
 
+class Args(TrueTuple[str]):
+    """ List of rule arguments, and optional trailing comma. """
+    empty: bool = False
+    def __init__(self, args: List[str] = [], *, comma: str = '', empty: bool = False):
+        self.comma = comma or ''
+        if empty: self.empty = empty
+
+    @property
+    def show(self) -> str:
+        return f'({", ".join(self)}{self.comma})'
+
+    def __repr__(self) -> str:
+        return self.show
+
+
+class NoArgs(Args):
+    empty: bool = True
+    def __repr__(self) -> str:
+        return '<no args>'
+    def __str__(self) -> str:
+        return ''
+
+
 class NameLeaf(Leaf):
     """The value is the name, may also carry arguments."""
-    def __init__(self, name: str, args: Optional[ArgList[str]] = None):
+    args: Args = NoArgs()
+
+    def __init__(self, name: str, args: Optional[Args] = None):
         super().__init__(name)
-        self.args = args
+        if args: self.args = args
 
     def __str__(self) -> str:
         if self.value == "ENDMARKER":
             return "$"
-        return super().__str__() + (self.args and str(self.args) or "")
+        return super().__str__() + str(self.args)
 
     def __repr__(self) -> str:
         return f"NameLeaf({self.value!r})"
@@ -183,17 +221,8 @@ class StringLeaf(Leaf):
         return f"StringLeaf({self.value!r})"
 
 
-class ArgList:
-    """ List of rule arguments, and optional trailing comma. """
-    def __init__(self, args: List[str] = [], comma: str = ''):
-        self.args = args
-        self.comma = comma or ''
-
-    def __repr__(self) -> str:
-        return f'({", ".join(self.args)}{self.comma})'
-
 class Rhs:
-    def __init__(self, alts: List[Alt]):
+    def __init__(self, alts: Alts):
         self.alts = alts
         self.memo: Optional[Tuple[Optional[str], str]] = None
 
@@ -214,6 +243,10 @@ class Rhs:
         if getattr(self.alts[0], "action", None) is not None:
             return False
         return True
+
+    @staticmethod
+    def join(rhs_list: List[Rhs]) -> Rhs:
+        return Rhs(list(itertools.chain(*(rhs.alts for rhs in rhs_list))))
 
 
 class Alt:
@@ -241,11 +274,22 @@ class Alt:
         yield self.items
 
 
-class NamedItem:
-    def __init__(self, name: Optional[str], item: Item, type: Optional[str] = None):
-        self.name = name
+class Alts(TrueTuple[Alt]):
+    @property
+    def can_be_inlined(self) -> bool:
+        if len(self) != 1 or len(self[0].items) != 1:
+            return False
+        # If the alternative has an action we cannot inline
+        if getattr(self[0], "action", None) is not None:
+            return False
+        return True
+
+
+class NamedItem(TypedName):
+    def __init__(self, name: Optional[TypedName], item: Item):
+        if not name: name = TypedName(None)
+        super().__init__(name.name, name.params, name.type)
         self.item = item
-        self.type = type
 
     def __str__(self) -> str:
         if not SIMPLE_STR and self.name:
@@ -404,6 +448,11 @@ class Cut:
         return set()
 
 
+class Nothing:
+    """ Node for a rule that consumes nothing. """
+    pass
+
+AltList = List[Alt]
 Plain = Union[Leaf, Group]
 Item = Union[Plain, Opt, Repeat, Forced, Lookahead, Rhs, Cut]
 MetaTuple = Tuple[str, Optional[str]]

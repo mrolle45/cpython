@@ -1,9 +1,11 @@
 @subheader """\
 from ast import literal_eval
+from itertools import chain
 
 from pegen.grammar import (
     Alt,
-    ArgList,
+    Alts,
+    Args,
     Cut,
     Forced,
     Gather,
@@ -17,7 +19,9 @@ from pegen.grammar import (
     NamedItem,
     NamedItemList,
     NegativeLookahead,
+    Nothing,
     Opt,
+    Params,
     Plain,
     PositiveLookahead,
     Repeat0,
@@ -25,122 +29,109 @@ from pegen.grammar import (
     Rhs,
     Rule,
     RuleList,
-    RuleName,
-    RuleParams,
     TypedName,
     Grammar,
     StringLeaf,
 )
 """
 
-start[Grammar]: grammar ENDMARKER { grammar }
+start[Grammar]: grammar=grammar ENDMARKER { grammar }
 
 grammar[Grammar]:
-    | metas rules { Grammar(rules, metas) }
-    | rules { Grammar(rules, []) }
-
-metas[MetaList]:
-    | meta metas { [meta] + metas }
-    | meta { [meta] }
+    | metas=meta* rules=rule+ { Grammar(rules, metas) }
 
 meta[MetaTuple]:
-    | "@" NAME NEWLINE { (name.string, None) }
-    | "@" a=NAME b=NAME NEWLINE { (a.string, b.string) }
-    | "@" NAME STRING NEWLINE { (name.string, literal_eval(string.string)) }
-
-rules[RuleList]:
-    | rule rules { [rule] + rules }
-    | rule { [rule] }
+    | "@" name=NAME NEWLINE { (name.string, None) }
+    | "@" name=NAME val=NAME NEWLINE { (name.string, val.string) }
+    | "@" name=NAME val=STRING NEWLINE { (name.string, literal_eval(val.string)) }
 
 rule[Rule]:
-    | rulename memoflag? ":" alts NEWLINE INDENT more_alts DEDENT {
-          Rule(rulename, Rhs(alts.alts + more_alts.alts), memo=opt) }
-    | rulename memoflag? ":" NEWLINE INDENT more_alts DEDENT {
-          Rule(rulename, more_alts, memo=opt) }
-    | rulename memoflag? ":" alts NEWLINE { Rule(rulename, alts, memo=opt) }
+    | n=typed_name m=memoflag? ":" a=maybe_alts? NEWLINE aa=more_alts? {
+          Rule(n, Rhs(a + aa), memo=m) }
 
-rulename[RuleName]:
-    | NAME p=rule_params? a=annotation? { RuleName(TypedName(name.string, a), p) }
-
-rule_params[RuleParams]:
-    | !memoflag '(' names=','.typed_name+ ')' { RuleParams(names) }
+params[Params]:
+    | !memoflag '(' n=','.typed_name+ [','] ')' { Params(n) }
+    | '(' ')' { Params([]) }
 
 typed_name[TypedName]:
-    | NAME a=annotation? { TypedName(name.string, a) }
+    | n=NAME p=params? a=annotation? { TypedName(n.string, p, a) }
 
 # In the future this may return something more complicated
 memoflag[str]:
     | '(' "memo" ')' { "memo" }
 
-alts[Rhs]:
-    | alt "|" alts { Rhs([alt] + alts.alts)}
-    | alt { Rhs([alt]) }
+alts[Alts]:
+    | a="|".alt+  { Alts(a) }
 
-more_alts[Rhs]:
-    | "|" alts NEWLINE more_alts { Rhs(alts.alts + more_alts.alts) }
-    | "|" alts NEWLINE { Rhs(alts.alts) }
+maybe_alts[Alts]:
+    | !NEWLINE a="|".alt+  { Alts(a) }
+    | NOTHING { Alts() }
+
+more_alts[Alts]:
+    | INDENT a=( "|" b=alts NEWLINE { b } )+ DEDENT { Alts (chain (*a)) }
+    | NOTHING { Alts() }
 
 alt[Alt]:
-    | items '$' action { Alt(items + [NamedItem(None, NameLeaf('ENDMARKER'))], action=action) }
-    | items '$' { Alt(items + [NamedItem(None, NameLeaf('ENDMARKER'))], action=None) }
-    | items action { Alt(items, action=action) }
-    | items { Alt(items, action=None) }
+    | i=items e=enditem? a=action? { Alt(i + (e and [e] or []), action=a) }
 
 items[NamedItemList]:
-    | named_item items { [named_item] + items }
-    | named_item { [named_item] }
+    | n=named_item* { n }
 
 named_item[NamedItem]:
-    | NAME annotation '=' ~ item {NamedItem(name.string, item, annotation)}
-    | NAME '=' ~ item {NamedItem(name.string, item)}
-    | item {NamedItem(None, item)}
+    | n=typed_name '=' ~ item {NamedItem(n, item)}
+    | it=item {NamedItem(None, it)}
     | forced=forced_atom {NamedItem(None, forced)}
     | it=lookahead {NamedItem(None, it)}
+    | cut=cut {NamedItem(None, cut)}
 
 forced_atom[Forced]:
-    | '&''&' ~ atom {Forced(atom)}
+    | '&''&' ~ a=atom {Forced(a)}
 
-lookahead[LookaheadOrCut]:
-    | '&' ~ atom {PositiveLookahead(atom)}
-    | '!' ~ atom {NegativeLookahead(atom)}
+lookahead[Lookahead]:
+    | '&' ~ a=atom {PositiveLookahead(a)}
+    | '!' ~ a=atom {NegativeLookahead(a)}
+
+cut[Cut]:
     | '~' {Cut()}
 
 item[Item]:
     | '[' ~ alts ']' {Opt(alts)}
-    |  atom '?' {Opt(atom)}
-    |  atom '*' {Repeat0(atom)}
-    |  atom '+' {Repeat1(atom)}
+    |  a=atom '?' {Opt(a)}
+    |  a=atom '*' {Repeat0(a)}
+    |  a=atom '+' {Repeat1(a)}
     |  sep=atom '.' node=atom '+' {Gather(sep, node)}
-    |  atom {atom}
+    |  a=atom {a}
+
+enditem[NamedItem]:
+    | '$' { NamedItem(None, NameLeaf('ENDMARKER')) }
 
 atom[Plain]:
-    | '(' ~ alts ')' {Group(alts)}
-    | NAME a=arguments? {NameLeaf(name.string, a) }
-    | STRING {StringLeaf(string.string)}
+    | '(' ~ alts ')' {Group(Rhs(alts))}
+    | n=NAME a=arguments? {NameLeaf(n.string, a) }
+    | s=STRING {StringLeaf(s.string)}
 
 # Mini-grammar for the actions and annotations and rule arguments
 
-action[str]: "{" ~ target_atoms "}" { target_atoms }
-annotation[str]: "[" ~ target_atoms "]" { target_atoms }
-arguments[ArgList]:
-    | '(' a=argument "," b=",".argument+ c=[","]')'  { ArgList([a] + b, c and c.string)}
-    | '(' a=argument "," ')' { ArgList([a], ",") }          # One arg, comma required.
-    | '(' ')' { ArgList() }                                 # No args, no comma.
-argument: a=arg_atom+ { " ".join(a) }
-arg_atom: !"," target_atom { target_atom }
+action[str]: "{" t=target_atoms "}" { t }
+annotation[str]: "[" t=target_atoms "]" { t }
+arguments[Args]:
+    | '(' a=arg "," b=",".arg+ c=[","]')'  { Args([a] + b, comma=c and c.string) } # Multiple args, comma optional
+    | '(' a=arg "," ')' { Args([a], comma=",") }                                   # One arg, comma required.
+    | '(' ')' { Args() }                                                     # No args, no comma.
+arg: a=arg_atom+ { " ".join(a) }
+arg_atom: !"," a=target_atom { a }
 
 target_atoms[str]:
-    | target_atom target_atoms { target_atom + " " + target_atoms }
-    | target_atom { target_atom }
+    | a=target_atom+ { " ".join(a) }
 
 target_atom[str]:
-    | "(" ~ atoms=target_atoms? ")" { "(" + (atoms or "") + ")" }
-    | "{" ~ atoms=target_atoms? "}" { "{" + (atoms or "") + "}" }
-    | "[" ~ atoms=target_atoms? "]" { "[" + (atoms or "") + "]" }
-    | NAME "*" { name.string + "*" }
-    | NAME { name.string }
-    | NUMBER { number.string }
-    | STRING { string.string }
+    | "(" atoms=target_atoms? ")" { "(" + (atoms or "") + ")" }
+    | "{" atoms=target_atoms? "}" { "{" + (atoms or "") + "}" }
+    | "[" atoms=target_atoms? "]" { "[" + (atoms or "") + "]" }
+    | n=NAME "*" { n.string + "*" }
+    | n=NAME { n.string }
+    | n=NUMBER { n.string }
+    | s=STRING { s.string }
     | "?" { "?" }
     | ":" { ":" }
-    | !")" !"}" !"]" OP { op.string }
+    | !")" !"}" !"]" op=OP { op.string }

@@ -8,6 +8,7 @@ from typing import IO, Any, Dict, List, Optional, Set, Text, Tuple
 from pegen import grammar
 from pegen.grammar import (
     Alt,
+    Alts,
     Cut,
     Forced,
     Gather,
@@ -68,6 +69,7 @@ class NodeTypes(Enum):
     KEYWORD = 4
     SOFT_KEYWORD = 5
     CUT_OPERATOR = 6
+    NOTHING = 7
 
 
 BASE_NODETYPES = {
@@ -75,6 +77,7 @@ BASE_NODETYPES = {
     "NUMBER": NodeTypes.NUMBER_TOKEN,
     "STRING": NodeTypes.STRING_TOKEN,
     "SOFT_KEYWORD": NodeTypes.SOFT_KEYWORD,
+    "NOTHING": NodeTypes.NOTHING,
 }
 
 
@@ -92,7 +95,7 @@ class FunctionCall:
     def __str__(self) -> str:
         parts = []
         parts.append(self.function)
-        if self.arguments:
+        if self.arguments is not None:
             parts.append(f"({', '.join(map(str, self.arguments))})")
         if self.force_true:
             parts.append(", !p->error_indicator")
@@ -169,18 +172,28 @@ class CCallMakerVisitor(GrammarVisitor):
                 comment=f"token='{name}'",
             )
 
+        #self.gen.validate_rule_args(node)
         type = None
+        args = node.args
         rule = self.gen.all_rules.get(name.lower())
         if rule is not None:
             type = "asdl_seq *" if rule.is_loop() or rule.is_gather() else rule.type
 
-        return FunctionCall(
-            assigned_variable=f"{name}_var",
-            function=f"{name}_rule",
-            arguments=["p"] + (node.args and node.args.args or []),
-            return_type=type,
-            comment=f"{node}",
-        )
+            return FunctionCall(
+                assigned_variable=f"{name}_var",
+                function=f"{name}_rule",
+                arguments=["p"] + list(args),
+                return_type=type,
+                comment=f"{node}",
+            )
+        else:
+            return FunctionCall(
+                assigned_variable=f"{name}_var",
+                function=f"{name}",
+                arguments=args,
+                return_type=type,
+                comment=f"{node}",
+            )
 
     def visit_StringLeaf(self, node: StringLeaf) -> FunctionCall:
         val = ast.literal_eval(node.value)
@@ -207,7 +220,22 @@ class CCallMakerVisitor(GrammarVisitor):
         if node.can_be_inlined:
             self.cache[node] = self.generate_call(node.alts[0].items[0])
         else:
-            name = self.gen.artifical_rule_from_rhs(node)
+            name = self.gen.artificial_rule_from_rhs(node)
+            self.cache[node] = FunctionCall(
+                assigned_variable=f"{name}_var",
+                function=f"{name}_rule",
+                arguments=["p"],
+                comment=f"{node}",
+            )
+        return self.cache[node]
+
+    def visit_Alts(self, node: Alts) -> FunctionCall:
+        if node in self.cache:
+            return self.cache[node]
+        if node.can_be_inlined:
+            self.cache[node] = self.generate_call(node[0].items[0])
+        else:
+            name = self.gen.artificial_rule_from_rhs(Rhs(node))
             self.cache[node] = FunctionCall(
                 assigned_variable=f"{name}_var",
                 function=f"{name}_rule",
@@ -226,31 +254,25 @@ class CCallMakerVisitor(GrammarVisitor):
 
     def lookahead_call_helper(self, node: Lookahead, positive: int) -> FunctionCall:
         call = self.generate_call(node.node)
+        def func(function: str, comment: Optional[str] = None) -> FunctionCall:
+            return FunctionCall(
+                assigned_variable="_lookahead_var",
+                function=function,
+                arguments=[positive, call.function, *call.arguments],
+                return_type="int",
+                comment=comment,
+            )
         if call.nodetype == NodeTypes.NAME_TOKEN:
-            return FunctionCall(
-                function=f"_PyPegen_lookahead_with_name",
-                arguments=[positive, call.function, *call.arguments],
-                return_type="int",
-            )
+            return func("_PyPegen_lookahead_with_name")
         elif call.nodetype == NodeTypes.SOFT_KEYWORD:
-            return FunctionCall(
-                function=f"_PyPegen_lookahead_with_string",
-                arguments=[positive, call.function, *call.arguments],
-                return_type="int",
-            )
+            return func("_PyPegen_lookahead_with_string")
         elif call.nodetype in {NodeTypes.GENERIC_TOKEN, NodeTypes.KEYWORD}:
-            return FunctionCall(
-                function=f"_PyPegen_lookahead_with_int",
-                arguments=[positive, call.function, *call.arguments],
-                return_type="int",
+            return func(
+                "_PyPegen_lookahead_with_int",
                 comment=f"token={node.node}",
             )
         else:
-            return FunctionCall(
-                function=f"_PyPegen_lookahead",
-                arguments=[positive, call.function, *call.arguments],
-                return_type="int",
-            )
+            return func("_PyPegen_lookahead")
 
     def visit_PositiveLookahead(self, node: PositiveLookahead) -> FunctionCall:
         return self.lookahead_call_helper(node, 1)
@@ -326,7 +348,7 @@ class CCallMakerVisitor(GrammarVisitor):
     def visit_Gather(self, node: Gather) -> FunctionCall:
         if node in self.cache:
             return self.cache[node]
-        name = self.gen.artifical_rule_from_gather(node)
+        name = self.gen.artificial_rule_from_gather(node)
         self.cache[node] = FunctionCall(
             assigned_variable=f"{name}_var",
             function=f"{name}_rule",
@@ -652,6 +674,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
         return f"(Parser *{parser_name}{params})"
 
     def visit_Rule(self, node: Rule) -> None:
+        self.current_rule = node
         is_loop = node.is_loop()
         is_gather = node.is_gather()
         rhs = node.flatten()
@@ -690,6 +713,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
             self.cleanup_statements.pop()
 
         self.print("}")
+        self.current_rule = None
 
     def visit_NamedItem(self, node: NamedItem) -> None:
         call = self.callmakervisitor.generate_call(node)
