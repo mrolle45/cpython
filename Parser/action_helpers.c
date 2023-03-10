@@ -514,6 +514,17 @@ _PyPegen_star_etc(Parser *p, arg_ty vararg, asdl_seq *kwonlyargs, arg_ty kwarg)
     return a;
 }
 
+/* Constructs a Nothing */
+Nothing *
+_PyPegen_nothing_token(Parser *p)
+{
+    Nothing *a = _PyArena_Malloc(p->arena, sizeof(Nothing));
+    if (!a) {
+        return NULL;
+    }
+    return a;
+}
+
 asdl_seq *
 _PyPegen_join_sequences(Parser *p, asdl_seq *a, asdl_seq *b)
 {
