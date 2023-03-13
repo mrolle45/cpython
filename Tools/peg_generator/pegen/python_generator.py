@@ -272,7 +272,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
 
     def rule_params(self, rule: Rule) -> str:
         """ The text for parameters to declare a rule. """
-        params = ''.join([f', {param.name}: {param.type or "Any"}' for param in rule.params])
+        params = ''.join([f', {param.name}: {param.type or "Any"}' for param in (rule.params or [])])
         return f"(self{params})"
 
     def visit_Rule(self, node: Rule) -> None:
@@ -342,6 +342,8 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
                     self.visit(item)
                     if is_gather:
                         self.print("is not None")
+                if not node.items:
+                    self.print("True")
 
             self.print("):")
             with self.indent():

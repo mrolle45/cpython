@@ -12,14 +12,11 @@ from pegen.grammar import (
     Group,
     Item,
     Lookahead,
-    LookaheadOrCut,
-    MetaTuple,
-    MetaList,
+    Meta,
     NameLeaf,
     NamedItem,
-    NamedItemList,
+    NamedItems,
     NegativeLookahead,
-    Nothing,
     Opt,
     Params,
     Plain,
@@ -28,7 +25,6 @@ from pegen.grammar import (
     Repeat1,
     Rhs,
     Rule,
-    RuleList,
     TypedName,
     Grammar,
     StringLeaf,
@@ -40,10 +36,13 @@ start[Grammar]: grammar=grammar ENDMARKER { grammar }
 grammar[Grammar]:
     | metas=meta* rules=rule+ { Grammar(rules, metas) }
 
-meta[MetaTuple]:
-    | "@" name=NAME NEWLINE { (name.string, None) }
-    | "@" name=NAME val=NAME NEWLINE { (name.string, val.string) }
-    | "@" name=NAME val=STRING NEWLINE { (name.string, literal_eval(val.string)) }
+meta[Meta]:
+    | "@" name=NAME val=metavalue? NEWLINE { Meta(name.string, val) }
+
+metavalue[Optional[str]]:
+    | val=NAME { val.string }
+    | val=STRING { literal_eval(val.string) }
+    | { None }
 
 rule[Rule]:
     | n=typed_name m=memoflag? ":" a=maybe_alts? NEWLINE aa=more_alts? {
@@ -60,22 +59,27 @@ typed_name[TypedName]:
 memoflag[str]:
     | '(' "memo" ')' { "memo" }
 
+# Alternatives, in various contexts.  Returns an Alts holding the alternatives.
+#   Within (...) or [...], or after indented '|'.  One or more with '|' separator.
 alts[Alts]:
     | a="|".alt+  { Alts(a) }
 
+#   After ':' in a rule on same line.  Zero or more with '|' separator.
 maybe_alts[Alts]:
     | !NEWLINE a="|".alt+  { Alts(a) }
-    | NOTHING { Alts() }
+    | { Alts() }
 
+#   Indented block following a rule, each line introduced by '|', or nothing.
 more_alts[Alts]:
     | INDENT a=( "|" b=alts NEWLINE { b } )+ DEDENT { Alts (chain (*a)) }
-    | NOTHING { Alts() }
+    | { Alts() }
 
+# Single alternative.  May be nothing at all.
 alt[Alt]:
-    | i=items e=enditem? a=action? { Alt(i + (e and [e] or []), action=a) }
+    | i=items e=endmarker a=action? { Alt(i + e, action=a) }
 
-items[NamedItemList]:
-    | n=named_item* { n }
+items[NamedItems]:
+    | n=named_item* { NamedItems(n) }
 
 named_item[NamedItem]:
     | n=typed_name '=' ~ item {NamedItem(n, item)}
@@ -102,8 +106,9 @@ item[Item]:
     |  sep=atom '.' node=atom '+' {Gather(sep, node)}
     |  a=atom {a}
 
-enditem[NamedItem]:
-    | '$' { NamedItem(None, NameLeaf('ENDMARKER')) }
+endmarker[NamedItems]:
+    | '$' { NamedItems([NamedItem(None, NameLeaf('ENDMARKER'))]) }
+    | { NamedItems() }
 
 atom[Plain]:
     | '(' ~ alts ')' {Group(Rhs(alts))}

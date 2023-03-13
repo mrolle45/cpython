@@ -36,19 +36,31 @@ class GrammarVisitor:
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Any:
         """Called if no explicit visitor function exists for a node."""
         for value in node:
-            if isinstance(value, list):
+            if type(value) is list:
                 for item in value:
                     self.visit(item, *args, **kwargs)
             else:
                 self.visit(value, *args, **kwargs)
 
+    def visit_Attr(self, node: Attr) -> None:
+        pass
 
-class Grammar:
+
+class GrammarNode:
+    """ Base class for all nodes found in a Grammar tree. """
+    def dump(self) -> None:
+        from pegen.parser_generator import DumpVisitor
+        DumpVisitor().visit(self)
+
+
+class Grammar(GrammarNode):
     def __init__(self, rules: Iterable[Rule], metas: Iterable[Tuple[str, Optional[str]]]):
         self.rules = {rule.name: rule for rule in rules}
         self.metas = dict(metas)
 
     def __str__(self) -> str:
+        res = ", ".join(((name) for name, rule in self.rules.items()),)
+        return res
         return "\n".join(str(rule) for name, rule in self.rules.items())
 
     def __repr__(self) -> str:
@@ -71,17 +83,23 @@ SIMPLE_STR = True
 
 T = TypeVar('T')
 
-class TrueTuple(Tuple[T]):
-    """ Same as Tuple[T, ...] except that it is always true. """
+class TrueHashableList(List[T], GrammarNode):
+    """ Same as List[T] except that it is hashable and always true. """
+    def __hash__(self) -> int: return id(self)
 
     def __bool__(self) -> bool: return True
 
 
-class TypedName:
+class TypedName(GrammarNode):
     def __init__(self, name: Optional[str], params: Optional[Params] = None, type: Optional[str] = None):
         self.name = name
         self.params = params
         self.type = type
+
+    def __iter__(self) -> Iterator[GrammarNode]:
+        yield Attr(self, 'name')
+
+        if self.params: yield self.params
 
     def __str__(self) -> str:
         if not SIMPLE_STR and (self.params or self.type):
@@ -96,9 +114,20 @@ class TypedName:
         return f"TypedName({self.name!r}, {self.type!r})"
 
 
+class Meta:
+    def __init__(self, name: str, val: str = None):
+        self.name = name
+        self.val = val
+
+    def __iter__(self) -> Iterable:
+        yield self.name
+        yield self.val
+
+
 class Rule(TypedName):
     def __init__(self, rulename: TypedName, rhs: Rhs, memo: Optional[object] = None):
-        super().__init__(rulename.name, rulename.params or [], rulename.type)
+        params = rulename.params or Params(())
+        super().__init__(rulename.name, params, rulename.type)
         self.rhs = rhs
         self.memo = bool(memo)
         self.left_recursive = False
@@ -122,6 +151,7 @@ class Rule(TypedName):
         return f"Rule({self.name!r}, {self.type!r}, {self.rhs!r})"
 
     def __iter__(self) -> Iterator[Rhs]:
+        yield TypedName(self.name, self.params, self.type)
         yield self.rhs
 
     def flatten(self) -> Rhs:
@@ -136,16 +166,21 @@ class Rule(TypedName):
             rhs = rhs.alts[0].items[0].item.rhs
         return rhs
 
+    @property
+    def param_names(self) -> List[str]:
+        return [param.name for param in self.params]
+
     @classmethod
     def simple(cls, name: str, params: Params, *args, **kwds) -> Rule:
         # Make Rule from just the name and any parameters.
         return cls(TypedName(name, params), *args, **kwds)
 
 
-class Params(TrueTuple[TypedName]):
+class Params(TrueHashableList[TypedName]):
     """ Parameters for a Rule or other callable. """
 
     def __init__(self, params: List[TypedName]):
+        super().__init__(params)
         if params:
             # Verify that the names are unique.
             unique_names = {param.name for param in params}
@@ -154,7 +189,7 @@ class Params(TrueTuple[TypedName]):
 
     def __str__(self) -> str:
         """ String used in a call expression, including the parent. """
-        return f'({", ".join([param.name for param in self.params])})'
+        return f'({", ".join([param.name for param in self])})'
 
     def get(self, name: str) -> Optional[TypedName]:
         for param in self:
@@ -162,7 +197,7 @@ class Params(TrueTuple[TypedName]):
         return None
 
 
-class Leaf:
+class Leaf(GrammarNode):
     def __init__(self, value: str):
         self.value = value
 
@@ -174,12 +209,12 @@ class Leaf:
             yield
 
 
-class Args(TrueTuple[str]):
+class Args(TrueHashableList[str]):
     """ List of rule arguments, and optional trailing comma. """
     empty: bool = False
-    def __init__(self, args: List[str] = [], *, comma: str = '', empty: bool = False):
+    def __init__(self, args: List[str] = [], *, comma: str = ''):
+        super().__init__(args)
         self.comma = comma or ''
-        if empty: self.empty = empty
 
     @property
     def show(self) -> str:
@@ -221,7 +256,7 @@ class StringLeaf(Leaf):
         return f"StringLeaf({self.value!r})"
 
 
-class Rhs:
+class Rhs(GrammarNode):
     def __init__(self, alts: Alts):
         self.alts = alts
         self.memo: Optional[Tuple[Optional[str], str]] = None
@@ -249,14 +284,14 @@ class Rhs:
         return Rhs(list(itertools.chain(*(rhs.alts for rhs in rhs_list))))
 
 
-class Alt:
+class Alt(GrammarNode):
     def __init__(self, items: List[NamedItem], *, icut: int = -1, action: Optional[str] = None):
         self.items = items
         self.icut = icut
         self.action = action
 
     def __str__(self) -> str:
-        core = " ".join(str(item) for item in self.items)
+        core = " ".join(str(item) for item in self.items) or '<always>'
         if not SIMPLE_STR and self.action:
             return f"{core} {{ {self.action} }}"
         else:
@@ -274,7 +309,7 @@ class Alt:
         yield self.items
 
 
-class Alts(TrueTuple[Alt]):
+class Alts(TrueHashableList[Alt]):
     @property
     def can_be_inlined(self) -> bool:
         if len(self) != 1 or len(self[0].items) != 1:
@@ -304,7 +339,11 @@ class NamedItem(TypedName):
         yield self.item
 
 
-class Forced:
+class NamedItems(TrueHashableList[NamedItem]):
+    pass
+
+
+class Forced(GrammarNode):
     def __init__(self, node: Plain):
         self.node = node
 
@@ -315,7 +354,7 @@ class Forced:
         yield self.node
 
 
-class Lookahead:
+class Lookahead(GrammarNode):
     def __init__(self, node: Plain, sign: str):
         self.node = node
         self.sign = sign
@@ -343,7 +382,7 @@ class NegativeLookahead(Lookahead):
         return f"NegativeLookahead({self.node!r})"
 
 
-class Opt:
+class Opt(GrammarNode):
     def __init__(self, node: Item):
         self.node = node
 
@@ -362,7 +401,7 @@ class Opt:
         yield self.node
 
 
-class Repeat:
+class Repeat(GrammarNode):
     """Shared base class for x* and x+."""
 
     def __init__(self, node: Plain):
@@ -411,7 +450,7 @@ class Gather(Repeat):
         return f"Gather({self.separator!r}, {self.node!r})"
 
 
-class Group:
+class Group(GrammarNode):
     def __init__(self, rhs: Rhs):
         self.rhs = rhs
 
@@ -425,7 +464,7 @@ class Group:
         yield self.rhs
 
 
-class Cut:
+class Cut(GrammarNode):
     def __init__(self) -> None:
         pass
 
@@ -448,16 +487,14 @@ class Cut:
         return set()
 
 
-class Nothing:
-    """ Node for a rule that consumes nothing. """
-    pass
+class Attr(GrammarNode):
+    """ Describes an attribute of another node, for display purposes. """
+    def __init__(self, node: GrammarNode, attr: str):
+        self.node = node
+        self.attr = attr
 
-AltList = List[Alt]
+    def __str__(self) -> str:
+        return f'{self.attr} = {getattr(self.node, self.attr)!r}'
+
 Plain = Union[Leaf, Group]
 Item = Union[Plain, Opt, Repeat, Forced, Lookahead, Rhs, Cut]
-MetaTuple = Tuple[str, Optional[str]]
-MetaList = List[MetaTuple]
-RuleList = List[Rule]
-TypedNameList = List[TypedName]
-NamedItemList = List[NamedItem]
-LookaheadOrCut = Union[Lookahead, Cut]

@@ -21,14 +21,11 @@ from pegen.grammar import (
     Group,
     Item,
     Lookahead,
-    LookaheadOrCut,
-    MetaTuple,
-    MetaList,
+    Meta,
     NameLeaf,
     NamedItem,
-    NamedItemList,
+    NamedItems,
     NegativeLookahead,
-    Nothing,
     Opt,
     Params,
     Plain,
@@ -37,7 +34,6 @@ from pegen.grammar import (
     Repeat1,
     Rhs,
     Rule,
-    RuleList,
     TypedName,
     Grammar,
     StringLeaf,
@@ -73,39 +69,40 @@ class GeneratedParser(Parser):
         return None
 
     @memoize
-    def meta(self) -> Optional[MetaTuple]:
-        # meta: "@" NAME NEWLINE | "@" NAME NAME NEWLINE | "@" NAME STRING NEWLINE
+    def meta(self) -> Optional[Meta]:
+        # meta: "@" NAME metavalue? NEWLINE
         mark = self._mark()
         if (
             (literal := self.expect("@"))
             and
             (name := self.name())
             and
+            (val := self.metavalue(),)
+            and
             (_newline := self.expect('NEWLINE'))
         ):
-            return (name . string , None)
+            return Meta (name . string , val)
         self._reset(mark)
+        return None
+
+    @memoize
+    def metavalue(self) -> Optional[Optional [str]]:
+        # metavalue: NAME | STRING | <always>
+        mark = self._mark()
         if (
-            (literal := self.expect("@"))
-            and
-            (name := self.name())
-            and
             (val := self.name())
-            and
-            (_newline := self.expect('NEWLINE'))
         ):
-            return (name . string , val . string)
+            return val . string
         self._reset(mark)
         if (
-            (literal := self.expect("@"))
-            and
-            (name := self.name())
-            and
             (val := self.string())
-            and
-            (_newline := self.expect('NEWLINE'))
         ):
-            return (name . string , literal_eval (val . string))
+            return literal_eval (val . string)
+        self._reset(mark)
+        if (
+            True
+        ):
+            return None
         self._reset(mark)
         return None
 
@@ -132,7 +129,7 @@ class GeneratedParser(Parser):
 
     @memoize
     def params(self) -> Optional[Params]:
-        # params: !memoflag '(' ','.typed_name+ [(Alt([NamedItem(None, StringLeaf("','"))]),)] ')' | '(' ')'
+        # params: !memoflag '(' ','.typed_name+ [[Alt([NamedItem(None, StringLeaf("','"))])]] ')' | '(' ')'
         mark = self._mark()
         if (
             (_lookahead := self.negative_lookahead(self.memoflag, ))
@@ -199,7 +196,7 @@ class GeneratedParser(Parser):
 
     @memoize
     def maybe_alts(self) -> Optional[Alts]:
-        # maybe_alts: !NEWLINE "|".alt+ | NOTHING
+        # maybe_alts: !NEWLINE "|".alt+ | <always>
         mark = self._mark()
         if (
             (_lookahead := self.negative_lookahead(self.expect, 'NEWLINE'))
@@ -209,7 +206,7 @@ class GeneratedParser(Parser):
             return Alts (a)
         self._reset(mark)
         if (
-            (nothing := Nothing())
+            True
         ):
             return Alts ()
         self._reset(mark)
@@ -217,7 +214,7 @@ class GeneratedParser(Parser):
 
     @memoize
     def more_alts(self) -> Optional[Alts]:
-        # more_alts: INDENT (("|" alts NEWLINE))+ DEDENT | NOTHING
+        # more_alts: INDENT (("|" alts NEWLINE))+ DEDENT | <always>
         mark = self._mark()
         if (
             (_indent := self.expect('INDENT'))
@@ -229,7 +226,7 @@ class GeneratedParser(Parser):
             return Alts (chain (* a))
         self._reset(mark)
         if (
-            (nothing := Nothing())
+            True
         ):
             return Alts ()
         self._reset(mark)
@@ -237,27 +234,27 @@ class GeneratedParser(Parser):
 
     @memoize
     def alt(self) -> Optional[Alt]:
-        # alt: items enditem? action?
+        # alt: items endmarker action?
         mark = self._mark()
         if (
             (i := self.items())
             and
-            (e := self.enditem(),)
+            (e := self.endmarker())
             and
             (a := self.action(),)
         ):
-            return Alt (i + (e and [e] or []) , action = a)
+            return Alt (i + e , action = a)
         self._reset(mark)
         return None
 
     @memoize
-    def items(self) -> Optional[NamedItemList]:
+    def items(self) -> Optional[NamedItems]:
         # items: named_item*
         mark = self._mark()
         if (
             (n := self._loop0_10(),)
         ):
-            return n
+            return NamedItems (n)
         self._reset(mark)
         return None
 
@@ -415,13 +412,18 @@ class GeneratedParser(Parser):
         return None
 
     @memoize
-    def enditem(self) -> Optional[NamedItem]:
-        # enditem: '$'
+    def endmarker(self) -> Optional[NamedItems]:
+        # endmarker: '$' | <always>
         mark = self._mark()
         if (
             (literal := self.expect('$'))
         ):
-            return NamedItem (None , NameLeaf ('ENDMARKER'))
+            return NamedItems ([NamedItem (None , NameLeaf ('ENDMARKER'))])
+        self._reset(mark)
+        if (
+            True
+        ):
+            return NamedItems ()
         self._reset(mark)
         return None
 
@@ -488,7 +490,7 @@ class GeneratedParser(Parser):
 
     @memoize
     def arguments(self) -> Optional[Args]:
-        # arguments: '(' arg "," ",".arg+ [(Alt([NamedItem(None, StringLeaf('","'))]),)] ')' | '(' arg "," ')' | '(' ')'
+        # arguments: '(' arg "," ",".arg+ [[Alt([NamedItem(None, StringLeaf('","'))])]] ')' | '(' arg "," ')' | '(' ')'
         mark = self._mark()
         if (
             (literal := self.expect('('))

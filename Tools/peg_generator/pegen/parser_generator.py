@@ -21,6 +21,7 @@ from pegen import sccutils
 from pegen.grammar import (
     Alt,
     Args,
+    Attr,
     Cut,
     Forced,
     Gather,
@@ -79,6 +80,9 @@ class DumpVisitor(GrammarVisitor):
         self.level = 0
 
     def visit(self, node) -> None:
+        if isinstance(node, Attr):
+            print(f'{"    " * self.level}-- {node}')
+            return
         print(f'{"    " * self.level}-- {type(node).__name__} = {node}')
         self.level += 1
         self.generic_visit(node)
@@ -289,7 +293,7 @@ class ParserGenerator(ParserGeneratorBase):
         """
         origname = name
         counter = 0
-        param_names = [param.name for param in self.current_rule.params]
+        param_names = self.current_rule.param_names
         while name in param_names + self.local_variable_names:
             counter += 1
             name = f"{origname}_{counter}"
@@ -410,6 +414,9 @@ class InitialNamesVisitor(GrammarVisitor):
         return {node.value}
 
     def visit_StringLeaf(self, node: StringLeaf) -> Set[Any]:
+        return set()
+
+    def visit_Attr(self, node: Attr) -> Set[Any]:
         return set()
 
 
