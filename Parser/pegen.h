@@ -117,8 +117,6 @@ typedef struct {
     int is_keyword;
 } KeywordOrStarred;
 
-typedef struct { } Nothing;
-
 // Internal parser functions
 #if defined(Py_DEBUG)
 void _PyPegen_clear_memo_statistics(void);
@@ -144,7 +142,6 @@ int _PyPegen_fill_token(Parser *p);
 expr_ty _PyPegen_name_token(Parser *p);
 expr_ty _PyPegen_number_token(Parser *p);
 void *_PyPegen_string_token(Parser *p);
-Nothing *_PyPegen_nothing_token(Parser* p);
 Py_ssize_t _PyPegen_byte_offset_to_character_offset(PyObject *line, Py_ssize_t col_offset);
 
 // Error handling functions and APIs

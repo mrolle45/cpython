@@ -163,7 +163,6 @@ class ParserGenerator(ParserGeneratorBase):
 
     def __init__(self, grammar: Grammar, tokens: Set[str], file: Optional[IO[Text]]):
         self.grammar = grammar
-        tokens.add('NOTHING')
         self.tokens = tokens
         self.keywords: Dict[str, int] = {}
         self.soft_keywords: Set[str] = set()
