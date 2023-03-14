@@ -728,6 +728,8 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
             self.visit(alt, is_loop=is_loop, is_gather=is_gather, rulename=rulename)
 
     def join_conditions(self, keyword: str, node: Any) -> None:
+        if not node.items:
+            return
         self.print(f"{keyword} (")
         with self.indent():
             first = True
@@ -737,6 +739,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
                 else:
                     self.print("&&")
                 self.visit(item)
+
         self.print(")")
 
     def emit_action(self, node: Alt, cleanup_code: Optional[str] = None) -> None:
@@ -776,7 +779,10 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
                 self.print(
                     f'D(fprintf(stderr, "Hit with default action [%d:%d]: %s\\n", _mark, p->mark, "{node}"));'
                 )
-            self.print(f"_res = {self.local_variable_names[0]};")
+            if node.items:
+                self.print(f"_res = {self.local_variable_names[0]};")
+            else:
+                self.print(f"_res = true;")
 
     def emit_dummy_action(self) -> None:
         self.print("_res = _PyPegen_dummy_name(p);")

@@ -48,10 +48,20 @@ class GrammarVisitor:
 
 class GrammarNode:
     """ Base class for all nodes found in a Grammar tree. """
+    showme: bool = True
+
     def dump(self) -> None:
         from pegen.parser_generator import DumpVisitor
         DumpVisitor().visit(self)
 
+    def show(self, leader: str = ''):
+        """ Same as str(self), but extra lines are indented with the leader.
+        Override in subclass to implement this.
+        """
+        return str(self)
+
+    def itershow(self) -> Iterable[GrammarNode]:
+        return iter(self)
 
 class Grammar(GrammarNode):
     def __init__(self, rules: Iterable[Rule], metas: Iterable[Tuple[str, Optional[str]]]):
@@ -89,6 +99,8 @@ class TrueHashableList(List[T], GrammarNode):
 
     def __bool__(self) -> bool: return True
 
+    def __str__(self) -> str:
+        return f'[{", ".join([str(x) for x in self])}]'
 
 class TypedName(GrammarNode):
     def __init__(self, name: Optional[str], params: Optional[Params] = None, type: Optional[str] = None):
@@ -140,11 +152,14 @@ class Rule(TypedName):
         return self.name.startswith("_gather")
 
     def __str__(self) -> str:
-        res = super().__str__() + f': {self.rhs}'
+        return super().__str__() + f': {self.rhs}'
+
+    def show(self, leader: str = ''):
+        res = str(self)
         if len(res) < 88:
             return res
         lines = [res.split(":")[0] + ":"]
-        lines += [f"    | {alt}" for alt in self.rhs.alts]
+        lines += [f"{leader}| {alt}" for alt in self.rhs.alts]
         return "\n".join(lines)
 
     def __repr__(self) -> str:
@@ -153,6 +168,10 @@ class Rule(TypedName):
     def __iter__(self) -> Iterator[Rhs]:
         yield TypedName(self.name, self.params, self.type)
         yield self.rhs
+
+    def itershow(self) -> Iterator[Rhs]:
+        yield TypedName(self.name, self.params, self.type)
+        yield from self.rhs
 
     def flatten(self) -> Rhs:
         # If it's a single parenthesized group, flatten it.
@@ -218,7 +237,7 @@ class Args(TrueHashableList[str]):
 
     @property
     def show(self) -> str:
-        return f'({", ".join(self)}{self.comma})'
+        return f'({", ".join(self)})'
 
     def __repr__(self) -> str:
         return self.show
@@ -336,8 +355,12 @@ class NamedItem(TypedName):
         return f"NamedItem({self.name!r}, {self.item!r})"
 
     def __iter__(self) -> Iterator[Item]:
+        if self.name: yield Attr(self, 'name')
         yield self.item
 
+    @property
+    def showme(self) -> bool:
+        return bool(self.name)
 
 class NamedItems(TrueHashableList[NamedItem]):
     pass
@@ -389,8 +412,8 @@ class Opt(GrammarNode):
     def __str__(self) -> str:
         s = str(self.node)
         # TODO: Decide whether to use [X] or X? based on type of X
-        if " " in s:
-            return f"[{s}]"
+        if type(self.node) is Alts:
+            return s
         else:
             return f"{s}?"
 
@@ -399,6 +422,12 @@ class Opt(GrammarNode):
 
     def __iter__(self) -> Iterator[Item]:
         yield self.node
+
+    def itershow(self) -> Iterator[Item]:
+        if type(self.node) is Alts:
+            yield from self.node
+        else:
+            yield self.node
 
 
 class Repeat(GrammarNode):
@@ -462,6 +491,9 @@ class Group(GrammarNode):
 
     def __iter__(self) -> Iterator[Rhs]:
         yield self.rhs
+
+    def itershow(self) -> Iterator[Rhs]:
+        yield from list(itertools.chain(*itertools.chain(self.rhs)))
 
 
 class Cut(GrammarNode):

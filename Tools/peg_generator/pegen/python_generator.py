@@ -15,7 +15,6 @@ from pegen.grammar import (
     NamedItem,
     NameLeaf,
     NegativeLookahead,
-    Nothing,
     Opt,
     PositiveLookahead,
     Repeat0,
@@ -107,9 +106,6 @@ class PythonCallMakerVisitor(GrammarVisitor):
         if name in ("NEWLINE", "DEDENT", "INDENT", "ENDMARKER", "ASYNC", "AWAIT"):
             # Avoid using names that can be Python keywords
             return "_" + name.lower(), f"self.expect({name!r})"
-        if name == "NOTHING":
-            return "nothing", "Nothing()"
-        #self.gen.validate_rule_args(node)
         return name, f"self.{name}{node.args.show}"
 
     def visit_StringLeaf(self, node: StringLeaf) -> Tuple[str, str]:
@@ -202,9 +198,6 @@ class PythonCallMakerVisitor(GrammarVisitor):
                 "forced",
                 f"self.expect_forced(self.expect({node.node.value}), {node.node.value!r})",
             )
-
-    def visit_Nothing(self, node: Nothing) -> Tuple[str, str]:
-        return "nothing", "Nothing()"
 
     def args_from_params(self):
         """ Argument list to call an artificial rule using names of main Rule parameters. """
@@ -328,25 +321,27 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         with self.local_variable_context():
             if has_cut:
                 self.print("cut = False")
-            if is_loop:
-                self.print("while (")
-            else:
-                self.print("if (")
-            with self.indent():
-                first = True
-                for item in node.items:
-                    if first:
-                        first = False
-                    else:
-                        self.print("and")
-                    self.visit(item)
-                    if is_gather:
-                        self.print("is not None")
-                if not node.items:
-                    self.print("True")
+            if node.items:
+                if is_loop:
+                    self.print("while (")
+                else:
+                    self.print("if (")
+                with self.indent():
+                    first = True
+                    for item in node.items:
+                        if first:
+                            first = False
+                        else:
+                            self.print("and")
+                        self.visit(item)
+                        if is_gather:
+                            self.print("is not None")
+                    if not node.items:
+                        self.print("True")
 
-            self.print("):")
-            with self.indent():
+                self.print("):")
+
+            with self.indent(bool(node.items)):
                 action = node.action
                 if not action:
                     if is_gather:
@@ -355,7 +350,9 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
                             f"[{self.local_variable_names[0]}] + {self.local_variable_names[1]}"
                         )
                     else:
-                        if self.invalidvisitor.visit(node):
+                        if not node.items:
+                            action = "True"
+                        elif self.invalidvisitor.visit(node):
                             action = "UNREACHABLE"
                         elif len(self.local_variable_names) == 1:
                             action = f"{self.local_variable_names[0]}"
