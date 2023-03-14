@@ -34,7 +34,7 @@ class SubRuleValidator(GrammarValidator):
         first_alt: Alt, first_items: List[str],
         second_alt: Alt, second_items: List[str]
         ) -> None:
-        if len(second_items) <= len(first_items): return
+        if len(second_items) < len(first_items): return
         if first_items == second_items[: len(first_items)]:
             raise ValidationError(
                 f"In {self.rulename} there is an alternative that will "
