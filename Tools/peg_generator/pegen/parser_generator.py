@@ -80,13 +80,26 @@ class DumpVisitor(GrammarVisitor):
         self.level = 0
 
     def visit(self, node) -> None:
+        leader = "    " * self.level
         if isinstance(node, Attr):
-            print(f'{"    " * self.level}-- {node}')
+            print(f'{leader}{node}')
             return
-        print(f'{"    " * self.level}-- {type(node).__name__} = {node}')
-        self.level += 1
-        self.generic_visit(node)
-        self.level -= 1
+        if node.showme:
+            print(f'{leader}{type(node).__name__} = {node.show(leader)}')
+            self.level += 1
+            self.generic_visit(node)
+            self.level -= 1
+        else:
+            self.generic_visit(node)
+
+    def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Any:
+        """Called if no explicit visitor function exists for a node."""
+        for value in node.itershow():
+            if type(value) is list:
+                for item in value:
+                    self.visit(item, *args, **kwargs)
+            else:
+                self.visit(value, *args, **kwargs)
 
 
 class ParserGeneratorBase: pass
@@ -201,12 +214,12 @@ class ParserGenerator(ParserGeneratorBase):
         raise NotImplementedError
 
     @contextlib.contextmanager
-    def indent(self) -> Iterator[None]:
-        self.level += 1
+    def indent(self, levels: int = 1) -> Iterator[None]:
+        self.level += levels
         try:
             yield
         finally:
-            self.level -= 1
+            self.level -= levels
 
     def print(self, *args: object) -> None:
         if not args:
