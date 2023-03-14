@@ -117,6 +117,9 @@ class Tokenizer:
             tok = self._tokens[self._index - 1]
             print(f"{fill} {shorttok(tok)}")
 
+    def showtokens(self) -> List[tokenize.TokenInfo]:
+        return [shorttok(tok) for tok in self._tokens]
+
     def dump(self) -> None:
         """ Prints all the tokens, without consuming any input or altering the index. """
         index = self._index
