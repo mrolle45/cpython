@@ -50,9 +50,9 @@ class GrammarNode:
     """ Base class for all nodes found in a Grammar tree. """
     showme: bool = True
 
-    def dump(self) -> None:
+    def dump(self, all: bool = False) -> None:
         from pegen.parser_generator import DumpVisitor
-        DumpVisitor().visit(self)
+        DumpVisitor(all).visit(self)
 
     def show(self, leader: str = ''):
         """ Same as str(self), but extra lines are indented with the leader.
@@ -148,6 +148,9 @@ class Rule(TypedName):
     def is_loop(self) -> bool:
         return self.name.startswith("_loop")
 
+    def is_loop1(self) -> bool:
+        return self.name.startswith("_loop1")
+
     def is_gather(self) -> bool:
         return self.name.startswith("_gather")
 
@@ -159,7 +162,7 @@ class Rule(TypedName):
         if len(res) < 88:
             return res
         lines = [res.split(":")[0] + ":"]
-        lines += [f"{leader}| {alt}" for alt in self.rhs.alts]
+        lines += [f"{leader}| {alt}" for alt in self.rhs]
         return "\n".join(lines)
 
     def __repr__(self) -> str:
@@ -178,11 +181,11 @@ class Rule(TypedName):
         rhs = self.rhs
         if (
             not self.is_loop()
-            and len(rhs.alts) == 1
-            and len(rhs.alts[0].items) == 1
-            and isinstance(rhs.alts[0].items[0].item, Group)
+            and len(rhs) == 1
+            and len(rhs[0].items) == 1
+            and isinstance(rhs[0].items[0].item, Group)
         ):
-            rhs = rhs.alts[0].items[0].item.rhs
+            rhs = rhs[0].items[0].item.rhs
         return rhs
 
     @property
@@ -235,9 +238,14 @@ class Args(TrueHashableList[str]):
         super().__init__(args)
         self.comma = comma or ''
 
-    @property
     def show(self) -> str:
         return f'({", ".join(self)})'
+
+    def __str__(self) -> str:
+        res = ", ".join(self)
+        res1 = '(' + res + ')'
+        return self.show()
+        return res1
 
     def __repr__(self) -> str:
         return self.show
@@ -275,39 +283,15 @@ class StringLeaf(Leaf):
         return f"StringLeaf({self.value!r})"
 
 
-class Rhs(GrammarNode):
-    def __init__(self, alts: Alts):
-        self.alts = alts
-        self.memo: Optional[Tuple[Optional[str], str]] = None
-
-    def __str__(self) -> str:
-        return " | ".join(str(alt) for alt in self.alts)
-
-    def __repr__(self) -> str:
-        return f"Rhs({self.alts!r})"
-
-    def __iter__(self) -> Iterator[List[Alt]]:
-        yield self.alts
-
-    @property
-    def can_be_inlined(self) -> bool:
-        if len(self.alts) != 1 or len(self.alts[0].items) != 1:
-            return False
-        # If the alternative has an action we cannot inline
-        if getattr(self.alts[0], "action", None) is not None:
-            return False
-        return True
-
-    @staticmethod
-    def join(rhs_list: List[Rhs]) -> Rhs:
-        return Rhs(list(itertools.chain(*(rhs.alts for rhs in rhs_list))))
-
-
 class Alt(GrammarNode):
+    has_cut: bool = False               # True on instance if any item is a Cut object.
+
     def __init__(self, items: List[NamedItem], *, icut: int = -1, action: Optional[str] = None):
         self.items = items
         self.icut = icut
         self.action = action
+        if any(isinstance(item.item, Cut) for item in items):
+            self.has_cut = True
 
     def __str__(self) -> str:
         core = " ".join(str(item) for item in self.items) or '<always>'
@@ -328,7 +312,14 @@ class Alt(GrammarNode):
         yield self.items
 
 
-class Alts(TrueHashableList[Alt]):
+class Rhs(TrueHashableList[Alt]):
+
+    def __str__(self) -> str:
+        return " | ".join(str(alt) for alt in self)
+
+    def __repr__(self) -> str:
+        return f"Rhs({list(self)!r})"
+
     @property
     def can_be_inlined(self) -> bool:
         if len(self) != 1 or len(self[0].items) != 1:
@@ -349,7 +340,8 @@ class NamedItem(TypedName):
         if not SIMPLE_STR and self.name:
             return f"{self.name}={self.item}"
         else:
-            return str(self.item)
+            res = str(self.item)
+            return res
 
     def __repr__(self) -> str:
         return f"NamedItem({self.name!r}, {self.item!r})"
@@ -412,7 +404,7 @@ class Opt(GrammarNode):
     def __str__(self) -> str:
         s = str(self.node)
         # TODO: Decide whether to use [X] or X? based on type of X
-        if type(self.node) is Alts:
+        if type(self.node) is Rhs:
             return s
         else:
             return f"{s}?"
@@ -424,7 +416,7 @@ class Opt(GrammarNode):
         yield self.node
 
     def itershow(self) -> Iterator[Item]:
-        if type(self.node) is Alts:
+        if type(self.node) is Rhs:
             yield from self.node
         else:
             yield self.node

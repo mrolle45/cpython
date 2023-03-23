@@ -76,15 +76,16 @@ class KeywordCollectorVisitor(GrammarVisitor):
                 return self.soft_keywords.add(node.value.replace('"', ""))
 
 class DumpVisitor(GrammarVisitor):
-    def __init__(self):
+    def __init__(self, all: bool = False):
         self.level = 0
+        self.all = all
 
     def visit(self, node) -> None:
         leader = "    " * self.level
         if isinstance(node, Attr):
             print(f'{leader}{node}')
             return
-        if node.showme:
+        if node.showme or self.all:
             print(f'{leader}{type(node).__name__} = {node.show(leader)}')
             self.level += 1
             self.generic_visit(node)
@@ -94,7 +95,7 @@ class DumpVisitor(GrammarVisitor):
 
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Any:
         """Called if no explicit visitor function exists for a node."""
-        for value in node.itershow():
+        for value in (node if self.all else node.itershow()):
             if type(value) is list:
                 for item in value:
                     self.visit(item, *args, **kwargs)
@@ -174,7 +175,7 @@ class ParserGenerator(ParserGeneratorBase):
 
     callmakervisitor: GrammarVisitor
 
-    def __init__(self, grammar: Grammar, tokens: Set[str], file: Optional[IO[Text]]):
+    def __init__(self, grammar: Grammar, tokens: Set[str], file: Optional[IO[Text]], *, verbose: bool = False):
         self.grammar = grammar
         self.tokens = tokens
         self.keywords: Dict[str, int] = {}
@@ -193,6 +194,7 @@ class ParserGenerator(ParserGeneratorBase):
         self.keyword_counter = 499  # For keyword_type()
         self.all_rules: Dict[str, Rule] = self.rules.copy()  # Rules + temporal rules
         self._local_variable_stack: List[List[str]] = []
+        self.verbose = verbose
 
     def validate_rule_names(self) -> None:
         for rule in self.rules:
@@ -277,26 +279,18 @@ class ParserGenerator(ParserGeneratorBase):
     def artificial_rule_from_gather(self, node: Gather) -> str:
         self.counter += 1
         name = f"_gather_{self.counter}"
-        self.counter += 1
-        extra_function_name = f"_loop0_{self.counter}"
 
-        extra_function_call = NameLeaf(extra_function_name, Args([param.name for param in self.current_rule.params]))
-        alt = Alt([NamedItem(TypedName("elem"), node.node), NamedItem(TypedName("seq"), extra_function_call)])
+        elem = NamedItem(TypedName("elem"), node.node)
+        sep = NamedItem(TypedName("sep"), node.separator)
+        group = Group(Rhs([Alt([sep, elem])]))
+        rep = Repeat0(group)
+        alt = Alt([NamedItem(TypedName("elem"), elem), NamedItem(TypedName("seq"), rep)])
         self.all_rules[name] = Rule.simple(
             name,
             self.current_rule.params,
             Rhs([alt]),
         )
 
-        extra_function_alt = Alt(
-            [NamedItem(None, node.separator), NamedItem(TypedName("elem"), node.node)],
-            action="elem",
-        )
-        self.all_rules[extra_function_name] = Rule.simple(
-            extra_function_name,
-            self.current_rule.params,
-            Rhs([extra_function_alt]),
-        )
         return name
 
     def dedupe(self, name: str) -> str:
@@ -328,7 +322,7 @@ class NullableVisitor(GrammarVisitor):
         return rule in self.nullables
 
     def visit_Rhs(self, rhs: Rhs) -> bool:
-        for alt in rhs.alts:
+        for alt in rhs:
             if self.visit(alt):
                 return True
         return False

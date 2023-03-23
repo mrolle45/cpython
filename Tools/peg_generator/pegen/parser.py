@@ -5,7 +5,7 @@ import token
 import tokenize
 import traceback
 from abc import abstractmethod
-from typing import Any, Callable, ClassVar, Dict, Optional, Tuple, Type, TypeVar, cast
+from typing import Any, Callable, ClassVar, Dict, Iterator, Optional, Tuple, Type, TypeVar, cast
 
 from pegen.tokenizer import Mark, Tokenizer, exact_token_types
 
@@ -26,7 +26,7 @@ def logger(method: F) -> F:
             return method(self, *args)
         argsr = ",".join(repr(arg) for arg in args)
         fill = "  " * self._level
-        print(f"{fill}{method_name}({argsr}) .... (looking at {self.showpeek()})")
+        print(f"{fill}{method_name}({argsr}) .... (looking at {self._showpeek()})")
         self._level += 1
         tree = method(self, *args)
         self._level -= 1
@@ -55,7 +55,7 @@ def memoize(method: F) -> F:
         fill = "  " * self._level
         if key not in self._cache:
             if verbose:
-                print(f"{fill}{method_name}({argsr}) ... (looking at {self.showpeek()})")
+                print(f"{fill}{method_name}({argsr}) ... (looking at {self._showpeek()})")
             self._level += 1
             tree = method(self, *args)
             self._level -= 1
@@ -91,7 +91,7 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
         fill = "  " * self._level
         if key not in self._cache:
             if verbose:
-                print(f"{fill}{method_name} ... (looking at {self.showpeek()})")
+                print(f"{fill}{method_name} ... (looking at {self._showpeek()})")
             self._level += 1
 
             # For left-recursive rules we manipulate the cache and
@@ -156,6 +156,15 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
     return memoize_left_rec_wrapper
 
 
+class _CutSentinel:
+    def __bool__(self) -> bool: return False
+
+    def __repr__(self) -> str: return '<Cut parsed>'
+
+# Singleton object returned by an Alt which parsed a Cut.
+cut_sentinel = _CutSentinel()
+
+
 class Parser:
     """Parsing base class."""
 
@@ -179,88 +188,124 @@ class Parser:
     def start(self) -> Any:
         pass
 
-    def showpeek(self) -> str:
+    def _showpeek(self) -> str:
         tok = self._tokenizer.peek()
         return f"{tok.start[0]}.{tok.start[1]}: {token.tok_name[tok.type]}:{tok.string!r}"
 
     @memoize
-    def name(self) -> Optional[tokenize.TokenInfo]:
+    def _name(self) -> Optional[tokenize.TokenInfo]:
         tok = self._tokenizer.peek()
         if tok.type == token.NAME and tok.string not in self.KEYWORDS:
-            return self._tokenizer.getnext()
+            return self._tokenizer.getnext(),
         return None
 
     @memoize
-    def number(self) -> Optional[tokenize.TokenInfo]:
+    def _number(self) -> Optional[tokenize.TokenInfo]:
         tok = self._tokenizer.peek()
         if tok.type == token.NUMBER:
-            return self._tokenizer.getnext()
+            return self._tokenizer.getnext(),
         return None
 
     @memoize
-    def string(self) -> Optional[tokenize.TokenInfo]:
+    def _string(self) -> Optional[tokenize.TokenInfo]:
         tok = self._tokenizer.peek()
         if tok.type == token.STRING:
-            return self._tokenizer.getnext()
+            return self._tokenizer.getnext(),
         return None
 
     @memoize
-    def op(self) -> Optional[tokenize.TokenInfo]:
+    def _op(self) -> Optional[tokenize.TokenInfo]:
         tok = self._tokenizer.peek()
         if tok.type == token.OP:
-            return self._tokenizer.getnext()
+            return self._tokenizer.getnext(),
         return None
 
     @memoize
-    def type_comment(self) -> Optional[tokenize.TokenInfo]:
+    def _type_comment(self) -> Optional[tokenize.TokenInfo]:
         tok = self._tokenizer.peek()
         if tok.type == token.TYPE_COMMENT:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def soft_keyword(self) -> Optional[tokenize.TokenInfo]:
+    def _soft_keyword(self) -> Optional[tokenize.TokenInfo]:
         tok = self._tokenizer.peek()
         if tok.type == token.NAME and tok.string in self.SOFT_KEYWORDS:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def expect(self, type: str) -> Optional[tokenize.TokenInfo]:
+    def _expect(self, type: str) -> Optional[Tuple[tokenize.TokenInfo]]:
         tok = self._tokenizer.peek()
         if tok.string == type:
-            return self._tokenizer.getnext()
+            return self._tokenizer.getnext(),
         if type in exact_token_types:
             if tok.type == exact_token_types[type]:
-                return self._tokenizer.getnext()
+                return self._tokenizer.getnext(),
         if type in token.__dict__:
             if tok.type == token.__dict__[type]:
-                return self._tokenizer.getnext()
+                return self._tokenizer.getnext(),
         if tok.type == token.OP and tok.string == type:
-            return self._tokenizer.getnext()
+            return self._tokenizer.getnext(),
         return None
 
-    def expect_forced(self, res: Any, expectation: str) -> Optional[tokenize.TokenInfo]:
+    def _expect_forced(self, res: Any, expectation: str) -> Optional[Tuple[tokenize.TokenInfo]]:
         if res is None:
-            raise self.make_syntax_error(f"expected {expectation}")
+            raise self._make_syntax_error(f"expected {expectation}")
         return res
 
-    def positive_lookahead(self, func: Callable[..., T], *args: object) -> T:
+    def _positive_lookahead(self, func: Callable[..., T], *args: object) -> T:
         mark = self._mark()
-        ok = func(*args)
+        item = func(*args)
         self._reset(mark)
-        return ok
+        return (item,) if item else None
 
-    def negative_lookahead(self, func: Callable[..., object], *args: object) -> bool:
+    def _negative_lookahead(self, func: Callable[..., object], *args: object) -> bool:
         mark = self._mark()
-        ok = func(*args)
+        item = func(*args)
         self._reset(mark)
-        return not ok
+        return None if item else (True,)
 
-    def make_syntax_error(self, message: str, filename: str = "<unknown>") -> SyntaxError:
+    def _rhs(self, *alts: Callable[..., object]) -> Optional[Tuple[object]]:
+        mark = self._mark()
+        results = map(self._alt, alts)
+        result = next(results, None)
+        if result: return result
+        self._reset(mark)
+        return None
+
+    def _alts(self, alts: Iterator[Optional[Tuple[object]]], cut_value = cut_sentinel) -> Optional[Tuple[object]]:
+        mark = self._mark()
+        for alt in alts:
+            if alt is cut_value:
+                self._reset(mark)
+                return None
+            if alt is not None: return alt
+            self._reset(mark)
+        return None
+
+    def _alt(self, alt: Callable[..., object]) -> Optional[Tuple[object]]:
+        mark = self._mark()
+        result = alt()
+        if result: return result
+        self._reset(mark)
+        return None
+
+    def _get_val(self, item) -> Optional[object]:
+        if item is None: return None
+        return item[0]
+
+    def _get_opt_val(self, item_tup) -> Tuple[object]:
+        """ Similar to _get_val(), except that item_tup is (item,), and
+        if item is Null, returns (Null,) rather than Null.
+        """
+        item, = item_tup
+        if item is None: return None,
+        return item
+
+    def _make_syntax_error(self, message: str, filename: str = "<unknown>") -> SyntaxError:
         tok = self._tokenizer.diagnose()
         return SyntaxError(message, (filename, tok.start[0], 1 + tok.start[1], tok.line))
-
 
 def simple_parser_main(parser_class: Type[Parser]) -> None:
     argparser = argparse.ArgumentParser()
@@ -308,7 +353,7 @@ def simple_parser_main(parser_class: Type[Parser]) -> None:
     t1 = time.time()
 
     if not tree:
-        err = parser.make_syntax_error(filename)
+        err = parser._make_syntax_error(filename)
         traceback.print_exception(err.__class__, err, None)
         sys.exit(1)
 

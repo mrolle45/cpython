@@ -1,10 +1,10 @@
 @subheader """\
 from ast import literal_eval
 from itertools import chain
+import traceback
 
 from pegen.grammar import (
     Alt,
-    Alts,
     Args,
     Cut,
     Forced,
@@ -59,20 +59,20 @@ typed_name[TypedName]:
 memoflag[str]:
     | '(' "memo" ')' { "memo" }
 
-# Alternatives, in various contexts.  Returns an Alts holding the alternatives.
+# Alternatives, in various contexts.  Returns an Rhs holding the alternatives.
 #   Within (...) or [...], or after indented '|'.  One or more with '|' separator.
-alts[Alts]:
-    | a="|".alt+  { Alts(a) }
+alts[Rhs]:
+    | a="|".alt+  { Rhs(a) }
 
 #   After ':' in a rule on same line.  Zero or more with '|' separator.
-maybe_alts[Alts]:
-    | !NEWLINE a="|".alt+  { Alts(a) }
-    | { Alts() }
+maybe_alts[Rhs] (memo):
+    | !NEWLINE a="|".alt+  { Rhs(a) }
+    | { Rhs([]) }
 
 #   Indented block following a rule, each line introduced by '|', or nothing.
-more_alts[Alts]:
-    | INDENT a=( "|" b=alts NEWLINE { b } )+ DEDENT { Alts (chain (*a)) }
-    | { Alts() }
+more_alts[Rhs] (memo):
+    | INDENT a=( "|" b=alts NEWLINE { b } )+ DEDENT { Rhs (chain (*a)) }
+    | { Rhs() }
 
 # Single alternative.  May be nothing at all.
 alt[Alt]:
@@ -81,7 +81,7 @@ alt[Alt]:
 items[NamedItems]:
     | n=named_item* { NamedItems(n) }
 
-named_item[NamedItem]:
+named_item[NamedItem] (memo):
     | n=typed_name '=' ~ item {NamedItem(n, item)}
     | it=item {NamedItem(None, it)}
     | forced=forced_atom {NamedItem(None, forced)}
@@ -98,7 +98,7 @@ lookahead[Lookahead]:
 cut[Cut]:
     | '~' {Cut()}
 
-item[Item]:
+item[Item] (memo):
     | '[' ~ alts ']' {Opt(alts)}
     |  a=atom '?' {Opt(a)}
     |  a=atom '*' {Repeat0(a)}
@@ -110,8 +110,8 @@ endmarker[NamedItems]:
     | '$' { NamedItems([NamedItem(None, NameLeaf('ENDMARKER'))]) }
     | { NamedItems() }
 
-atom[Plain]:
-    | '(' ~ alts ')' {Group(Rhs(alts))}
+atom[Plain] (memo):
+    | '(' ~ alts ')' {Group((alts))}
     | n=NAME a=arguments? {NameLeaf(n.string, a) }
     | s=STRING {StringLeaf(s.string)}
 
@@ -129,7 +129,7 @@ arg_atom: !"," a=target_atom { a }
 target_atoms[str]:
     | a=target_atom+ { " ".join(a) }
 
-target_atom[str]:
+target_atom[str] (memo):
     | "(" atoms=target_atoms? ")" { "(" + (atoms or "") + ")" }
     | "{" atoms=target_atoms? "}" { "{" + (atoms or "") + "}" }
     | "[" atoms=target_atoms? "]" { "[" + (atoms or "") + "]" }

@@ -23,7 +23,7 @@ class SubRuleValidator(GrammarValidator):
     def visit_Rhs(self, node: Rhs) -> None:
         # Compare alts as lists of their items.
         item_lists: List[Tuple[Alt, List[str]]] = [
-            (alt, [str(item) for item in alt.items]) for alt in node.alts]
+            (alt, [str(item) for item in alt.items]) for alt in node]
         for index, alt in enumerate(item_lists):
             alts_to_consider = item_lists[index + 1 :]
             for other_alt in alts_to_consider:

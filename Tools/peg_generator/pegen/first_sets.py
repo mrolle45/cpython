@@ -115,7 +115,7 @@ class FirstSetCalculator(GrammarVisitor):
 
     def visit_Rhs(self, item: Rhs) -> Set[str]:
         result: Set[str] = set()
-        for alt in item.alts:
+        for alt in item:
             result |= self.visit(alt)
         return result
 

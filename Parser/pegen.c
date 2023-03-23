@@ -377,6 +377,27 @@ _PyPegen_expect_token(Parser *p, int type)
     return t;
 }
 
+// Looking for a single character that parses as an OP Token.
+Token*
+_PyPegen_expect_char(Parser* p, char c)
+{
+    if (p->mark == p->fill) {
+        if (_PyPegen_fill_token(p) < 0) {
+            p->error_indicator = 1;
+            return NULL;
+        }
+    }
+    Token* t = p->tokens[p->mark];
+    if (t->type != OP) {
+        return NULL;
+    }
+    if (t->bytes->ob_sval[0] != c) {
+        return NULL;
+    }
+    p->mark += 1;
+    return t;
+}
+
 void*
 _PyPegen_expect_forced_result(Parser *p, void* result, const char* expected) {
 

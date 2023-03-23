@@ -172,10 +172,10 @@ def build_parser(
     with open(grammar_file) as file:
         tokenizer = Tokenizer(tokenize.generate_tokens(file.readline), verbose=verbose_tokenizer)
         parser = GrammarParser(tokenizer, verbose=verbose_parser)
-        grammar = parser.start()
+        grammar = parser._get_val(parser.start())
 
         if not grammar:
-            raise parser.make_syntax_error(grammar_file)
+            raise parser._make_syntax_error(grammar_file)
 
     return grammar, parser, tokenizer
 
@@ -320,9 +320,9 @@ def build_python_parser_and_generator(
         with open(grammar_file) as file:
             tokenizer = Tokenizer(tokenize.generate_tokens(file.readline))
             if verbose_tokenizer: tokenizer.dump()
-            parser = parser_class(tokenizer)
-            grammar = parser.start()
-            gen: ParserGenerator = PythonParserGenerator(grammar, result)
+            parser = parser_class(tokenizer, verbose=verbose_parser)
+            grammar = parser._get_val(parser.start())
+            gen: ParserGenerator = PythonParserGenerator(grammar, result, verbose=verbose_parser)
             gen.generate(grammar_file)
         return result.getvalue(), grammar, parser, tokenizer, gen
 
