@@ -4,11 +4,11 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import IO, Any, Dict, List, Optional, Set, Text, Tuple
+from token import OP
 
 from pegen import grammar
 from pegen.grammar import (
     Alt,
-    Alts,
     Cut,
     Forced,
     Gather,
@@ -26,6 +26,7 @@ from pegen.grammar import (
     Rhs,
     Rule,
     StringLeaf,
+    TypedName,
 )
 from pegen.parser_generator import ParserGenerator
 
@@ -136,7 +137,7 @@ class CCallMakerVisitor(GrammarVisitor):
             arguments=["p", self.gen.keywords[keyword]],
             return_type="Token *",
             nodetype=NodeTypes.KEYWORD,
-            comment=f"token='{keyword}'",
+            comment=f"keyword='{keyword}'",
         )
 
     def soft_keyword_helper(self, value: str) -> FunctionCall:
@@ -146,7 +147,6 @@ class CCallMakerVisitor(GrammarVisitor):
             arguments=["p", value],
             return_type="expr_ty",
             nodetype=NodeTypes.SOFT_KEYWORD,
-            comment=f"soft_keyword='{value}'",
         )
 
     def visit_NameLeaf(self, node: NameLeaf) -> FunctionCall:
@@ -170,7 +170,6 @@ class CCallMakerVisitor(GrammarVisitor):
                 comment=f"token='{name}'",
             )
 
-        #self.gen.validate_rule_args(node)
         type = None
         args = node.args
         rule = self.gen.all_rules.get(name.lower())
@@ -200,8 +199,7 @@ class CCallMakerVisitor(GrammarVisitor):
                 return self.keyword_helper(val)
             else:
                 return self.soft_keyword_helper(node.value)
-        else:
-            assert val in self.exact_tokens, f"{node.value} is not a known literal"
+        elif val in self.exact_tokens:
             type = self.exact_tokens[val]
             return FunctionCall(
                 assigned_variable="_literal",
@@ -209,31 +207,25 @@ class CCallMakerVisitor(GrammarVisitor):
                 arguments=["p", type],
                 nodetype=NodeTypes.GENERIC_TOKEN,
                 return_type="Token *",
-                comment=f"token='{val}'",
+                comment=f"token={val}",
+            )
+        else:
+            assert len(val) == 1, f"{node.value} is not a known literal"
+            return FunctionCall(
+                assigned_variable="_literal",
+                function=f"_PyPegen_expect_char",
+                arguments=["p", f"'{val[0]}'"],
+                nodetype=NodeTypes.GENERIC_TOKEN,
+                return_type="Token *",
             )
 
     def visit_Rhs(self, node: Rhs) -> FunctionCall:
         if node in self.cache:
             return self.cache[node]
         if node.can_be_inlined:
-            self.cache[node] = self.generate_call(node.alts[0].items[0])
-        else:
-            name = self.gen.artificial_rule_from_rhs(node)
-            self.cache[node] = FunctionCall(
-                assigned_variable=f"{name}_var",
-                function=f"{name}_rule",
-                arguments=["p"],
-                comment=f"{node}",
-            )
-        return self.cache[node]
-
-    def visit_Alts(self, node: Alts) -> FunctionCall:
-        if node in self.cache:
-            return self.cache[node]
-        if node.can_be_inlined:
             self.cache[node] = self.generate_call(node[0].items[0])
         else:
-            name = self.gen.artificial_rule_from_rhs(Rhs(node))
+            name = self.gen.artificial_rule_from_rhs((node))
             self.cache[node] = FunctionCall(
                 assigned_variable=f"{name}_var",
                 function=f"{name}_rule",
@@ -366,6 +358,10 @@ class CCallMakerVisitor(GrammarVisitor):
             function="1",
             nodetype=NodeTypes.CUT_OPERATOR,
         )
+
+    def return_type(self, node: Any) -> Optional[str]:
+        """ The return type associated with the node, to be compatible with the Python generator. """
+        return self.generate_call(node).return_type
 
     def generate_call(self, node: Any) -> FunctionCall:
         return super().visit(node)
@@ -608,7 +604,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
                     self.add_return("_res")
                 self.print("}")
             self.print("int _mark = p->mark;")
-            if any(alt.action and "EXTRA" in alt.action for alt in rhs.alts):
+            if any(alt.action and "EXTRA" in alt.action for alt in rhs):
                 self._set_up_token_start_metadata_extraction()
             self.visit(
                 rhs,
@@ -644,7 +640,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
             self.out_of_memory_return(f"!_children")
             self.print("Py_ssize_t _children_capacity = 1;")
             self.print("Py_ssize_t _n = 0;")
-            if any(alt.action and "EXTRA" in alt.action for alt in rhs.alts):
+            if any(alt.action and "EXTRA" in alt.action for alt in rhs):
                 self._set_up_token_start_metadata_extraction()
             self.visit(
                 rhs,
@@ -668,8 +664,25 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
 
     def rule_params(self, rule: Rule, parser_name: str = 'p') -> str:
         """ The text for parameters to declare a rule.  The name 'p' can be suppressed. """
-        params = ''.join([f', {param.type or "void *"} {param.name}' for param in (rule.params or ())])
+        params = ''.join([f', {self.param_type(param)} {param.name}' for param in rule.params])
         return f"(Parser *{parser_name}{params})"
+
+    def rule_params(self, rule: Rule, parser_name: str = 'p') -> str:
+        """ The text for parameters to declare a rule.  The name 'p' can be suppressed. """
+        params = ''.join([f', {self.param_type(param)} {param.name}' for param in rule.params])
+        return f"(Parser *{parser_name}{params})"
+
+    def param_type(self, param: TypedName) -> str:
+        """ What is generated for the type of a parameter, following '{param.name}:'
+        The name may have its own parameters, which are generated recursively.
+        """
+        base_type = param.type or "void *"
+        if param.params and len(param.params):
+            # This node is a callable type.
+            subtypes = [self.param_type(subparam) for subparam in param.params]
+            return f'{base_type}({", ".join(subtypes)})'
+        else:
+            return base_type
 
     def visit_Rule(self, node: Rule) -> None:
         self.current_rule = node
@@ -723,8 +736,8 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
         self, node: Rhs, is_loop: bool, is_gather: bool, rulename: Optional[str]
     ) -> None:
         if is_loop:
-            assert len(node.alts) == 1
-        for alt in node.alts:
+            assert len(node) == 1
+        for alt in node:
             self.visit(alt, is_loop=is_loop, is_gather=is_gather, rulename=rulename)
 
     def join_conditions(self, keyword: str, node: Any) -> None:
