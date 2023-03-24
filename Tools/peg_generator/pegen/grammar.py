@@ -405,7 +405,7 @@ class Opt(GrammarNode):
         s = str(self.node)
         # TODO: Decide whether to use [X] or X? based on type of X
         if type(self.node) is Rhs:
-            return s
+            return f"[{s}]"
         else:
             return f"{s}?"
 
@@ -491,6 +491,9 @@ class Group(GrammarNode):
 class Cut(GrammarNode):
     def __init__(self) -> None:
         pass
+
+    def __bool__(self) -> bool:
+        return False
 
     def __repr__(self) -> str:
         return f"Cut()"

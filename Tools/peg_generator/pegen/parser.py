@@ -5,9 +5,10 @@ import token
 import tokenize
 import traceback
 from abc import abstractmethod
-from typing import Any, Callable, ClassVar, Dict, Iterator, Optional, Tuple, Type, TypeVar, cast
+from typing import Any, Callable, ClassVar, Dict, Iterator, Optional, List, Tuple, Type, TypeVar, cast
 
 from pegen.tokenizer import Mark, Tokenizer, exact_token_types
+from pegen.grammar import Cut
 
 T = TypeVar("T")
 P = TypeVar("P", bound="Parser")
@@ -274,13 +275,14 @@ class Parser:
         self._reset(mark)
         return None
 
-    def _alts(self, alts: Iterator[Optional[Tuple[object]]], cut_value = cut_sentinel) -> Optional[Tuple[object]]:
+    def _alts(self, alts: Iterator[Optional[Tuple[object]]], cut = cut_sentinel) -> Optional[Tuple[object]]:
         mark = self._mark()
         for alt in alts:
-            if alt is cut_value:
-                self._reset(mark)
+            if alt is cut:
+                # This Alt failed with a cut, quit.
                 return None
-            if alt is not None: return alt
+            if alt: return alt
+            # This Alt failed, try again with the next one.
             self._reset(mark)
         return None
 
@@ -290,6 +292,78 @@ class Parser:
         if result: return result
         self._reset(mark)
         return None
+
+    def _items(self, *items: Callable[..., object], fail: Optional[Cut] = None, cut: Cut = cut_sentinel) -> Optional[List[Tuple[object]]]:
+        """ Returns list of the item results if they all succeed, else None with mark preserved.
+        An item which returns Cut won't be included in results, and a subsequent failure returns Cut.
+        """
+        mark = self._mark()
+        results = []
+        for item in items:
+            if item is cut:
+                fail = cut
+                continue
+            result = item()
+            if result:
+                results.append(result[0])
+            else:
+                self._reset(mark)
+                return fail
+        return results
+
+    def _opt(self, obj) -> Tuple[object]:
+        """ Make the result always true by replacing None with (None,). """
+        return obj and obj or (None, )
+
+    def _repeat0(self, elem_func: Callable[..., object], ) -> Optional[Tuple[List[object]]]:
+        result = []
+        while True:
+            mark = self._mark()
+            child = elem_func()
+            if not child:
+                self._reset(mark)
+                break
+            result.append(child[0])
+        return result,
+
+    def _repeat1(self, elem_func: Callable[..., object], ) -> Optional[Tuple[List[object]]]:
+        mark = self._mark()
+        child = elem_func()
+        if not child:
+            self._reset(mark)
+            return None
+        result = [child[0]]
+        while True:
+            mark = self._mark()
+            child = elem_func()
+            if not child:
+                self._reset(mark)
+                break
+            result.append(child[0])
+        return result,
+
+    def _gather(self,
+            elem_func: Callable[..., object],
+            sep_func: Callable[..., object],
+            ) -> Optional[Tuple[List[object]]]:
+        mark = self._mark()
+        child = elem_func()
+        if not child:
+            self._reset(mark)
+            return None
+        result = [child[0]]
+        while True:
+            mark = self._mark()
+            sep = sep_func()
+            if not sep:
+                self._reset(mark)
+                break
+            child = elem_func()
+            if not child:
+                self._reset(mark)
+                break
+            result.append(child[0])
+        return result,
 
     def _get_val(self, item) -> Optional[object]:
         if item is None: return None
