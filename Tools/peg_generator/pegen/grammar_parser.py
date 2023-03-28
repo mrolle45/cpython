@@ -58,8 +58,8 @@ class GeneratedParser(Parser):
                 if _item__endmarker is None: return None
                 _endmarker, = _item__endmarker
                 return (grammar),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # grammar
         _item_grammar: Optional[Tuple[Any]]; grammar: Any
@@ -90,8 +90,8 @@ class GeneratedParser(Parser):
                 if _item_rules is None: return None
                 rules, = _item_rules
                 return (Grammar (rules , metas)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # meta*
         _item_metas: Optional[Tuple[Any]]; metas: Any
@@ -132,8 +132,8 @@ class GeneratedParser(Parser):
                 if _item__newline is None: return None
                 _newline, = _item__newline
                 return (Meta (name . string , val)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # "@"
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -170,7 +170,7 @@ class GeneratedParser(Parser):
                 if _item_val is None: return None
                 val, = _item_val
                 return (val . string),
-            yield _alt()
+            yield _alt
             def _alt():
                 # STRING
                 _item_val: Optional[Tuple[Any]]; val: Any
@@ -178,11 +178,11 @@ class GeneratedParser(Parser):
                 if _item_val is None: return None
                 val, = _item_val
                 return (literal_eval (val . string)),
-            yield _alt()
+            yield _alt
             def _alt():
                 return (None),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # NAME
         _item_val: Optional[Tuple[Any]]; val: Any
@@ -239,8 +239,8 @@ class GeneratedParser(Parser):
                 if _item_aa is None: aa = None
                 else: aa, = _item_aa
                 return (Rule (n , Rhs (a + aa) , memo = m)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # typed_name
         _item_n: Optional[Tuple[Any]]; n: Any
@@ -307,7 +307,7 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return (Params (n)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # '('
                 _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -320,8 +320,8 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return (Params ([])),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # !memoflag
         _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
@@ -385,8 +385,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: a = None
                 else: a, = _item_a
                 return (TypedName (n . string , p , a)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # NAME
         _item_n: Optional[Tuple[Any]]; n: Any
@@ -428,8 +428,8 @@ class GeneratedParser(Parser):
                 if _item__literal_2 is None: return None
                 _literal_2, = _item__literal_2
                 return ("memo"),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # '('
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -461,8 +461,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: return None
                 a, = _item_a
                 return (Rhs (a)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # "|".alt+
         _item_a: Optional[Tuple[Any]]; a: Any
@@ -490,11 +490,11 @@ class GeneratedParser(Parser):
                 if _item_a is None: return None
                 a, = _item_a
                 return (Rhs (a)),
-            yield _alt()
+            yield _alt
             def _alt():
                 return (Rhs ()),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # !NEWLINE
         _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
@@ -534,11 +534,11 @@ class GeneratedParser(Parser):
                 if _item__dedent is None: return None
                 _dedent, = _item__dedent
                 return (Rhs (chain (* a))),
-            yield _alt()
+            yield _alt
             def _alt():
                 return (Rhs ()),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # INDENT
         _item__indent: Optional[Tuple[Any]]; _indent: Any
@@ -582,8 +582,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: a = None
                 else: a, = _item_a
                 return (Alt (i + e , action = a)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # items
         _item_i: Optional[Tuple[Any]]; i: Any
@@ -614,8 +614,8 @@ class GeneratedParser(Parser):
                 _item_n = self._loop0_10()
                 n, = _item_n
                 return (NamedItems (n)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # named_item*
         _item_n: Optional[Tuple[Any]]; n: Any
@@ -648,7 +648,7 @@ class GeneratedParser(Parser):
                 if _item_item is None: return cut_sentinel
                 item, = _item_item
                 return (NamedItem (n , item)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # item
                 _item_it: Optional[Tuple[Any]]; it: Any
@@ -656,7 +656,7 @@ class GeneratedParser(Parser):
                 if _item_it is None: return None
                 it, = _item_it
                 return (NamedItem (None , it)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # forced_atom
                 _item_forced: Optional[Tuple[Any]]; forced: Any
@@ -664,7 +664,7 @@ class GeneratedParser(Parser):
                 if _item_forced is None: return None
                 forced, = _item_forced
                 return (NamedItem (None , forced)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # lookahead
                 _item_it: Optional[Tuple[Any]]; it: Any
@@ -672,7 +672,7 @@ class GeneratedParser(Parser):
                 if _item_it is None: return None
                 it, = _item_it
                 return (NamedItem (None , it)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # cut
                 _item_cut: Optional[Tuple[Any]]; cut: Any
@@ -680,8 +680,8 @@ class GeneratedParser(Parser):
                 if _item_cut is None: return None
                 cut, = _item_cut
                 return (NamedItem (None , cut)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # typed_name
         _item_n: Optional[Tuple[Any]]; n: Any
@@ -753,8 +753,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: return cut_sentinel
                 a, = _item_a
                 return (Forced (a)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # '&'
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -793,7 +793,7 @@ class GeneratedParser(Parser):
                 if _item_a is None: return cut_sentinel
                 a, = _item_a
                 return (PositiveLookahead (a)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # '!'
                 _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -807,8 +807,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: return cut_sentinel
                 a, = _item_a
                 return (NegativeLookahead (a)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # '&'
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -849,8 +849,8 @@ class GeneratedParser(Parser):
                 if _item__literal is None: return None
                 _literal, = _item__literal
                 return (Cut ()),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # '~'
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -884,7 +884,7 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return cut_sentinel
                 _literal_1, = _item__literal_1
                 return (Opt (alts)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # atom
                 _item_a: Optional[Tuple[Any]]; a: Any
@@ -897,7 +897,7 @@ class GeneratedParser(Parser):
                 if _item__literal is None: return None
                 _literal, = _item__literal
                 return (Opt (a)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # atom
                 _item_a: Optional[Tuple[Any]]; a: Any
@@ -910,7 +910,7 @@ class GeneratedParser(Parser):
                 if _item__literal is None: return None
                 _literal, = _item__literal
                 return (Repeat0 (a)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # atom
                 _item_a: Optional[Tuple[Any]]; a: Any
@@ -923,7 +923,7 @@ class GeneratedParser(Parser):
                 if _item__literal is None: return None
                 _literal, = _item__literal
                 return (Repeat1 (a)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # atom
                 _item_sep: Optional[Tuple[Any]]; sep: Any
@@ -946,7 +946,7 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return (Gather (sep , node)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # atom
                 _item_a: Optional[Tuple[Any]]; a: Any
@@ -954,8 +954,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: return None
                 a, = _item_a
                 return (a),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # '['
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1053,11 +1053,11 @@ class GeneratedParser(Parser):
                 if _item__literal is None: return None
                 _literal, = _item__literal
                 return (NamedItems ([NamedItem (None , NameLeaf ('ENDMARKER'))])),
-            yield _alt()
+            yield _alt
             def _alt():
                 return (NamedItems ()),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # '$'
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1093,7 +1093,7 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return cut_sentinel
                 _literal_1, = _item__literal_1
                 return (Group ((alts))),
-            yield _alt()
+            yield _alt
             def _alt():
                 # NAME
                 _item_n: Optional[Tuple[Any]]; n: Any
@@ -1106,7 +1106,7 @@ class GeneratedParser(Parser):
                 if _item_a is None: a = None
                 else: a, = _item_a
                 return (NameLeaf (n . string , a)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # STRING
                 _item_s: Optional[Tuple[Any]]; s: Any
@@ -1114,8 +1114,8 @@ class GeneratedParser(Parser):
                 if _item_s is None: return None
                 s, = _item_s
                 return (StringLeaf (s . string)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # '('
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1177,8 +1177,8 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return (t),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # "{"
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1220,8 +1220,8 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return (t),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # "["
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1278,7 +1278,7 @@ class GeneratedParser(Parser):
                 if _item__literal_2 is None: return None
                 _literal_2, = _item__literal_2
                 return (Args ([a] + b , comma = c and c . string)),
-            yield _alt()
+            yield _alt
             def _alt():
                 # '('
                 _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1301,7 +1301,7 @@ class GeneratedParser(Parser):
                 if _item__literal_2 is None: return None
                 _literal_2, = _item__literal_2
                 return (Args ([a] , comma = ",")),
-            yield _alt()
+            yield _alt
             def _alt():
                 # '('
                 _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1314,8 +1314,8 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return (Args ()),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # '('
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1396,8 +1396,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: return None
                 a, = _item_a
                 return (" " . join (a)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # arg_atom+
         _item_a: Optional[Tuple[Any]]; a: Any
@@ -1424,8 +1424,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: return None
                 a, = _item_a
                 return (a),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # !","
         _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
@@ -1452,8 +1452,8 @@ class GeneratedParser(Parser):
                 if _item_a is None: return None
                 a, = _item_a
                 return (" " . join (a)),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # target_atom+
         _item_a: Optional[Tuple[Any]]; a: Any
@@ -1486,7 +1486,7 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return ("(" + (atoms or "") + ")"),
-            yield _alt()
+            yield _alt
             def _alt():
                 # "{"
                 _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1504,7 +1504,7 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return ("{" + (atoms or "") + "}"),
-            yield _alt()
+            yield _alt
             def _alt():
                 # "["
                 _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1522,7 +1522,7 @@ class GeneratedParser(Parser):
                 if _item__literal_1 is None: return None
                 _literal_1, = _item__literal_1
                 return ("[" + (atoms or "") + "]"),
-            yield _alt()
+            yield _alt
             def _alt():
                 # NAME
                 _item_n: Optional[Tuple[Any]]; n: Any
@@ -1535,7 +1535,7 @@ class GeneratedParser(Parser):
                 if _item__literal is None: return None
                 _literal, = _item__literal
                 return (n . string + "*"),
-            yield _alt()
+            yield _alt
             def _alt():
                 # NAME
                 _item_n: Optional[Tuple[Any]]; n: Any
@@ -1543,7 +1543,7 @@ class GeneratedParser(Parser):
                 if _item_n is None: return None
                 n, = _item_n
                 return (n . string),
-            yield _alt()
+            yield _alt
             def _alt():
                 # NUMBER
                 _item_n: Optional[Tuple[Any]]; n: Any
@@ -1551,7 +1551,7 @@ class GeneratedParser(Parser):
                 if _item_n is None: return None
                 n, = _item_n
                 return (n . string),
-            yield _alt()
+            yield _alt
             def _alt():
                 # STRING
                 _item_s: Optional[Tuple[Any]]; s: Any
@@ -1559,7 +1559,7 @@ class GeneratedParser(Parser):
                 if _item_s is None: return None
                 s, = _item_s
                 return (s . string),
-            yield _alt()
+            yield _alt
             def _alt():
                 # "?"
                 _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1567,7 +1567,7 @@ class GeneratedParser(Parser):
                 if _item__literal is None: return None
                 _literal, = _item__literal
                 return ("?"),
-            yield _alt()
+            yield _alt
             def _alt():
                 # ":"
                 _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1575,7 +1575,7 @@ class GeneratedParser(Parser):
                 if _item__literal is None: return None
                 _literal, = _item__literal
                 return (":"),
-            yield _alt()
+            yield _alt
             def _alt():
                 # !")"
                 _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
@@ -1598,8 +1598,8 @@ class GeneratedParser(Parser):
                 if _item_op is None: return None
                 op, = _item_op
                 return (op . string),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # "("
         _item__literal: Optional[Tuple[Any]]; _literal: Any
@@ -1737,8 +1737,8 @@ class GeneratedParser(Parser):
                     meta, = _item_meta
                     children.append(meta)
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -1768,8 +1768,8 @@ class GeneratedParser(Parser):
                     children.append(rule)
                 if not children: self._reset(mark); return None
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -1801,8 +1801,8 @@ class GeneratedParser(Parser):
                 if _item_seq is None: return None
                 seq, = _item_seq
                 return ([elem] + seq),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # typed_name
         _item_elem: Optional[Tuple[Any]]; elem: Any
@@ -1837,8 +1837,8 @@ class GeneratedParser(Parser):
                     elem, = _item_elem
                     children.append(elem)
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -1874,8 +1874,8 @@ class GeneratedParser(Parser):
                 if _item_seq is None: return None
                 seq, = _item_seq
                 return ([elem] + seq),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # alt
         _item_elem: Optional[Tuple[Any]]; elem: Any
@@ -1910,8 +1910,8 @@ class GeneratedParser(Parser):
                     elem, = _item_elem
                     children.append(elem)
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -1947,8 +1947,8 @@ class GeneratedParser(Parser):
                 if _item_seq is None: return None
                 seq, = _item_seq
                 return ([elem] + seq),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # alt
         _item_elem: Optional[Tuple[Any]]; elem: Any
@@ -1983,8 +1983,8 @@ class GeneratedParser(Parser):
                     elem, = _item_elem
                     children.append(elem)
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -2019,8 +2019,8 @@ class GeneratedParser(Parser):
                     children.append(_group_15)
                 if not children: self._reset(mark); return None
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -2050,8 +2050,8 @@ class GeneratedParser(Parser):
                     named_item, = _item_named_item
                     children.append(named_item)
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -2082,8 +2082,8 @@ class GeneratedParser(Parser):
                 if _item_seq is None: return None
                 seq, = _item_seq
                 return ([elem] + seq),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # arg
         _item_elem: Optional[Tuple[Any]]; elem: Any
@@ -2118,8 +2118,8 @@ class GeneratedParser(Parser):
                     elem, = _item_elem
                     children.append(elem)
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -2154,8 +2154,8 @@ class GeneratedParser(Parser):
                     children.append(arg_atom)
                 if not children: self._reset(mark); return None
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -2186,8 +2186,8 @@ class GeneratedParser(Parser):
                     children.append(target_atom)
                 if not children: self._reset(mark); return None
                 return children,
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         children = []
         children = []
@@ -2224,8 +2224,8 @@ class GeneratedParser(Parser):
                 if _item__newline is None: return None
                 _newline, = _item__newline
                 return (b),
-            yield _alt()
-        return self._alts(_alts())
+            yield _alt
+        return self._alts2(_alts())
         self._reset(mark)
         # "|"
         _item__literal: Optional[Tuple[Any]]; _literal: Any

@@ -234,11 +234,11 @@ class ParserGenerator(ParserGeneratorBase):
         for line in lines.splitlines():
             self.print(line)
 
-    def collect_rules(self) -> None:
-        keyword_collector = KeywordCollectorVisitor(self, self.keywords, self.soft_keywords)
-        for rule in self.all_rules.values():
-            keyword_collector.visit(rule)
+    def lineno(self) -> int:
+        return len(self.file.getvalue().splitlines()) + 1
 
+    def collect_rules(self) -> None:
+        self.collect_keywords()
         rule_collector = RuleCollectorVisitor(self, self.callmakervisitor)
         done: Set[str] = set()
         while True:
@@ -252,6 +252,11 @@ class ParserGenerator(ParserGeneratorBase):
                 rule_collector.visit(self.current_rule)
             self.current_rule = None
 
+    def collect_keywords(self) -> None:
+        keyword_collector = KeywordCollectorVisitor(self, self.keywords, self.soft_keywords)
+        for rule in self.all_rules.values():
+            keyword_collector.visit(rule)
+
     def keyword_type(self) -> int:
         self.keyword_counter += 1
         return self.keyword_counter
@@ -261,6 +266,9 @@ class ParserGenerator(ParserGeneratorBase):
         name = f"_group_{self.counter}"
         self.all_rules[name] = Rule.simple(name, self.current_rule.params, rhs)
         return name
+
+    # TODO: Remove these artificial rules when no longer called in c_generator.
+    # They are not called in python_generator.
 
     def artificial_rule_from_repeat(self, node: Plain, is_repeat1: bool) -> str:
         self.counter += 1

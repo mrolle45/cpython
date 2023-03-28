@@ -83,7 +83,7 @@ def references_for_item(item: Any) -> List[Any]:
     elif isinstance(item, Repeat):
         return references_for_item(item.node)
     elif isinstance(item, Rhs):
-        return [_ref for alt in item.alts for _ref in references_for_item(alt)]
+        return [_ref for alt in item for _ref in references_for_item(alt)]
     elif isinstance(item, Rule):
         return references_for_item(item.rhs)
     else:

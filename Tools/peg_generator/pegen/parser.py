@@ -5,7 +5,10 @@ import token
 import tokenize
 import traceback
 from abc import abstractmethod
-from typing import Any, Callable, ClassVar, Dict, Iterator, Optional, List, Tuple, Type, TypeVar, cast
+from typing import (
+    Any, Callable, ClassVar, Dict, Iterator, Literal, Optional, List, Tuple,
+    Type, TypeVar, Union, cast
+    )
 
 from pegen.tokenizer import Mark, Tokenizer, exact_token_types
 from pegen.grammar import Cut
@@ -14,6 +17,8 @@ T = TypeVar("T")
 P = TypeVar("P", bound="Parser")
 F = TypeVar("F", bound=Callable[..., Any])
 
+ParseResult = Union[Tuple[object], None]
+ParseFunc = Callable[[], ParseResult]
 
 def logger(method: F) -> F:
     """For non-memoized functions that we want to be logged.
@@ -275,27 +280,44 @@ class Parser:
         self._reset(mark)
         return None
 
-    def _alts(self, alts: Iterator[Optional[Tuple[object]]], cut = cut_sentinel) -> Optional[Tuple[object]]:
+    def _alts(self, *alts: ParseFunc, cut = cut_sentinel) -> ParseResult:
         mark = self._mark()
-        for alt in alts:
+        """ Parse several Alts.  Return first success result, or failure if an alt parses as Cut. """
+        for altfunc in alts:
+            alt = self._alt(altfunc)
             if alt is cut:
                 # This Alt failed with a cut, quit.
                 return None
             if alt: return alt
             # This Alt failed, try again with the next one.
-            self._reset(mark)
+        # All Alts failed.
         return None
 
-    def _alt(self, alt: Callable[..., object]) -> Optional[Tuple[object]]:
+    # TODO: Remove this after generating new grammar_parser.py.
+    def _alts2(self, alts: Iterator[ParseFunc], cut = cut_sentinel) -> ParseResult:
+        mark = self._mark()
+        """ Parse an iterable of Alts.  Return first success result, or failure if an alt parses as Cut. """
+        for altfunc in alts:
+            alt = self._alt(altfunc)
+            if alt is cut:
+                # This Alt failed with a cut, quit.
+                return None
+            if alt: return alt
+            # This Alt failed, try again with the next one.
+        return None
+
+    def _alt(self, alt: ParseFunc) -> ParseResult:
+        """ Parse an Alt.  Restore mark on failure. """
         mark = self._mark()
         result = alt()
         if result: return result
         self._reset(mark)
         return None
 
-    def _items(self, *items: Callable[..., object], fail: Optional[Cut] = None, cut: Cut = cut_sentinel) -> Optional[List[Tuple[object]]]:
-        """ Returns list of the item results if they all succeed, else None with mark preserved.
-        An item which returns Cut won't be included in results, and a subsequent failure returns Cut.
+    def _items(self, *items: Callable[..., object], fail: Optional[Cut] = None, cut: Cut = cut_sentinel
+               ) -> Union[Cut, Literal[True], None]:
+        """ Parse all of the given Items.
+        Return True if they all succeed, cut sentinel if a Cut item was parsed, else None.
         """
         mark = self._mark()
         results = []
@@ -311,8 +333,9 @@ class Parser:
                 return fail
         return results
 
-    def _opt(self, obj) -> Tuple[object]:
+    def _opt(self, func: Callable[..., object]) -> Tuple[object]:
         """ Make the result always true by replacing None with (None,). """
+        obj = func()
         return obj and obj or (None, )
 
     def _repeat0(self, elem_func: Callable[..., object], ) -> Optional[Tuple[List[object]]]:

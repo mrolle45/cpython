@@ -1,6 +1,6 @@
 import os.path
 import token
-from typing import IO, Any, Dict, Optional, Sequence, Set, Text, Tuple, Iterable
+from typing import IO, Any, Dict, List, Optional, Sequence, Set, Text, Tuple, Iterable
 from dataclasses import dataclass, field, replace
 
 from pegen import grammar
@@ -13,6 +13,7 @@ from pegen.grammar import (
     GrammarVisitor,
     Group,
     Lookahead,
+    Item,
     NamedItem,
     NameLeaf,
     NegativeLookahead,
@@ -94,18 +95,38 @@ class InvalidNodeVisitor(GrammarVisitor):
         return self.visit(node.node)
 
 
+# FunctionCall class.
+# Has members to describe what is to be generated to produce the body of a parse function or method.
+# The generate(gen) method does the actual generation, using `gen` as the output writer.
+# Subclasses are variations for certain classes of parse nodes.
+
 @dataclass
 class FunctionCall:
     var: Optional[str]
     call: str
     var_type: Optional[str] = None      # The type of a designated variable for a NamedItem.
     return_type: Optional[str] = None
+    inlines: Dict[str, Item] = field(default_factory=dict)       # Local functions defined before the call.
 
-    def __iter__(self) -> Iterable:
-        yield self.var
-        yield self.call
-        yield self.return_type
-        #yield self.var_type
+    @property
+    def inline_names(self) -> List[str]:
+        return [inline.name for inline in self.inlines]
+
+    def generate(self, gen: ParserGenerator, varname: Optional[str] = None, fail_value: str = "None"):
+        gen.gen_func_old(self, varname, fail_value)
+
+
+class NamedItemFunctionCall (FunctionCall):
+    pass
+
+
+class FunctionCallRhs (FunctionCall):
+    pass
+
+    def generate(self, gen: ParserGenerator, varname: Optional[str] = None, fail_value: str = "None"):
+        for rhs in self.inlines.values():
+            gen.print(f"def {list(self.inlines)[0]}():")
+            gen.visit(rhs)
 
 
 class PythonCallMakerVisitor(GrammarVisitor):
@@ -114,6 +135,7 @@ class PythonCallMakerVisitor(GrammarVisitor):
         self.cache: Dict[Any, Any] = {}
 
     def visit_NameLeaf(self, node: NameLeaf) -> Tuple[Optional[str], str]:
+        # TODO:  Parse a variable/parameter as a simple callable, not a method.
         name = node.value
         if name == "SOFT_KEYWORD":
             return FunctionCall("_soft_keyword", "self._soft_keyword()")
@@ -134,8 +156,11 @@ class PythonCallMakerVisitor(GrammarVisitor):
         if len(node) == 1 and len(node[0].items) == 1:
             self.cache[node] = self.visit(node[0].items[0])
         else:
-            name = self.gen.artificial_rule_from_rhs((node))
-            self.cache[node] = FunctionCall(name, f"self.{name}{self.args_from_params()}")
+            self.cache[node] = FunctionCallRhs(
+                "_rhs", "self._rhs(_group)", inlines=dict(_group=node))
+            self.visit(node)
+            #name = self.gen.artificial_rule_from_rhs((node))
+            #self.cache[node] = FunctionCall(name, f"self.{name}{self.args_from_params()}")
         return self.cache[node]
 
     def visit_NamedItem(self, node: NamedItem) -> Tuple[Optional[str], str]:
@@ -145,12 +170,7 @@ class PythonCallMakerVisitor(GrammarVisitor):
         return func
 
     def lookahead_call_helper(self, node: Lookahead, method: str) -> Tuple[str, str]:
-        func = self.visit(node.node)
-        call = func.call
-        head, tail = call.split("(", 1)
-        assert tail[-1] == ")"
-        tail = tail[:-1]
-        return replace(func, var="_lookahead", call=f"self.{method}({head}, {tail})")
+        return FunctionCall("_lookahead", f"self.{method}(_atom)", inlines=dict(_atom=node.node))
 
     def visit_PositiveLookahead(self, node: PositiveLookahead) -> Tuple[None, str]:
         return self.lookahead_call_helper(node, '_positive_lookahead')
@@ -159,30 +179,29 @@ class PythonCallMakerVisitor(GrammarVisitor):
         return self.lookahead_call_helper(node, '_negative_lookahead')
 
     def visit_Opt(self, node: Opt) -> Tuple[str, str]:
-        func = self.visit(node.node)
-        return replace(func, call=f"self._opt({func.call})")
+        return FunctionCall("_lookahead", f"self._opt(_atom)", inlines=dict(_atom=node.node))
+        #func = self.visit(node.node)
+        #return replace(func, call=f"self._opt({func.call})")
 
     def visit_Repeat0(self, node: Repeat0) -> Tuple[str, str]:
         if node in self.cache:
             return self.cache[node]
-        self.cache[node] = FunctionCall("_loop", "")
+        self.cache[node] = FunctionCall("_loop0", "self._repeat0(_node)", inlines=dict(_node=node.node))
         self.visit(node.node)
         return self.cache[node]
 
     def visit_Repeat1(self, node: Repeat1) -> Tuple[str, str]:
         if node in self.cache:
             return self.cache[node]
-        self.cache[node] = FunctionCall("_loop", "")
+        self.cache[node] = FunctionCall("_loop1", "self._repeat1(_node)", inlines=dict(_node=node.node))
         self.visit(node.node)
         return self.cache[node]
 
     def visit_Gather(self, node: Gather) -> Tuple[str, str]:
         if node in self.cache:
             return self.cache[node]
-        self.cache[node] = FunctionCall("_gather", "")
+        self.cache[node] = FunctionCall("_gather", "self._gather(_elem, _sep)", inlines=dict(_elem=node.node, _sep=node.separator))
         self.visit(node.node)
-        #name = self.gen.artificial_rule_from_gather(node)
-        #self.cache[node] = FunctionCall(name, f"self.{name}{self.args_from_params()}")  # No trailing comma here either!
         return self.cache[node]
 
     def visit_Group(self, node: Group) -> Tuple[Optional[str], str]:
@@ -233,7 +252,8 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         )
 
     def generate(self, filename: str) -> None:
-        self.collect_rules()
+        self.collect_keywords()
+        #self.collect_rules()
         header = self.grammar.metas.get("header", MODULE_PREFIX)
         if header is not None:
             basename = os.path.basename(filename)
@@ -299,197 +319,126 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
             self.print("@memoize")
         node_type = node.type or "Any"
         self.print(f"def {node.name}{self.rule_params(node)} -> Optional[{node_type}]:")
-        alt_names = [f'_alt{i}_{node.name}' for i, alt in enumerate(node.rhs, 1)]
+        with self.indent():
+            self.print(f"# {node.name}: {rhs}")
+        self.visit_Rhs(rhs)
+        self.current_rule = None
 
-        def gen_alt(alt: Alt) -> None:
-            self.print("def _alt():")
+    def visit_Rhs(self, node: Rhs) -> None:
+
+        def gen_alt(alt: Alt, suffix: int = 0) -> str:
+            name = f"_alt{f'_{suffix}' if suffix else ''}"
+            self.print(f"def {name}():")
             with self.indent():
                 # The body of the alternative, returns (result,) or None.
                 self.visit(alt)
+            return name
 
         with self.indent():
-            alts = node.rhs
-            self.print(f"# {node.name}: {rhs}")
+            alts = node
             if len(alts) == 1:
                 gen_alt(alts[0])
                 self.print("return self._alt(_alt)")
             else:
-                self.print("def _alts():")
-                with self.indent():
-                    for alt in node.rhs:
-                        gen_alt(alt)
-                        self.print("yield _alt()")
-                self.print("return self._alts(_alts())")
-
-        self.current_rule = None
-
-    def visit_NamedItem(self, node: NamedItem) -> None:
-        name, call, type = self.callmakervisitor.visit(node.item)
-        if node.name:
-            name = node.name
-        if not name:
-            self.print(call)
-        else:
-            if name != "cut":
-                name = self.dedupe(name)
-            if call.endswith(','):
-                call = f"({call})"
-            expr = f"({name} := self._get_val({call}))"
-            if isinstance(node.item, (Opt, Cut)) or call.startswith('self._loop0'):
-                expr = f"({expr} or True)"
-            self.print(expr)
+                names = []
+                with self.indent(0):
+                    for n, alt in enumerate(node, 1):
+                        names.append(gen_alt(alt, n))
+                    self.print(f"return self._alts({', '.join(names)})")
 
 
     def visit_Alt(self, node: Alt) -> None:
         self.failed_value = "None"
         with self.local_variable_context():
-            with self.indent(0):
-                if node.has_cut and 0x0:
-                    for item in node.items:
-                        # Test each item, and return None from the function if failed
-                        self.gen_item(item)
-                    # If the function has reached this point, then the alt is successful
-                    self.print("# successful parse")
-                    
-                else:
-                    func_names = []
-                    item_names = []
-                    for item in node.items:
-                        self.print(f"# {item}")
-                        # If the item is a Cut, then there's no item name, but there's a Cut function
-                        if isinstance(item.item, Cut):
-                            func_names.append("cut_sentinel")
-                            continue
-                        item_name = self.gen_item_func(item)
-                        item_names.append(item_name)
-                        func_names.append(f"_item_{item_name}")
-                    if item_names:
-                        item_targets = f"[{', '.join(item_names)}]"
-                        items_call = f"self._items({', '.join(func_names)})"
-                        self.print(f"_items = {items_call}")
-                        self.print("if not _items: return _items")
-                        self.print(f"{item_targets} = _items")
+            func_names = []
+            item_names = []
+            fail_value = "None"
+            for item in node.items:
+                self.print(f"# {item}")
+                # If the item is a Cut, then there's no item name, but there's a Cut function
+                if isinstance(item.item, Cut):
+                    fail_value = "cut_sentinel"
+                    func_names.append("cut_sentinel")
+                    continue
+                item_name = self.gen_named_item(item, fail_value)
+                item_names.append(item_name)
+                func_names.append(f"_item_{item_name}")
+            if item_names:
+                item_targets = f"[{', '.join(item_names)}]"
+                items_call = f"self._items({', '.join(func_names)})"
+                #self.print(f"_items = {items_call}")
+                #self.print("if not _items: return _items")
+                #self.print(f"{item_targets} = _items")
 
+            self.print("# parse succeeded")
             action = self.action(node)
             self.print(f"return ({action}),")
 
-    def gen_item(self, item: NamedItem) -> None:
-        """ Code for a single item in an alt or loop function. """
-
-        assert isinstance (item, NamedItem)
-        self.print(f"# {item}")
-        if isinstance(item.item, Cut):
-            # Return cut indicator if anything fails from here forward.
-            self.failed_value = "cut_sentinel"
-            return
-
-        name, call, item_type = self.callmakervisitor.visit(item)
-        if item.name:
-            name = item.name
-
-        name = self.dedupe(name)
-        if item_type is None: item_type = 'Any'
-        rawname = f"_item_{name}"
-        rawtype = f"Optional[Tuple[{item_type}]]"
-        if isinstance(item.item, Opt):
-            item_type = f"Optional[{item_type}]"
-        self.print(f"{rawname}: {rawtype}; {name}: {item_type}")
-        if call:
-            self.print(f"{rawname} = {call}")
-        else:
-            # Expand the item inline
-            self.print("def _elem():")
-            with self.indent():
-                call = self.gen_atom(item.item.node)
-                #_, call, _ = self.callmakervisitor.visit(item.item.node)
-                self.print(f"return {call}")
-            if type(item.item) is Gather:
-                self.print("def _sep():")
-                with self.indent():
-                    call = self.gen_atom(item.item.separator)
-                    self.print(f"return {call}")
-                self.print(f"{rawname} = self._gather(_elem, _sep)")
-            else:
-                self.print(f"{rawname} = self._{type(item.item).__name__.lower()}(_elem)")
-
-        if isinstance(item.item, Opt):
-            # The item may be failed, but we keep going anyway.
-            self.print(f"if {rawname} is None: {name} = None")
-            self.print(f"else: {name}, = {rawname}")
-        else:
-            # Test for failure.  A Repeat0 never fails.
-            if not isinstance(item.item, Repeat0):
-                self.print(f"if {rawname} is None: return {self.failed_value}")
-            self.print(f"{name}, = {rawname}")
-
-    def gen_item_func(self, item: NamedItem) -> str:
-        """ Code for function which evaluates a single item in an alt.
+    def gen_named_item(self, item: NamedItem, fail_value: str = "None") -> str:
+        """ Code which parses a single named item in an alt.
+        Exits the alt if the parse fails.
         Return name of the variable.  The function name is _Item_{name}
         """
 
         assert isinstance (item, NamedItem)
 
-        name, call, item_type = self.callmakervisitor.visit(item)
+        func: FunctionCall = self.callmakervisitor.visit(item)
         if item.name:
             name = item.name
-
+        else:
+            name = func.var
         name = self.dedupe(name)
+        item_type = func.return_type
         if item_type is None: item_type = 'Any'
         rawname = f"_item_{name}"
         rawtype = f"Optional[Tuple[{item_type}]]"
         if isinstance(item.item, Opt):
             item_type = f"Optional[{item_type}]"
-        self.print(f"def {rawname}():")
-        with self.indent():
-            if call:
-                self.print(f"return {call}")
-            else:
-                # Expand the item inline
-                self.print("def _elem():")
-                with self.indent():
-                    call = self.gen_atom(item.item.node)
-                    #_, call, _ = self.callmakervisitor.visit(item.item.node)
-                    self.print(f"return {call}")
-                if type(item.item) is Gather:
-                    self.print("def _sep():")
-                    with self.indent():
-                        call = self.gen_atom(item.item.separator)
-                        self.print(f"return {call}")
-                    self.print(f"return self._gather(_elem, _sep)")
-                else:
-                    self.print(f"return self._{type(item.item).__name__.lower()}(_elem)")
-
-        #if isinstance(item.item, Opt):
-        #    # The item may be failed, but we keep going anyway.
-        #    self.print(f"if {rawname} is None: {name} = None")
-        #    self.print(f"else: {name}, = {rawname}")
-        #else:
-        #    # Test for failure.  A Repeat0 never fails.
-        #    if not isinstance(item.item, Repeat0):
-        #        self.print(f"if {rawname} is None: return {self.failed_value}")
-        #    self.print(f"{name}, = {rawname}")
+        self.print(f"{name}: {item_type}; {rawname}: {rawtype}")
+        func.generate(self, name, fail_value)
 
         return name
 
-    def gen_atom(self, atom: Plain) -> str:
-        """ Text of call to get the value of the node.
-        Also prints defs of any other functions involved.
-        """
-        _, call, _ = self.callmakervisitor.visit(atom)
-        if call: return call
-        # Expand the atom inline.
-        self.print("def _elem():")
-        with self.indent():
-            _, call, _ = self.callmakervisitor.visit(atom)
-            self.print(f"return {call}")
-        if type(item.item) is Gather:
-            self.print("def _sep():")
+    def gen_func_old(self, func: FunctionCall, varname: str = None, fail_value: str = "None"):
+        for inline_name, inline in func.inlines.items():
+            # Expand the inline items.
+            self.print(f"def {inline_name}():")
             with self.indent():
-                _, call, _ = self.callmakervisitor.visit(item.item.separator)
-                self.print(f"return {call}")
-            return f"self._gather(_elem, _sep)"
-        else:
-            return f"self._{type(item.item).__name__.lower()}(_elem)"
+                inline_func = self.callmakervisitor.visit(inline)
+                inline_func.generate(self)
+                self.print(f"return {inline_func.call}")
+        if varname:
+            rawname = f"_item_{varname}"
+            self.print(f"{rawname} = {func.call}")
+            self.print(f"if not {rawname}: return {fail_value}")
+            self.print(f"{varname}, = {rawname}")
+
+            #self.print(f"_item = {func.call}")
+            #self.print(f"nonlocal {varname}")
+            #self.print(f"if _item: {varname}, = _item")
+            #self.print(f"return _item")
+        #else:
+        #    self.print(f"return {func.call}")
+
+    #def gen_atom(self, atom: Plain) -> str:
+    #    """ Text of call to get the value of the node.
+    #    Also prints defs of any other functions involved.
+    #    """
+    #    func = self.callmakervisitor.visit(atom)
+    #    if func.call: return func.call
+    #    # Expand the atom inline.
+    #    self.print("def _elem():")
+    #    with self.indent():
+    #        _, call, _ = self.callmakervisitor.visit(atom)
+    #        self.print(f"return {call}")
+    #    if type(item.item) is Gather:
+    #        self.print("def _sep():")
+    #        with self.indent():
+    #            _, call, _ = self.callmakervisitor.visit(item.item.separator)
+    #            self.print(f"return {call}")
+    #        return f"self._gather(_elem, _sep)"
+    #    else:
+    #        return f"self._{type(item.item).__name__.lower()}(_elem)"
 
     def action(self, node: Alt) -> str:
         """ The action for the alt, if it succeeds. """
