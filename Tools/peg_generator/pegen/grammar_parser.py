@@ -14,7 +14,6 @@ import traceback
 
 from pegen.grammar import (
     Alt,
-    Rhs,
     Args,
     Cut,
     Forced,
@@ -33,6 +32,7 @@ from pegen.grammar import (
     PositiveLookahead,
     Repeat0,
     Repeat1,
+    Rhs,
     Rule,
     TypedName,
     Grammar,
@@ -44,2207 +44,1220 @@ class GeneratedParser(Parser):
 
     def start(self) -> Optional[Grammar]:
         # start: grammar $
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # grammar
-                _item_grammar: Optional[Tuple[Any]]; grammar: Any
-                _item_grammar = self.grammar()
-                if _item_grammar is None: return None
-                grammar, = _item_grammar
-                # $
-                _item__endmarker: Optional[Tuple[Any]]; _endmarker: Any
-                _item__endmarker = self._expect('ENDMARKER')
-                if _item__endmarker is None: return None
-                _endmarker, = _item__endmarker
-                return (grammar),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # grammar
-        _item_grammar: Optional[Tuple[Any]]; grammar: Any
-        _item_grammar = self.grammar()
-        if _item_grammar is None: return None
-        grammar, = _item_grammar
-        # $
-        _item__endmarker: Optional[Tuple[Any]]; _endmarker: Any
-        _item__endmarker = self._expect('ENDMARKER')
-        if _item__endmarker is None: return None
-        _endmarker, = _item__endmarker
-        return (grammar),
-        self._reset(mark)
-        return None
+        def _alt():
+            # grammar
+            def _item_grammar():
+                return self.grammar()
+            grammar: Any; _result_grammar: Optional[Tuple[Any]]
+            _result_grammar = _item_grammar()
+            if not _result_grammar: return None
+            grammar, = _result_grammar
+            # $
+            def _item__endmarker():
+                return self._expect('ENDMARKER')
+            _endmarker: Any; _result__endmarker: Optional[Tuple[Any]]
+            _result__endmarker = _item__endmarker()
+            if not _result__endmarker: return None
+            _endmarker, = _result__endmarker
+            # parse succeeded
+            return (grammar),
+        return self._alt(_alt)
 
     def grammar(self) -> Optional[Grammar]:
         # grammar: meta* rule+
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # meta*
-                _item_metas: Optional[Tuple[Any]]; metas: Any
-                _item_metas = self._loop0_1()
-                metas, = _item_metas
-                # rule+
-                _item_rules: Optional[Tuple[Any]]; rules: Any
-                _item_rules = self._loop1_2()
-                if _item_rules is None: return None
-                rules, = _item_rules
-                return (Grammar (rules , metas)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # meta*
-        _item_metas: Optional[Tuple[Any]]; metas: Any
-        _item_metas = self._loop0_1()
-        metas, = _item_metas
-        # rule+
-        _item_rules: Optional[Tuple[Any]]; rules: Any
-        _item_rules = self._loop1_2()
-        if _item_rules is None: return None
-        rules, = _item_rules
-        return (Grammar (rules , metas)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # meta*
+            def _item_metas():
+                def _atom():
+                    return self.meta()
+                return self._repeat0(_atom)
+            metas: Any; _result_metas: Optional[Tuple[Any]]
+            _result_metas = _item_metas()
+            if not _result_metas: return None
+            metas, = _result_metas
+            # rule+
+            def _item_rules():
+                def _atom():
+                    return self.rule()
+                return self._repeat1(_atom)
+            rules: Any; _result_rules: Optional[Tuple[Any]]
+            _result_rules = _item_rules()
+            if not _result_rules: return None
+            rules, = _result_rules
+            # parse succeeded
+            return (Grammar (rules , metas)),
+        return self._alt(_alt)
 
     def meta(self) -> Optional[Meta]:
         # meta: "@" NAME metavalue? NEWLINE
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # "@"
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("@")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # NAME
-                _item_name: Optional[Tuple[Any]]; name: Any
-                _item_name = self._name()
-                if _item_name is None: return None
-                name, = _item_name
-                # metavalue?
-                _item_val: Optional[Tuple[Any]]; val: Optional[Any]
-                _item_val = self.metavalue()
-                if _item_val is None: val = None
-                else: val, = _item_val
-                # NEWLINE
-                _item__newline: Optional[Tuple[Any]]; _newline: Any
-                _item__newline = self._expect('NEWLINE')
-                if _item__newline is None: return None
-                _newline, = _item__newline
-                return (Meta (name . string , val)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # "@"
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("@")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # NAME
-        _item_name: Optional[Tuple[Any]]; name: Any
-        _item_name = self._name()
-        if _item_name is None: return None
-        name, = _item_name
-        # metavalue?
-        _item_val: Optional[Tuple[Any]]; val: Optional[Any]
-        _item_val = self.metavalue()
-        if _item_val is None: val = None
-        else: val, = _item_val
-        # NEWLINE
-        _item__newline: Optional[Tuple[Any]]; _newline: Any
-        _item__newline = self._expect('NEWLINE')
-        if _item__newline is None: return None
-        _newline, = _item__newline
-        return (Meta (name . string , val)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # "@"
+            def _item__literal():
+                return self._expect("@")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # NAME
+            def _item_name():
+                return self._name()
+            name: Any; _result_name: Optional[Tuple[Any]]
+            _result_name = _item_name()
+            if not _result_name: return None
+            name, = _result_name
+            # metavalue?
+            def _item_val():
+                def _atom():
+                    return self.metavalue()
+                return self._opt(_atom)
+            val: Optional[Any]; _result_val: Optional[Tuple[Any]]
+            _result_val = _item_val()
+            if not _result_val: return None
+            val, = _result_val
+            # NEWLINE
+            def _item__newline():
+                return self._expect('NEWLINE')
+            _newline: Any; _result__newline: Optional[Tuple[Any]]
+            _result__newline = _item__newline()
+            if not _result__newline: return None
+            _newline, = _result__newline
+            # parse succeeded
+            return (Meta (name . string , val)),
+        return self._alt(_alt)
 
     def metavalue(self) -> Optional[Optional [str]]:
         # metavalue: NAME | STRING | <always>
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # NAME
-                _item_val: Optional[Tuple[Any]]; val: Any
-                _item_val = self._name()
-                if _item_val is None: return None
-                val, = _item_val
-                return (val . string),
-            yield _alt
-            def _alt():
-                # STRING
-                _item_val: Optional[Tuple[Any]]; val: Any
-                _item_val = self._string()
-                if _item_val is None: return None
-                val, = _item_val
-                return (literal_eval (val . string)),
-            yield _alt
-            def _alt():
-                return (None),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # NAME
-        _item_val: Optional[Tuple[Any]]; val: Any
-        _item_val = self._name()
-        if _item_val is None: return None
-        val, = _item_val
-        return (val . string),
-        self._reset(mark)
-        # STRING
-        _item_val: Optional[Tuple[Any]]; val: Any
-        _item_val = self._string()
-        if _item_val is None: return None
-        val, = _item_val
-        return (literal_eval (val . string)),
-        self._reset(mark)
-        return (None),
-        self._reset(mark)
-        return None
+        def _alt_1():
+            # NAME
+            def _item_val():
+                return self._name()
+            val: Any; _result_val: Optional[Tuple[Any]]
+            _result_val = _item_val()
+            if not _result_val: return None
+            val, = _result_val
+            # parse succeeded
+            return (val . string),
+        def _alt_2():
+            # STRING
+            def _item_val():
+                return self._string()
+            val: Any; _result_val: Optional[Tuple[Any]]
+            _result_val = _item_val()
+            if not _result_val: return None
+            val, = _result_val
+            # parse succeeded
+            return (literal_eval (val . string)),
+        def _alt_3():
+            # parse succeeded
+            return (None),
+        return self._alts(_alt_1, _alt_2, _alt_3)
 
-    @memoize
     def rule(self) -> Optional[Rule]:
         # rule: typed_name memoflag? ":" maybe_alts? NEWLINE more_alts?
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # typed_name
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self.typed_name()
-                if _item_n is None: return None
-                n, = _item_n
-                # memoflag?
-                _item_m: Optional[Tuple[Any]]; m: Optional[Any]
-                _item_m = self.memoflag()
-                if _item_m is None: m = None
-                else: m, = _item_m
-                # ":"
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect(":")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # maybe_alts?
-                _item_a: Optional[Tuple[Any]]; a: Optional[Any]
-                _item_a = self.maybe_alts()
-                if _item_a is None: a = None
-                else: a, = _item_a
-                # NEWLINE
-                _item__newline: Optional[Tuple[Any]]; _newline: Any
-                _item__newline = self._expect('NEWLINE')
-                if _item__newline is None: return None
-                _newline, = _item__newline
-                # more_alts?
-                _item_aa: Optional[Tuple[Any]]; aa: Optional[Any]
-                _item_aa = self.more_alts()
-                if _item_aa is None: aa = None
-                else: aa, = _item_aa
-                return (Rule (n , Rhs (a + aa) , memo = m)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # typed_name
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self.typed_name()
-        if _item_n is None: return None
-        n, = _item_n
-        # memoflag?
-        _item_m: Optional[Tuple[Any]]; m: Optional[Any]
-        _item_m = self.memoflag()
-        if _item_m is None: m = None
-        else: m, = _item_m
-        # ":"
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect(":")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # maybe_alts?
-        _item_a: Optional[Tuple[Any]]; a: Optional[Any]
-        _item_a = self.maybe_alts()
-        if _item_a is None: a = None
-        else: a, = _item_a
-        # NEWLINE
-        _item__newline: Optional[Tuple[Any]]; _newline: Any
-        _item__newline = self._expect('NEWLINE')
-        if _item__newline is None: return None
-        _newline, = _item__newline
-        # more_alts?
-        _item_aa: Optional[Tuple[Any]]; aa: Optional[Any]
-        _item_aa = self.more_alts()
-        if _item_aa is None: aa = None
-        else: aa, = _item_aa
-        return (Rule (n , Rhs (a + aa) , memo = m)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # typed_name
+            def _item_n():
+                return self.typed_name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # memoflag?
+            def _item_m():
+                def _atom():
+                    return self.memoflag()
+                return self._opt(_atom)
+            m: Optional[Any]; _result_m: Optional[Tuple[Any]]
+            _result_m = _item_m()
+            if not _result_m: return None
+            m, = _result_m
+            # ":"
+            def _item__literal():
+                return self._expect(":")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # maybe_alts?
+            def _item_a():
+                def _atom():
+                    return self.maybe_alts()
+                return self._opt(_atom)
+            a: Optional[Any]; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # NEWLINE
+            def _item__newline():
+                return self._expect('NEWLINE')
+            _newline: Any; _result__newline: Optional[Tuple[Any]]
+            _result__newline = _item__newline()
+            if not _result__newline: return None
+            _newline, = _result__newline
+            # more_alts?
+            def _item_aa():
+                def _atom():
+                    return self.more_alts()
+                return self._opt(_atom)
+            aa: Optional[Any]; _result_aa: Optional[Tuple[Any]]
+            _result_aa = _item_aa()
+            if not _result_aa: return None
+            aa, = _result_aa
+            # parse succeeded
+            return (Rule (n , Rhs (a + aa) , memo = m)),
+        return self._alt(_alt)
 
     def params(self) -> Optional[Params]:
-        # params: !memoflag '(' ','.typed_name+ ',' ')' | '(' ')'
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # !memoflag
-                _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
-                _item__lookahead = self._negative_lookahead(self.memoflag, )
-                if _item__lookahead is None: return None
-                _lookahead, = _item__lookahead
-                # '('
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('(')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # ','.typed_name+
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self._gather_3()
-                if _item_n is None: return None
-                n, = _item_n
-                # ','
-                _item_opt: Optional[Tuple[Any]]; opt: Optional[Any]
-                _item_opt = self._expect(',')
-                if _item_opt is None: opt = None
-                else: opt, = _item_opt
-                # ')'
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect(')')
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return (Params (n)),
-            yield _alt
-            def _alt():
-                # '('
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('(')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # ')'
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect(')')
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return (Params ([])),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # !memoflag
-        _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
-        _item__lookahead = self._negative_lookahead(self.memoflag, )
-        if _item__lookahead is None: return None
-        _lookahead, = _item__lookahead
-        # '('
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('(')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # ','.typed_name+
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self._gather_3()
-        if _item_n is None: return None
-        n, = _item_n
-        # ','
-        _item_opt: Optional[Tuple[Any]]; opt: Optional[Any]
-        _item_opt = self._expect(',')
-        if _item_opt is None: opt = None
-        else: opt, = _item_opt
-        # ')'
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect(')')
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return (Params (n)),
-        self._reset(mark)
-        # '('
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('(')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # ')'
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect(')')
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return (Params ([])),
-        self._reset(mark)
-        return None
+        # params: !memoflag '(' ','.typed_name+ [','] ')' | '(' ')'
+        def _alt_1():
+            # !memoflag
+            def _item__lookahead():
+                def _atom():
+                    return self.memoflag()
+                return self._negative_lookahead(_atom)
+            _lookahead: Any; _result__lookahead: Optional[Tuple[Any]]
+            _result__lookahead = _item__lookahead()
+            if not _result__lookahead: return None
+            _lookahead, = _result__lookahead
+            # '('
+            def _item__literal():
+                return self._expect('(')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # ','.typed_name+
+            def _item_n():
+                def _elem():
+                    return self.typed_name()
+                def _sep():
+                    return self._expect(',')
+                return self._gather(_elem, _sep)
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # [',']
+            def _item_opt():
+                def _atom():
+                    def _alt():
+                        # ','
+                        def _item__literal():
+                            return self._expect(',')
+                        _literal: Any; _result__literal: Optional[Tuple[Any]]
+                        _result__literal = _item__literal()
+                        if not _result__literal: return None
+                        _literal, = _result__literal
+                        # parse succeeded
+                        return (_literal),
+                    return self._alt(_alt)
+                return self._opt(_atom)
+            opt: Optional[Any]; _result_opt: Optional[Tuple[Any]]
+            _result_opt = _item_opt()
+            if not _result_opt: return None
+            opt, = _result_opt
+            # ')'
+            def _item__literal_1():
+                return self._expect(')')
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (Params (n)),
+        def _alt_2():
+            # '('
+            def _item__literal():
+                return self._expect('(')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # ')'
+            def _item__literal_1():
+                return self._expect(')')
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (Params ([])),
+        return self._alts(_alt_1, _alt_2)
 
     def typed_name(self) -> Optional[TypedName]:
         # typed_name: NAME params? annotation?
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # NAME
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self._name()
-                if _item_n is None: return None
-                n, = _item_n
-                # params?
-                _item_p: Optional[Tuple[Any]]; p: Optional[Any]
-                _item_p = self.params()
-                if _item_p is None: p = None
-                else: p, = _item_p
-                # annotation?
-                _item_a: Optional[Tuple[Any]]; a: Optional[Any]
-                _item_a = self.annotation()
-                if _item_a is None: a = None
-                else: a, = _item_a
-                return (TypedName (n . string , p , a)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # NAME
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self._name()
-        if _item_n is None: return None
-        n, = _item_n
-        # params?
-        _item_p: Optional[Tuple[Any]]; p: Optional[Any]
-        _item_p = self.params()
-        if _item_p is None: p = None
-        else: p, = _item_p
-        # annotation?
-        _item_a: Optional[Tuple[Any]]; a: Optional[Any]
-        _item_a = self.annotation()
-        if _item_a is None: a = None
-        else: a, = _item_a
-        return (TypedName (n . string , p , a)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # NAME
+            def _item_n():
+                return self._name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # params?
+            def _item_p():
+                def _atom():
+                    return self.params()
+                return self._opt(_atom)
+            p: Optional[Any]; _result_p: Optional[Tuple[Any]]
+            _result_p = _item_p()
+            if not _result_p: return None
+            p, = _result_p
+            # annotation?
+            def _item_a():
+                def _atom():
+                    return self.annotation()
+                return self._opt(_atom)
+            a: Optional[Any]; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (TypedName (n . string , p , a)),
+        return self._alt(_alt)
 
     def memoflag(self) -> Optional[str]:
         # memoflag: '(' "memo" ')'
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # '('
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('(')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # "memo"
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect("memo")
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                # ')'
-                _item__literal_2: Optional[Tuple[Any]]; _literal_2: Any
-                _item__literal_2 = self._expect(')')
-                if _item__literal_2 is None: return None
-                _literal_2, = _item__literal_2
-                return ("memo"),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # '('
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('(')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # "memo"
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect("memo")
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        # ')'
-        _item__literal_2: Optional[Tuple[Any]]; _literal_2: Any
-        _item__literal_2 = self._expect(')')
-        if _item__literal_2 is None: return None
-        _literal_2, = _item__literal_2
-        return ("memo"),
-        self._reset(mark)
-        return None
+        def _alt():
+            # '('
+            def _item__literal():
+                return self._expect('(')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # "memo"
+            def _item__literal_1():
+                return self._expect("memo")
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # ')'
+            def _item__literal_2():
+                return self._expect(')')
+            _literal_2: Any; _result__literal_2: Optional[Tuple[Any]]
+            _result__literal_2 = _item__literal_2()
+            if not _result__literal_2: return None
+            _literal_2, = _result__literal_2
+            # parse succeeded
+            return ("memo"),
+        return self._alt(_alt)
 
     def alts(self) -> Optional[Rhs]:
         # alts: "|".alt+
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # "|".alt+
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self._gather_5()
-                if _item_a is None: return None
-                a, = _item_a
-                return (Rhs (a)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # "|".alt+
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self._gather_5()
-        if _item_a is None: return None
-        a, = _item_a
-        return (Rhs (a)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # "|".alt+
+            def _item_a():
+                def _elem():
+                    return self.alt()
+                def _sep():
+                    return self._expect("|")
+                return self._gather(_elem, _sep)
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (Rhs (a)),
+        return self._alt(_alt)
 
     @memoize
     def maybe_alts(self) -> Optional[Rhs]:
         # maybe_alts: !NEWLINE "|".alt+ | <always>
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # !NEWLINE
-                _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
-                _item__lookahead = self._negative_lookahead(self._expect, 'NEWLINE')
-                if _item__lookahead is None: return None
-                _lookahead, = _item__lookahead
-                # "|".alt+
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self._gather_7()
-                if _item_a is None: return None
-                a, = _item_a
-                return (Rhs (a)),
-            yield _alt
-            def _alt():
-                return (Rhs ()),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # !NEWLINE
-        _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
-        _item__lookahead = self._negative_lookahead(self._expect, 'NEWLINE')
-        if _item__lookahead is None: return None
-        _lookahead, = _item__lookahead
-        # "|".alt+
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self._gather_7()
-        if _item_a is None: return None
-        a, = _item_a
-        return (Rhs (a)),
-        self._reset(mark)
-        return (Rhs ()),
-        self._reset(mark)
-        return None
+        def _alt_1():
+            # !NEWLINE
+            def _item__lookahead():
+                def _atom():
+                    return self._expect('NEWLINE')
+                return self._negative_lookahead(_atom)
+            _lookahead: Any; _result__lookahead: Optional[Tuple[Any]]
+            _result__lookahead = _item__lookahead()
+            if not _result__lookahead: return None
+            _lookahead, = _result__lookahead
+            # "|".alt+
+            def _item_a():
+                def _elem():
+                    return self.alt()
+                def _sep():
+                    return self._expect("|")
+                return self._gather(_elem, _sep)
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (Rhs (a)),
+        def _alt_2():
+            # parse succeeded
+            return (Rhs ([])),
+        return self._alts(_alt_1, _alt_2)
 
     @memoize
     def more_alts(self) -> Optional[Rhs]:
         # more_alts: INDENT (("|" alts NEWLINE))+ DEDENT | <always>
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # INDENT
-                _item__indent: Optional[Tuple[Any]]; _indent: Any
-                _item__indent = self._expect('INDENT')
-                if _item__indent is None: return None
-                _indent, = _item__indent
-                # (("|" alts NEWLINE))+
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self._loop1_9()
-                if _item_a is None: return None
-                a, = _item_a
-                # DEDENT
-                _item__dedent: Optional[Tuple[Any]]; _dedent: Any
-                _item__dedent = self._expect('DEDENT')
-                if _item__dedent is None: return None
-                _dedent, = _item__dedent
-                return (Rhs (chain (* a))),
-            yield _alt
-            def _alt():
-                return (Rhs ()),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # INDENT
-        _item__indent: Optional[Tuple[Any]]; _indent: Any
-        _item__indent = self._expect('INDENT')
-        if _item__indent is None: return None
-        _indent, = _item__indent
-        # (("|" alts NEWLINE))+
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self._loop1_9()
-        if _item_a is None: return None
-        a, = _item_a
-        # DEDENT
-        _item__dedent: Optional[Tuple[Any]]; _dedent: Any
-        _item__dedent = self._expect('DEDENT')
-        if _item__dedent is None: return None
-        _dedent, = _item__dedent
-        return (Rhs (chain (* a))),
-        self._reset(mark)
-        return (Rhs ()),
-        self._reset(mark)
-        return None
+        def _alt_1():
+            # INDENT
+            def _item__indent():
+                return self._expect('INDENT')
+            _indent: Any; _result__indent: Optional[Tuple[Any]]
+            _result__indent = _item__indent()
+            if not _result__indent: return None
+            _indent, = _result__indent
+            # (("|" alts NEWLINE))+
+            def _item_a():
+                def _atom():
+                    def _alt():
+                        # "|"
+                        def _item__literal():
+                            return self._expect("|")
+                        _literal: Any; _result__literal: Optional[Tuple[Any]]
+                        _result__literal = _item__literal()
+                        if not _result__literal: return None
+                        _literal, = _result__literal
+                        # alts
+                        def _item_b():
+                            return self.alts()
+                        b: Any; _result_b: Optional[Tuple[Any]]
+                        _result_b = _item_b()
+                        if not _result_b: return None
+                        b, = _result_b
+                        # NEWLINE
+                        def _item__newline():
+                            return self._expect('NEWLINE')
+                        _newline: Any; _result__newline: Optional[Tuple[Any]]
+                        _result__newline = _item__newline()
+                        if not _result__newline: return None
+                        _newline, = _result__newline
+                        # parse succeeded
+                        return (b),
+                    return self._alt(_alt)
+                return self._repeat1(_atom)
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # DEDENT
+            def _item__dedent():
+                return self._expect('DEDENT')
+            _dedent: Any; _result__dedent: Optional[Tuple[Any]]
+            _result__dedent = _item__dedent()
+            if not _result__dedent: return None
+            _dedent, = _result__dedent
+            # parse succeeded
+            return (Rhs (chain (* a))),
+        def _alt_2():
+            # parse succeeded
+            return (Rhs ()),
+        return self._alts(_alt_1, _alt_2)
 
     def alt(self) -> Optional[Alt]:
-        # alt: items opt_endmarker action?
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # items
-                _item_i: Optional[Tuple[Any]]; i: Any
-                _item_i = self.items()
-                if _item_i is None: return None
-                i, = _item_i
-                # opt_endmarker
-                _item_e: Optional[Tuple[Any]]; e: Any
-                _item_e = self.opt_endmarker()
-                if _item_e is None: return None
-                e, = _item_e
-                # action?
-                _item_a: Optional[Tuple[Any]]; a: Optional[Any]
-                _item_a = self.action()
-                if _item_a is None: a = None
-                else: a, = _item_a
-                return (Alt (i + e , action = a)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # items
-        _item_i: Optional[Tuple[Any]]; i: Any
-        _item_i = self.items()
-        if _item_i is None: return None
-        i, = _item_i
-        # opt_endmarker
-        _item_e: Optional[Tuple[Any]]; e: Any
-        _item_e = self.opt_endmarker()
-        if _item_e is None: return None
-        e, = _item_e
-        # action?
-        _item_a: Optional[Tuple[Any]]; a: Optional[Any]
-        _item_a = self.action()
-        if _item_a is None: a = None
-        else: a, = _item_a
-        return (Alt (i + e , action = a)),
-        self._reset(mark)
-        return None
+        # alt: items endmarker action?
+        def _alt():
+            # items
+            def _item_i():
+                return self.items()
+            i: Any; _result_i: Optional[Tuple[Any]]
+            _result_i = _item_i()
+            if not _result_i: return None
+            i, = _result_i
+            # endmarker
+            def _item_e():
+                return self.endmarker()
+            e: Any; _result_e: Optional[Tuple[Any]]
+            _result_e = _item_e()
+            if not _result_e: return None
+            e, = _result_e
+            # action?
+            def _item_a():
+                def _atom():
+                    return self.action()
+                return self._opt(_atom)
+            a: Optional[Any]; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (Alt (i + e , action = a)),
+        return self._alt(_alt)
 
     def items(self) -> Optional[NamedItems]:
         # items: named_item*
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # named_item*
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self._loop0_10()
-                n, = _item_n
-                return (NamedItems (n)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # named_item*
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self._loop0_10()
-        n, = _item_n
-        return (NamedItems (n)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # named_item*
+            def _item_n():
+                def _atom():
+                    return self.named_item()
+                return self._repeat0(_atom)
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # parse succeeded
+            return (NamedItems (n)),
+        return self._alt(_alt)
 
     @memoize
     def named_item(self) -> Optional[NamedItem]:
         # named_item: typed_name '=' ~ item | item | forced_atom | lookahead | cut
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # typed_name
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self.typed_name()
-                if _item_n is None: return None
-                n, = _item_n
-                # '='
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('=')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # ~
-                # item
-                _item_item: Optional[Tuple[Any]]; item: Any
-                _item_item = self.item()
-                if _item_item is None: return cut_sentinel
-                item, = _item_item
-                return (NamedItem (n , item)),
-            yield _alt
-            def _alt():
-                # item
-                _item_it: Optional[Tuple[Any]]; it: Any
-                _item_it = self.item()
-                if _item_it is None: return None
-                it, = _item_it
-                return (NamedItem (None , it)),
-            yield _alt
-            def _alt():
-                # forced_atom
-                _item_forced: Optional[Tuple[Any]]; forced: Any
-                _item_forced = self.forced_atom()
-                if _item_forced is None: return None
-                forced, = _item_forced
-                return (NamedItem (None , forced)),
-            yield _alt
-            def _alt():
-                # lookahead
-                _item_it: Optional[Tuple[Any]]; it: Any
-                _item_it = self.lookahead()
-                if _item_it is None: return None
-                it, = _item_it
-                return (NamedItem (None , it)),
-            yield _alt
-            def _alt():
-                # cut
-                _item_cut: Optional[Tuple[Any]]; cut: Any
-                _item_cut = self.cut()
-                if _item_cut is None: return None
-                cut, = _item_cut
-                return (NamedItem (None , cut)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # typed_name
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self.typed_name()
-        if _item_n is None: return None
-        n, = _item_n
-        # '='
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('=')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # ~
-        # item
-        _item_item: Optional[Tuple[Any]]; item: Any
-        _item_item = self.item()
-        if _item_item is None: return cut_sentinel
-        item, = _item_item
-        return (NamedItem (n , item)),
-        self._reset(mark)
-        # item
-        _item_it: Optional[Tuple[Any]]; it: Any
-        _item_it = self.item()
-        if _item_it is None: return None
-        it, = _item_it
-        return (NamedItem (None , it)),
-        self._reset(mark)
-        # forced_atom
-        _item_forced: Optional[Tuple[Any]]; forced: Any
-        _item_forced = self.forced_atom()
-        if _item_forced is None: return None
-        forced, = _item_forced
-        return (NamedItem (None , forced)),
-        self._reset(mark)
-        # lookahead
-        _item_it: Optional[Tuple[Any]]; it: Any
-        _item_it = self.lookahead()
-        if _item_it is None: return None
-        it, = _item_it
-        return (NamedItem (None , it)),
-        self._reset(mark)
-        # cut
-        _item_cut: Optional[Tuple[Any]]; cut: Any
-        _item_cut = self.cut()
-        if _item_cut is None: return None
-        cut, = _item_cut
-        return (NamedItem (None , cut)),
-        self._reset(mark)
-        return None
+        def _alt_1():
+            # typed_name
+            def _item_n():
+                return self.typed_name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # '='
+            def _item__literal():
+                return self._expect('=')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # ~
+            # item
+            def _item_item():
+                return self.item()
+            item: Any; _result_item: Optional[Tuple[Any]]
+            _result_item = _item_item()
+            if not _result_item: return cut_sentinel
+            item, = _result_item
+            # parse succeeded
+            return (NamedItem (n , item)),
+        def _alt_2():
+            # item
+            def _item_it():
+                return self.item()
+            it: Any; _result_it: Optional[Tuple[Any]]
+            _result_it = _item_it()
+            if not _result_it: return None
+            it, = _result_it
+            # parse succeeded
+            return (NamedItem (None , it)),
+        def _alt_3():
+            # forced_atom
+            def _item_forced():
+                return self.forced_atom()
+            forced: Any; _result_forced: Optional[Tuple[Any]]
+            _result_forced = _item_forced()
+            if not _result_forced: return None
+            forced, = _result_forced
+            # parse succeeded
+            return (NamedItem (None , forced)),
+        def _alt_4():
+            # lookahead
+            def _item_it():
+                return self.lookahead()
+            it: Any; _result_it: Optional[Tuple[Any]]
+            _result_it = _item_it()
+            if not _result_it: return None
+            it, = _result_it
+            # parse succeeded
+            return (NamedItem (None , it)),
+        def _alt_5():
+            # cut
+            def _item_cut():
+                return self.cut()
+            cut: Any; _result_cut: Optional[Tuple[Any]]
+            _result_cut = _item_cut()
+            if not _result_cut: return None
+            cut, = _result_cut
+            # parse succeeded
+            return (NamedItem (None , cut)),
+        return self._alts(_alt_1, _alt_2, _alt_3, _alt_4, _alt_5)
 
     def forced_atom(self) -> Optional[Forced]:
         # forced_atom: '&' '&' ~ atom
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # '&'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('&')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # '&'
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect('&')
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                # ~
-                # atom
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.atom()
-                if _item_a is None: return cut_sentinel
-                a, = _item_a
-                return (Forced (a)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # '&'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('&')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # '&'
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect('&')
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        # ~
-        # atom
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.atom()
-        if _item_a is None: return cut_sentinel
-        a, = _item_a
-        return (Forced (a)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # '&'
+            def _item__literal():
+                return self._expect('&')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # '&'
+            def _item__literal_1():
+                return self._expect('&')
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # ~
+            # atom
+            def _item_a():
+                return self.atom()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return cut_sentinel
+            a, = _result_a
+            # parse succeeded
+            return (Forced (a)),
+        return self._alt(_alt)
 
     def lookahead(self) -> Optional[Lookahead]:
         # lookahead: '&' ~ atom | '!' ~ atom
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # '&'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('&')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # ~
-                # atom
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.atom()
-                if _item_a is None: return cut_sentinel
-                a, = _item_a
-                return (PositiveLookahead (a)),
-            yield _alt
-            def _alt():
-                # '!'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('!')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # ~
-                # atom
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.atom()
-                if _item_a is None: return cut_sentinel
-                a, = _item_a
-                return (NegativeLookahead (a)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # '&'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('&')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # ~
-        # atom
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.atom()
-        if _item_a is None: return cut_sentinel
-        a, = _item_a
-        return (PositiveLookahead (a)),
-        self._reset(mark)
-        # '!'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('!')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # ~
-        # atom
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.atom()
-        if _item_a is None: return cut_sentinel
-        a, = _item_a
-        return (NegativeLookahead (a)),
-        self._reset(mark)
-        return None
+        def _alt_1():
+            # '&'
+            def _item__literal():
+                return self._expect('&')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # ~
+            # atom
+            def _item_a():
+                return self.atom()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return cut_sentinel
+            a, = _result_a
+            # parse succeeded
+            return (PositiveLookahead (a)),
+        def _alt_2():
+            # '!'
+            def _item__literal():
+                return self._expect('!')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # ~
+            # atom
+            def _item_a():
+                return self.atom()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return cut_sentinel
+            a, = _result_a
+            # parse succeeded
+            return (NegativeLookahead (a)),
+        return self._alts(_alt_1, _alt_2)
 
     def cut(self) -> Optional[Cut]:
         # cut: '~'
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # '~'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('~')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                return (Cut ()),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # '~'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('~')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        return (Cut ()),
-        self._reset(mark)
-        return None
+        def _alt():
+            # '~'
+            def _item__literal():
+                return self._expect('~')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # parse succeeded
+            return (Cut ()),
+        return self._alt(_alt)
 
     @memoize
     def item(self) -> Optional[Item]:
         # item: '[' ~ alts ']' | atom '?' | atom '*' | atom '+' | atom '.' atom '+' | atom
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # '['
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('[')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # ~
-                # alts
-                _item_alts: Optional[Tuple[Any]]; alts: Any
-                _item_alts = self.alts()
-                if _item_alts is None: return cut_sentinel
-                alts, = _item_alts
-                # ']'
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect(']')
-                if _item__literal_1 is None: return cut_sentinel
-                _literal_1, = _item__literal_1
-                return (Opt (alts)),
-            yield _alt
-            def _alt():
-                # atom
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.atom()
-                if _item_a is None: return None
-                a, = _item_a
-                # '?'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('?')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                return (Opt (a)),
-            yield _alt
-            def _alt():
-                # atom
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.atom()
-                if _item_a is None: return None
-                a, = _item_a
-                # '*'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('*')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                return (Repeat0 (a)),
-            yield _alt
-            def _alt():
-                # atom
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.atom()
-                if _item_a is None: return None
-                a, = _item_a
-                # '+'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('+')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                return (Repeat1 (a)),
-            yield _alt
-            def _alt():
-                # atom
-                _item_sep: Optional[Tuple[Any]]; sep: Any
-                _item_sep = self.atom()
-                if _item_sep is None: return None
-                sep, = _item_sep
-                # '.'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('.')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # atom
-                _item_node: Optional[Tuple[Any]]; node: Any
-                _item_node = self.atom()
-                if _item_node is None: return None
-                node, = _item_node
-                # '+'
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect('+')
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return (Gather (sep , node)),
-            yield _alt
-            def _alt():
-                # atom
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.atom()
-                if _item_a is None: return None
-                a, = _item_a
-                return (a),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # '['
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('[')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # ~
-        # alts
-        _item_alts: Optional[Tuple[Any]]; alts: Any
-        _item_alts = self.alts()
-        if _item_alts is None: return cut_sentinel
-        alts, = _item_alts
-        # ']'
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect(']')
-        if _item__literal_1 is None: return cut_sentinel
-        _literal_1, = _item__literal_1
-        return (Opt (alts)),
-        self._reset(mark)
-        # atom
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.atom()
-        if _item_a is None: return None
-        a, = _item_a
-        # '?'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('?')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        return (Opt (a)),
-        self._reset(mark)
-        # atom
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.atom()
-        if _item_a is None: return None
-        a, = _item_a
-        # '*'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('*')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        return (Repeat0 (a)),
-        self._reset(mark)
-        # atom
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.atom()
-        if _item_a is None: return None
-        a, = _item_a
-        # '+'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('+')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        return (Repeat1 (a)),
-        self._reset(mark)
-        # atom
-        _item_sep: Optional[Tuple[Any]]; sep: Any
-        _item_sep = self.atom()
-        if _item_sep is None: return None
-        sep, = _item_sep
-        # '.'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('.')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # atom
-        _item_node: Optional[Tuple[Any]]; node: Any
-        _item_node = self.atom()
-        if _item_node is None: return None
-        node, = _item_node
-        # '+'
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect('+')
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return (Gather (sep , node)),
-        self._reset(mark)
-        # atom
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.atom()
-        if _item_a is None: return None
-        a, = _item_a
-        return (a),
-        self._reset(mark)
-        return None
+        def _alt_1():
+            # '['
+            def _item__literal():
+                return self._expect('[')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # ~
+            # alts
+            def _item_alts():
+                return self.alts()
+            alts: Any; _result_alts: Optional[Tuple[Any]]
+            _result_alts = _item_alts()
+            if not _result_alts: return cut_sentinel
+            alts, = _result_alts
+            # ']'
+            def _item__literal_1():
+                return self._expect(']')
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return cut_sentinel
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (Opt (alts)),
+        def _alt_2():
+            # atom
+            def _item_a():
+                return self.atom()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # '?'
+            def _item__literal():
+                return self._expect('?')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # parse succeeded
+            return (Opt (a)),
+        def _alt_3():
+            # atom
+            def _item_a():
+                return self.atom()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # '*'
+            def _item__literal():
+                return self._expect('*')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # parse succeeded
+            return (Repeat0 (a)),
+        def _alt_4():
+            # atom
+            def _item_a():
+                return self.atom()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # '+'
+            def _item__literal():
+                return self._expect('+')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # parse succeeded
+            return (Repeat1 (a)),
+        def _alt_5():
+            # atom
+            def _item_sep():
+                return self.atom()
+            sep: Any; _result_sep: Optional[Tuple[Any]]
+            _result_sep = _item_sep()
+            if not _result_sep: return None
+            sep, = _result_sep
+            # '.'
+            def _item__literal():
+                return self._expect('.')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # atom
+            def _item_node():
+                return self.atom()
+            node: Any; _result_node: Optional[Tuple[Any]]
+            _result_node = _item_node()
+            if not _result_node: return None
+            node, = _result_node
+            # '+'
+            def _item__literal_1():
+                return self._expect('+')
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (Gather (sep , node)),
+        def _alt_6():
+            # atom
+            def _item_a():
+                return self.atom()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (a),
+        return self._alts(_alt_1, _alt_2, _alt_3, _alt_4, _alt_5, _alt_6)
 
-    def opt_endmarker(self) -> Optional[NamedItems]:
-        # opt_endmarker: '$' | <always>
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # '$'
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('$')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                return (NamedItems ([NamedItem (None , NameLeaf ('ENDMARKER'))])),
-            yield _alt
-            def _alt():
-                return (NamedItems ()),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # '$'
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('$')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        return (NamedItems ([NamedItem (None , NameLeaf ('ENDMARKER'))])),
-        self._reset(mark)
-        return (NamedItems ()),
-        self._reset(mark)
-        return None
+    def endmarker(self) -> Optional[NamedItems]:
+        # endmarker: '$' | <always>
+        def _alt_1():
+            # '$'
+            def _item__literal():
+                return self._expect('$')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # parse succeeded
+            return (NamedItems ([NamedItem (None , NameLeaf ('ENDMARKER'))])),
+        def _alt_2():
+            # parse succeeded
+            return (NamedItems ()),
+        return self._alts(_alt_1, _alt_2)
 
     @memoize
     def atom(self) -> Optional[Plain]:
         # atom: '(' ~ alts ')' | NAME arguments? | STRING
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # '('
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('(')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # ~
-                # alts
-                _item_alts: Optional[Tuple[Any]]; alts: Any
-                _item_alts = self.alts()
-                if _item_alts is None: return cut_sentinel
-                alts, = _item_alts
-                # ')'
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect(')')
-                if _item__literal_1 is None: return cut_sentinel
-                _literal_1, = _item__literal_1
-                return (Group ((alts))),
-            yield _alt
-            def _alt():
-                # NAME
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self._name()
-                if _item_n is None: return None
-                n, = _item_n
-                # arguments?
-                _item_a: Optional[Tuple[Any]]; a: Optional[Any]
-                _item_a = self.arguments()
-                if _item_a is None: a = None
-                else: a, = _item_a
-                return (NameLeaf (n . string , a)),
-            yield _alt
-            def _alt():
-                # STRING
-                _item_s: Optional[Tuple[Any]]; s: Any
-                _item_s = self._string()
-                if _item_s is None: return None
-                s, = _item_s
-                return (StringLeaf (s . string)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # '('
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('(')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # ~
-        # alts
-        _item_alts: Optional[Tuple[Any]]; alts: Any
-        _item_alts = self.alts()
-        if _item_alts is None: return cut_sentinel
-        alts, = _item_alts
-        # ')'
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect(')')
-        if _item__literal_1 is None: return cut_sentinel
-        _literal_1, = _item__literal_1
-        return (Group ((alts))),
-        self._reset(mark)
-        # NAME
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self._name()
-        if _item_n is None: return None
-        n, = _item_n
-        # arguments?
-        _item_a: Optional[Tuple[Any]]; a: Optional[Any]
-        _item_a = self.arguments()
-        if _item_a is None: a = None
-        else: a, = _item_a
-        return (NameLeaf (n . string , a)),
-        self._reset(mark)
-        # STRING
-        _item_s: Optional[Tuple[Any]]; s: Any
-        _item_s = self._string()
-        if _item_s is None: return None
-        s, = _item_s
-        return (StringLeaf (s . string)),
-        self._reset(mark)
-        return None
+        def _alt_1():
+            # '('
+            def _item__literal():
+                return self._expect('(')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # ~
+            # alts
+            def _item_alts():
+                return self.alts()
+            alts: Any; _result_alts: Optional[Tuple[Any]]
+            _result_alts = _item_alts()
+            if not _result_alts: return cut_sentinel
+            alts, = _result_alts
+            # ')'
+            def _item__literal_1():
+                return self._expect(')')
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return cut_sentinel
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (Group ((alts))),
+        def _alt_2():
+            # NAME
+            def _item_n():
+                return self._name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # arguments?
+            def _item_a():
+                def _atom():
+                    return self.arguments()
+                return self._opt(_atom)
+            a: Optional[Any]; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (NameLeaf (n . string , a)),
+        def _alt_3():
+            # STRING
+            def _item_s():
+                return self._string()
+            s: Any; _result_s: Optional[Tuple[Any]]
+            _result_s = _item_s()
+            if not _result_s: return None
+            s, = _result_s
+            # parse succeeded
+            return (StringLeaf (s . string)),
+        return self._alts(_alt_1, _alt_2, _alt_3)
 
     def action(self) -> Optional[str]:
         # action: "{" target_atoms "}"
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # "{"
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("{")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # target_atoms
-                _item_t: Optional[Tuple[Any]]; t: Any
-                _item_t = self.target_atoms()
-                if _item_t is None: return None
-                t, = _item_t
-                # "}"
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect("}")
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return (t),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # "{"
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("{")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # target_atoms
-        _item_t: Optional[Tuple[Any]]; t: Any
-        _item_t = self.target_atoms()
-        if _item_t is None: return None
-        t, = _item_t
-        # "}"
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect("}")
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return (t),
-        self._reset(mark)
-        return None
+        def _alt():
+            # "{"
+            def _item__literal():
+                return self._expect("{")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # target_atoms
+            def _item_t():
+                return self.target_atoms()
+            t: Any; _result_t: Optional[Tuple[Any]]
+            _result_t = _item_t()
+            if not _result_t: return None
+            t, = _result_t
+            # "}"
+            def _item__literal_1():
+                return self._expect("}")
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (t),
+        return self._alt(_alt)
 
     def annotation(self) -> Optional[str]:
         # annotation: "[" target_atoms "]"
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # "["
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("[")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # target_atoms
-                _item_t: Optional[Tuple[Any]]; t: Any
-                _item_t = self.target_atoms()
-                if _item_t is None: return None
-                t, = _item_t
-                # "]"
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect("]")
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return (t),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # "["
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("[")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # target_atoms
-        _item_t: Optional[Tuple[Any]]; t: Any
-        _item_t = self.target_atoms()
-        if _item_t is None: return None
-        t, = _item_t
-        # "]"
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect("]")
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return (t),
-        self._reset(mark)
-        return None
+        def _alt():
+            # "["
+            def _item__literal():
+                return self._expect("[")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # target_atoms
+            def _item_t():
+                return self.target_atoms()
+            t: Any; _result_t: Optional[Tuple[Any]]
+            _result_t = _item_t()
+            if not _result_t: return None
+            t, = _result_t
+            # "]"
+            def _item__literal_1():
+                return self._expect("]")
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (t),
+        return self._alt(_alt)
 
     def arguments(self) -> Optional[Args]:
-        # arguments: '(' arg "," ",".arg+ "," ')' | '(' arg "," ')' | '(' ')'
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # '('
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('(')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # arg
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.arg()
-                if _item_a is None: return None
-                a, = _item_a
-                # ","
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect(",")
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                # ",".arg+
-                _item_b: Optional[Tuple[Any]]; b: Any
-                _item_b = self._gather_11()
-                if _item_b is None: return None
-                b, = _item_b
-                # ","
-                _item_c: Optional[Tuple[Any]]; c: Optional[Any]
-                _item_c = self._expect(",")
-                if _item_c is None: c = None
-                else: c, = _item_c
-                # ')'
-                _item__literal_2: Optional[Tuple[Any]]; _literal_2: Any
-                _item__literal_2 = self._expect(')')
-                if _item__literal_2 is None: return None
-                _literal_2, = _item__literal_2
-                return (Args ([a] + b , comma = c and c . string)),
-            yield _alt
-            def _alt():
-                # '('
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('(')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # arg
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.arg()
-                if _item_a is None: return None
-                a, = _item_a
-                # ","
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect(",")
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                # ')'
-                _item__literal_2: Optional[Tuple[Any]]; _literal_2: Any
-                _item__literal_2 = self._expect(')')
-                if _item__literal_2 is None: return None
-                _literal_2, = _item__literal_2
-                return (Args ([a] , comma = ",")),
-            yield _alt
-            def _alt():
-                # '('
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect('(')
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # ')'
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect(')')
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return (Args ()),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # '('
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('(')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # arg
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.arg()
-        if _item_a is None: return None
-        a, = _item_a
-        # ","
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect(",")
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        # ",".arg+
-        _item_b: Optional[Tuple[Any]]; b: Any
-        _item_b = self._gather_11()
-        if _item_b is None: return None
-        b, = _item_b
-        # ","
-        _item_c: Optional[Tuple[Any]]; c: Optional[Any]
-        _item_c = self._expect(",")
-        if _item_c is None: c = None
-        else: c, = _item_c
-        # ')'
-        _item__literal_2: Optional[Tuple[Any]]; _literal_2: Any
-        _item__literal_2 = self._expect(')')
-        if _item__literal_2 is None: return None
-        _literal_2, = _item__literal_2
-        return (Args ([a] + b , comma = c and c . string)),
-        self._reset(mark)
-        # '('
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('(')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # arg
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.arg()
-        if _item_a is None: return None
-        a, = _item_a
-        # ","
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect(",")
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        # ')'
-        _item__literal_2: Optional[Tuple[Any]]; _literal_2: Any
-        _item__literal_2 = self._expect(')')
-        if _item__literal_2 is None: return None
-        _literal_2, = _item__literal_2
-        return (Args ([a] , comma = ",")),
-        self._reset(mark)
-        # '('
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect('(')
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # ')'
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect(')')
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return (Args ()),
-        self._reset(mark)
-        return None
+        # arguments: '(' arg "," ",".arg+ [","] ')' | '(' arg "," ')' | '(' ')'
+        def _alt_1():
+            # '('
+            def _item__literal():
+                return self._expect('(')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # arg
+            def _item_a():
+                return self.arg()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # ","
+            def _item__literal_1():
+                return self._expect(",")
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # ",".arg+
+            def _item_b():
+                def _elem():
+                    return self.arg()
+                def _sep():
+                    return self._expect(",")
+                return self._gather(_elem, _sep)
+            b: Any; _result_b: Optional[Tuple[Any]]
+            _result_b = _item_b()
+            if not _result_b: return None
+            b, = _result_b
+            # [","]
+            def _item_c():
+                def _atom():
+                    def _alt():
+                        # ","
+                        def _item__literal():
+                            return self._expect(",")
+                        _literal: Any; _result__literal: Optional[Tuple[Any]]
+                        _result__literal = _item__literal()
+                        if not _result__literal: return None
+                        _literal, = _result__literal
+                        # parse succeeded
+                        return (_literal),
+                    return self._alt(_alt)
+                return self._opt(_atom)
+            c: Optional[Any]; _result_c: Optional[Tuple[Any]]
+            _result_c = _item_c()
+            if not _result_c: return None
+            c, = _result_c
+            # ')'
+            def _item__literal_2():
+                return self._expect(')')
+            _literal_2: Any; _result__literal_2: Optional[Tuple[Any]]
+            _result__literal_2 = _item__literal_2()
+            if not _result__literal_2: return None
+            _literal_2, = _result__literal_2
+            # parse succeeded
+            return (Args ([a] + b , comma = c and c . string)),
+        def _alt_2():
+            # '('
+            def _item__literal():
+                return self._expect('(')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # arg
+            def _item_a():
+                return self.arg()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # ","
+            def _item__literal_1():
+                return self._expect(",")
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # ')'
+            def _item__literal_2():
+                return self._expect(')')
+            _literal_2: Any; _result__literal_2: Optional[Tuple[Any]]
+            _result__literal_2 = _item__literal_2()
+            if not _result__literal_2: return None
+            _literal_2, = _result__literal_2
+            # parse succeeded
+            return (Args ([a] , comma = ",")),
+        def _alt_3():
+            # '('
+            def _item__literal():
+                return self._expect('(')
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # ')'
+            def _item__literal_1():
+                return self._expect(')')
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (Args ()),
+        return self._alts(_alt_1, _alt_2, _alt_3)
 
     def arg(self) -> Optional[Any]:
         # arg: arg_atom+
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # arg_atom+
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self._loop1_13()
-                if _item_a is None: return None
-                a, = _item_a
-                return (" " . join (a)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # arg_atom+
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self._loop1_13()
-        if _item_a is None: return None
-        a, = _item_a
-        return (" " . join (a)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # arg_atom+
+            def _item_a():
+                def _atom():
+                    return self.arg_atom()
+                return self._repeat1(_atom)
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (" " . join (a)),
+        return self._alt(_alt)
 
     def arg_atom(self) -> Optional[Any]:
         # arg_atom: !"," target_atom
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # !","
-                _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
-                _item__lookahead = self._negative_lookahead(self._expect, ",")
-                if _item__lookahead is None: return None
-                _lookahead, = _item__lookahead
-                # target_atom
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self.target_atom()
-                if _item_a is None: return None
-                a, = _item_a
-                return (a),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # !","
-        _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
-        _item__lookahead = self._negative_lookahead(self._expect, ",")
-        if _item__lookahead is None: return None
-        _lookahead, = _item__lookahead
-        # target_atom
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self.target_atom()
-        if _item_a is None: return None
-        a, = _item_a
-        return (a),
-        self._reset(mark)
-        return None
+        def _alt():
+            # !","
+            def _item__lookahead():
+                def _atom():
+                    return self._expect(",")
+                return self._negative_lookahead(_atom)
+            _lookahead: Any; _result__lookahead: Optional[Tuple[Any]]
+            _result__lookahead = _item__lookahead()
+            if not _result__lookahead: return None
+            _lookahead, = _result__lookahead
+            # target_atom
+            def _item_a():
+                return self.target_atom()
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (a),
+        return self._alt(_alt)
 
     def target_atoms(self) -> Optional[str]:
         # target_atoms: target_atom+
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # target_atom+
-                _item_a: Optional[Tuple[Any]]; a: Any
-                _item_a = self._loop1_14()
-                if _item_a is None: return None
-                a, = _item_a
-                return (" " . join (a)),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # target_atom+
-        _item_a: Optional[Tuple[Any]]; a: Any
-        _item_a = self._loop1_14()
-        if _item_a is None: return None
-        a, = _item_a
-        return (" " . join (a)),
-        self._reset(mark)
-        return None
+        def _alt():
+            # target_atom+
+            def _item_a():
+                def _atom():
+                    return self.target_atom()
+                return self._repeat1(_atom)
+            a: Any; _result_a: Optional[Tuple[Any]]
+            _result_a = _item_a()
+            if not _result_a: return None
+            a, = _result_a
+            # parse succeeded
+            return (" " . join (a)),
+        return self._alt(_alt)
 
     @memoize
     def target_atom(self) -> Optional[str]:
         # target_atom: "(" target_atoms? ")" | "{" target_atoms? "}" | "[" target_atoms? "]" | NAME "*" | NAME | NUMBER | STRING | "?" | ":" | !")" !"}" !"]" OP
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # "("
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("(")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # target_atoms?
-                _item_atoms: Optional[Tuple[Any]]; atoms: Optional[Any]
-                _item_atoms = self.target_atoms()
-                if _item_atoms is None: atoms = None
-                else: atoms, = _item_atoms
-                # ")"
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect(")")
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return ("(" + (atoms or "") + ")"),
-            yield _alt
-            def _alt():
-                # "{"
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("{")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # target_atoms?
-                _item_atoms: Optional[Tuple[Any]]; atoms: Optional[Any]
-                _item_atoms = self.target_atoms()
-                if _item_atoms is None: atoms = None
-                else: atoms, = _item_atoms
-                # "}"
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect("}")
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return ("{" + (atoms or "") + "}"),
-            yield _alt
-            def _alt():
-                # "["
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("[")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # target_atoms?
-                _item_atoms: Optional[Tuple[Any]]; atoms: Optional[Any]
-                _item_atoms = self.target_atoms()
-                if _item_atoms is None: atoms = None
-                else: atoms, = _item_atoms
-                # "]"
-                _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-                _item__literal_1 = self._expect("]")
-                if _item__literal_1 is None: return None
-                _literal_1, = _item__literal_1
-                return ("[" + (atoms or "") + "]"),
-            yield _alt
-            def _alt():
-                # NAME
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self._name()
-                if _item_n is None: return None
-                n, = _item_n
-                # "*"
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("*")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                return (n . string + "*"),
-            yield _alt
-            def _alt():
-                # NAME
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self._name()
-                if _item_n is None: return None
-                n, = _item_n
-                return (n . string),
-            yield _alt
-            def _alt():
-                # NUMBER
-                _item_n: Optional[Tuple[Any]]; n: Any
-                _item_n = self._number()
-                if _item_n is None: return None
-                n, = _item_n
-                return (n . string),
-            yield _alt
-            def _alt():
-                # STRING
-                _item_s: Optional[Tuple[Any]]; s: Any
-                _item_s = self._string()
-                if _item_s is None: return None
-                s, = _item_s
-                return (s . string),
-            yield _alt
-            def _alt():
-                # "?"
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("?")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                return ("?"),
-            yield _alt
-            def _alt():
-                # ":"
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect(":")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                return (":"),
-            yield _alt
-            def _alt():
-                # !")"
-                _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
-                _item__lookahead = self._negative_lookahead(self._expect, ")")
-                if _item__lookahead is None: return None
-                _lookahead, = _item__lookahead
-                # !"}"
-                _item__lookahead_1: Optional[Tuple[Any]]; _lookahead_1: Any
-                _item__lookahead_1 = self._negative_lookahead(self._expect, "}")
-                if _item__lookahead_1 is None: return None
-                _lookahead_1, = _item__lookahead_1
-                # !"]"
-                _item__lookahead_2: Optional[Tuple[Any]]; _lookahead_2: Any
-                _item__lookahead_2 = self._negative_lookahead(self._expect, "]")
-                if _item__lookahead_2 is None: return None
-                _lookahead_2, = _item__lookahead_2
-                # OP
-                _item_op: Optional[Tuple[Any]]; op: Any
-                _item_op = self._op()
-                if _item_op is None: return None
-                op, = _item_op
-                return (op . string),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # "("
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("(")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # target_atoms?
-        _item_atoms: Optional[Tuple[Any]]; atoms: Optional[Any]
-        _item_atoms = self.target_atoms()
-        if _item_atoms is None: atoms = None
-        else: atoms, = _item_atoms
-        # ")"
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect(")")
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return ("(" + (atoms or "") + ")"),
-        self._reset(mark)
-        # "{"
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("{")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # target_atoms?
-        _item_atoms: Optional[Tuple[Any]]; atoms: Optional[Any]
-        _item_atoms = self.target_atoms()
-        if _item_atoms is None: atoms = None
-        else: atoms, = _item_atoms
-        # "}"
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect("}")
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return ("{" + (atoms or "") + "}"),
-        self._reset(mark)
-        # "["
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("[")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # target_atoms?
-        _item_atoms: Optional[Tuple[Any]]; atoms: Optional[Any]
-        _item_atoms = self.target_atoms()
-        if _item_atoms is None: atoms = None
-        else: atoms, = _item_atoms
-        # "]"
-        _item__literal_1: Optional[Tuple[Any]]; _literal_1: Any
-        _item__literal_1 = self._expect("]")
-        if _item__literal_1 is None: return None
-        _literal_1, = _item__literal_1
-        return ("[" + (atoms or "") + "]"),
-        self._reset(mark)
-        # NAME
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self._name()
-        if _item_n is None: return None
-        n, = _item_n
-        # "*"
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("*")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        return (n . string + "*"),
-        self._reset(mark)
-        # NAME
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self._name()
-        if _item_n is None: return None
-        n, = _item_n
-        return (n . string),
-        self._reset(mark)
-        # NUMBER
-        _item_n: Optional[Tuple[Any]]; n: Any
-        _item_n = self._number()
-        if _item_n is None: return None
-        n, = _item_n
-        return (n . string),
-        self._reset(mark)
-        # STRING
-        _item_s: Optional[Tuple[Any]]; s: Any
-        _item_s = self._string()
-        if _item_s is None: return None
-        s, = _item_s
-        return (s . string),
-        self._reset(mark)
-        # "?"
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("?")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        return ("?"),
-        self._reset(mark)
-        # ":"
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect(":")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        return (":"),
-        self._reset(mark)
-        # !")"
-        _item__lookahead: Optional[Tuple[Any]]; _lookahead: Any
-        _item__lookahead = self._negative_lookahead(self._expect, ")")
-        if _item__lookahead is None: return None
-        _lookahead, = _item__lookahead
-        # !"}"
-        _item__lookahead_1: Optional[Tuple[Any]]; _lookahead_1: Any
-        _item__lookahead_1 = self._negative_lookahead(self._expect, "}")
-        if _item__lookahead_1 is None: return None
-        _lookahead_1, = _item__lookahead_1
-        # !"]"
-        _item__lookahead_2: Optional[Tuple[Any]]; _lookahead_2: Any
-        _item__lookahead_2 = self._negative_lookahead(self._expect, "]")
-        if _item__lookahead_2 is None: return None
-        _lookahead_2, = _item__lookahead_2
-        # OP
-        _item_op: Optional[Tuple[Any]]; op: Any
-        _item_op = self._op()
-        if _item_op is None: return None
-        op, = _item_op
-        return (op . string),
-        self._reset(mark)
-        return None
-
-    def _loop0_1(self) -> Optional[Any]:
-        # _loop0_1: meta
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # meta
-                    _item_meta: Optional[Tuple[Any]]; meta: Any
-                    _item_meta = self.meta()
-                    if _item_meta is None: break
-                    meta, = _item_meta
-                    children.append(meta)
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # meta
-            _item_meta: Optional[Tuple[Any]]; meta: Any
-            _item_meta = self.meta()
-            if _item_meta is None: break
-            meta, = _item_meta
-            children.append(meta)
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _loop1_2(self) -> Optional[Any]:
-        # _loop1_2: rule
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # rule
-                    _item_rule: Optional[Tuple[Any]]; rule: Any
-                    _item_rule = self.rule()
-                    if _item_rule is None: break
-                    rule, = _item_rule
-                    children.append(rule)
-                if not children: self._reset(mark); return None
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # rule
-            _item_rule: Optional[Tuple[Any]]; rule: Any
-            _item_rule = self.rule()
-            if _item_rule is None: break
-            rule, = _item_rule
-            children.append(rule)
-        if not children: self._reset(mark); return None
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _gather_3(self) -> Optional[Any]:
-        # _gather_3: typed_name _loop0_4[]
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # typed_name
-                _item_elem: Optional[Tuple[Any]]; elem: Any
-                _item_elem = self.typed_name()
-                if _item_elem is None: return None
-                elem, = _item_elem
-                # _loop0_4[]
-                _item_seq: Optional[Tuple[Any]]; seq: Any
-                _item_seq = self._loop0_4()
-                if _item_seq is None: return None
-                seq, = _item_seq
-                return ([elem] + seq),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # typed_name
-        _item_elem: Optional[Tuple[Any]]; elem: Any
-        _item_elem = self.typed_name()
-        if _item_elem is None: return None
-        elem, = _item_elem
-        # _loop0_4[]
-        _item_seq: Optional[Tuple[Any]]; seq: Any
-        _item_seq = self._loop0_4()
-        if _item_seq is None: return None
-        seq, = _item_seq
-        return ([elem] + seq),
-        self._reset(mark)
-        return None
-
-    def _loop0_4(self) -> Optional[Any]:
-        # _loop0_4: ',' typed_name
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # ','
-                    _item__literal: Optional[Tuple[Any]]; _literal: Any
-                    _item__literal = self._expect(',')
-                    if _item__literal is None: break
-                    _literal, = _item__literal
-                    # typed_name
-                    _item_elem: Optional[Tuple[Any]]; elem: Any
-                    _item_elem = self.typed_name()
-                    if _item_elem is None: break
-                    elem, = _item_elem
-                    children.append(elem)
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # ','
-            _item__literal: Optional[Tuple[Any]]; _literal: Any
-            _item__literal = self._expect(',')
-            if _item__literal is None: break
-            _literal, = _item__literal
-            # typed_name
-            _item_elem: Optional[Tuple[Any]]; elem: Any
-            _item_elem = self.typed_name()
-            if _item_elem is None: break
-            elem, = _item_elem
-            children.append(elem)
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _gather_5(self) -> Optional[Any]:
-        # _gather_5: alt _loop0_6[]
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # alt
-                _item_elem: Optional[Tuple[Any]]; elem: Any
-                _item_elem = self.alt()
-                if _item_elem is None: return None
-                elem, = _item_elem
-                # _loop0_6[]
-                _item_seq: Optional[Tuple[Any]]; seq: Any
-                _item_seq = self._loop0_6()
-                if _item_seq is None: return None
-                seq, = _item_seq
-                return ([elem] + seq),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # alt
-        _item_elem: Optional[Tuple[Any]]; elem: Any
-        _item_elem = self.alt()
-        if _item_elem is None: return None
-        elem, = _item_elem
-        # _loop0_6[]
-        _item_seq: Optional[Tuple[Any]]; seq: Any
-        _item_seq = self._loop0_6()
-        if _item_seq is None: return None
-        seq, = _item_seq
-        return ([elem] + seq),
-        self._reset(mark)
-        return None
-
-    def _loop0_6(self) -> Optional[Any]:
-        # _loop0_6: "|" alt
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # "|"
-                    _item__literal: Optional[Tuple[Any]]; _literal: Any
-                    _item__literal = self._expect("|")
-                    if _item__literal is None: break
-                    _literal, = _item__literal
-                    # alt
-                    _item_elem: Optional[Tuple[Any]]; elem: Any
-                    _item_elem = self.alt()
-                    if _item_elem is None: break
-                    elem, = _item_elem
-                    children.append(elem)
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # "|"
-            _item__literal: Optional[Tuple[Any]]; _literal: Any
-            _item__literal = self._expect("|")
-            if _item__literal is None: break
-            _literal, = _item__literal
-            # alt
-            _item_elem: Optional[Tuple[Any]]; elem: Any
-            _item_elem = self.alt()
-            if _item_elem is None: break
-            elem, = _item_elem
-            children.append(elem)
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _gather_7(self) -> Optional[Any]:
-        # _gather_7: alt _loop0_8[]
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # alt
-                _item_elem: Optional[Tuple[Any]]; elem: Any
-                _item_elem = self.alt()
-                if _item_elem is None: return None
-                elem, = _item_elem
-                # _loop0_8[]
-                _item_seq: Optional[Tuple[Any]]; seq: Any
-                _item_seq = self._loop0_8()
-                if _item_seq is None: return None
-                seq, = _item_seq
-                return ([elem] + seq),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # alt
-        _item_elem: Optional[Tuple[Any]]; elem: Any
-        _item_elem = self.alt()
-        if _item_elem is None: return None
-        elem, = _item_elem
-        # _loop0_8[]
-        _item_seq: Optional[Tuple[Any]]; seq: Any
-        _item_seq = self._loop0_8()
-        if _item_seq is None: return None
-        seq, = _item_seq
-        return ([elem] + seq),
-        self._reset(mark)
-        return None
-
-    def _loop0_8(self) -> Optional[Any]:
-        # _loop0_8: "|" alt
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # "|"
-                    _item__literal: Optional[Tuple[Any]]; _literal: Any
-                    _item__literal = self._expect("|")
-                    if _item__literal is None: break
-                    _literal, = _item__literal
-                    # alt
-                    _item_elem: Optional[Tuple[Any]]; elem: Any
-                    _item_elem = self.alt()
-                    if _item_elem is None: break
-                    elem, = _item_elem
-                    children.append(elem)
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # "|"
-            _item__literal: Optional[Tuple[Any]]; _literal: Any
-            _item__literal = self._expect("|")
-            if _item__literal is None: break
-            _literal, = _item__literal
-            # alt
-            _item_elem: Optional[Tuple[Any]]; elem: Any
-            _item_elem = self.alt()
-            if _item_elem is None: break
-            elem, = _item_elem
-            children.append(elem)
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _loop1_9(self) -> Optional[Any]:
-        # _loop1_9: ("|" alts NEWLINE)
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # ("|" alts NEWLINE)
-                    _item__group_15: Optional[Tuple[Any]]; _group_15: Any
-                    _item__group_15 = self._group_15()
-                    if _item__group_15 is None: break
-                    _group_15, = _item__group_15
-                    children.append(_group_15)
-                if not children: self._reset(mark); return None
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # ("|" alts NEWLINE)
-            _item__group_15: Optional[Tuple[Any]]; _group_15: Any
-            _item__group_15 = self._group_15()
-            if _item__group_15 is None: break
-            _group_15, = _item__group_15
-            children.append(_group_15)
-        if not children: self._reset(mark); return None
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _loop0_10(self) -> Optional[Any]:
-        # _loop0_10: named_item
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # named_item
-                    _item_named_item: Optional[Tuple[Any]]; named_item: Any
-                    _item_named_item = self.named_item()
-                    if _item_named_item is None: break
-                    named_item, = _item_named_item
-                    children.append(named_item)
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # named_item
-            _item_named_item: Optional[Tuple[Any]]; named_item: Any
-            _item_named_item = self.named_item()
-            if _item_named_item is None: break
-            named_item, = _item_named_item
-            children.append(named_item)
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _gather_11(self) -> Optional[Any]:
-        # _gather_11: arg _loop0_12[]
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # arg
-                _item_elem: Optional[Tuple[Any]]; elem: Any
-                _item_elem = self.arg()
-                if _item_elem is None: return None
-                elem, = _item_elem
-                # _loop0_12[]
-                _item_seq: Optional[Tuple[Any]]; seq: Any
-                _item_seq = self._loop0_12()
-                if _item_seq is None: return None
-                seq, = _item_seq
-                return ([elem] + seq),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # arg
-        _item_elem: Optional[Tuple[Any]]; elem: Any
-        _item_elem = self.arg()
-        if _item_elem is None: return None
-        elem, = _item_elem
-        # _loop0_12[]
-        _item_seq: Optional[Tuple[Any]]; seq: Any
-        _item_seq = self._loop0_12()
-        if _item_seq is None: return None
-        seq, = _item_seq
-        return ([elem] + seq),
-        self._reset(mark)
-        return None
-
-    def _loop0_12(self) -> Optional[Any]:
-        # _loop0_12: "," arg
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # ","
-                    _item__literal: Optional[Tuple[Any]]; _literal: Any
-                    _item__literal = self._expect(",")
-                    if _item__literal is None: break
-                    _literal, = _item__literal
-                    # arg
-                    _item_elem: Optional[Tuple[Any]]; elem: Any
-                    _item_elem = self.arg()
-                    if _item_elem is None: break
-                    elem, = _item_elem
-                    children.append(elem)
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # ","
-            _item__literal: Optional[Tuple[Any]]; _literal: Any
-            _item__literal = self._expect(",")
-            if _item__literal is None: break
-            _literal, = _item__literal
-            # arg
-            _item_elem: Optional[Tuple[Any]]; elem: Any
-            _item_elem = self.arg()
-            if _item_elem is None: break
-            elem, = _item_elem
-            children.append(elem)
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _loop1_13(self) -> Optional[Any]:
-        # _loop1_13: arg_atom
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # arg_atom
-                    _item_arg_atom: Optional[Tuple[Any]]; arg_atom: Any
-                    _item_arg_atom = self.arg_atom()
-                    if _item_arg_atom is None: break
-                    arg_atom, = _item_arg_atom
-                    children.append(arg_atom)
-                if not children: self._reset(mark); return None
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # arg_atom
-            _item_arg_atom: Optional[Tuple[Any]]; arg_atom: Any
-            _item_arg_atom = self.arg_atom()
-            if _item_arg_atom is None: break
-            arg_atom, = _item_arg_atom
-            children.append(arg_atom)
-        if not children: self._reset(mark); return None
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _loop1_14(self) -> Optional[Any]:
-        # _loop1_14: target_atom
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                children = []
-                while True:
-                    # target_atom
-                    _item_target_atom: Optional[Tuple[Any]]; target_atom: Any
-                    _item_target_atom = self.target_atom()
-                    if _item_target_atom is None: break
-                    target_atom, = _item_target_atom
-                    children.append(target_atom)
-                if not children: self._reset(mark); return None
-                return children,
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        children = []
-        children = []
-        while True:
-            # target_atom
-            _item_target_atom: Optional[Tuple[Any]]; target_atom: Any
-            _item_target_atom = self.target_atom()
-            if _item_target_atom is None: break
-            target_atom, = _item_target_atom
-            children.append(target_atom)
-        if not children: self._reset(mark); return None
-        return children,
-        self._reset(mark)
-        return children,
-
-    def _group_15(self) -> Optional[Any]:
-        # _group_15: "|" alts NEWLINE
-        mark = self._mark()
-        def _alts():
-            def _alt():
-                # "|"
-                _item__literal: Optional[Tuple[Any]]; _literal: Any
-                _item__literal = self._expect("|")
-                if _item__literal is None: return None
-                _literal, = _item__literal
-                # alts
-                _item_b: Optional[Tuple[Any]]; b: Any
-                _item_b = self.alts()
-                if _item_b is None: return None
-                b, = _item_b
-                # NEWLINE
-                _item__newline: Optional[Tuple[Any]]; _newline: Any
-                _item__newline = self._expect('NEWLINE')
-                if _item__newline is None: return None
-                _newline, = _item__newline
-                return (b),
-            yield _alt
-        return self._alts2(_alts())
-        self._reset(mark)
-        # "|"
-        _item__literal: Optional[Tuple[Any]]; _literal: Any
-        _item__literal = self._expect("|")
-        if _item__literal is None: return None
-        _literal, = _item__literal
-        # alts
-        _item_b: Optional[Tuple[Any]]; b: Any
-        _item_b = self.alts()
-        if _item_b is None: return None
-        b, = _item_b
-        # NEWLINE
-        _item__newline: Optional[Tuple[Any]]; _newline: Any
-        _item__newline = self._expect('NEWLINE')
-        if _item__newline is None: return None
-        _newline, = _item__newline
-        return (b),
-        self._reset(mark)
-        return None
+        def _alt_1():
+            # "("
+            def _item__literal():
+                return self._expect("(")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # target_atoms?
+            def _item_atoms():
+                def _atom():
+                    return self.target_atoms()
+                return self._opt(_atom)
+            atoms: Optional[Any]; _result_atoms: Optional[Tuple[Any]]
+            _result_atoms = _item_atoms()
+            if not _result_atoms: return None
+            atoms, = _result_atoms
+            # ")"
+            def _item__literal_1():
+                return self._expect(")")
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return ("(" + (atoms or "") + ")"),
+        def _alt_2():
+            # "{"
+            def _item__literal():
+                return self._expect("{")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # target_atoms?
+            def _item_atoms():
+                def _atom():
+                    return self.target_atoms()
+                return self._opt(_atom)
+            atoms: Optional[Any]; _result_atoms: Optional[Tuple[Any]]
+            _result_atoms = _item_atoms()
+            if not _result_atoms: return None
+            atoms, = _result_atoms
+            # "}"
+            def _item__literal_1():
+                return self._expect("}")
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return ("{" + (atoms or "") + "}"),
+        def _alt_3():
+            # "["
+            def _item__literal():
+                return self._expect("[")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # target_atoms?
+            def _item_atoms():
+                def _atom():
+                    return self.target_atoms()
+                return self._opt(_atom)
+            atoms: Optional[Any]; _result_atoms: Optional[Tuple[Any]]
+            _result_atoms = _item_atoms()
+            if not _result_atoms: return None
+            atoms, = _result_atoms
+            # "]"
+            def _item__literal_1():
+                return self._expect("]")
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return ("[" + (atoms or "") + "]"),
+        def _alt_4():
+            # NAME
+            def _item_n():
+                return self._name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # "*"
+            def _item__literal():
+                return self._expect("*")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # parse succeeded
+            return (n . string + "*"),
+        def _alt_5():
+            # NAME
+            def _item_n():
+                return self._name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # parse succeeded
+            return (n . string),
+        def _alt_6():
+            # NUMBER
+            def _item_n():
+                return self._number()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # parse succeeded
+            return (n . string),
+        def _alt_7():
+            # STRING
+            def _item_s():
+                return self._string()
+            s: Any; _result_s: Optional[Tuple[Any]]
+            _result_s = _item_s()
+            if not _result_s: return None
+            s, = _result_s
+            # parse succeeded
+            return (s . string),
+        def _alt_8():
+            # "?"
+            def _item__literal():
+                return self._expect("?")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # parse succeeded
+            return ("?"),
+        def _alt_9():
+            # ":"
+            def _item__literal():
+                return self._expect(":")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # parse succeeded
+            return (":"),
+        def _alt_10():
+            # !")"
+            def _item__lookahead():
+                def _atom():
+                    return self._expect(")")
+                return self._negative_lookahead(_atom)
+            _lookahead: Any; _result__lookahead: Optional[Tuple[Any]]
+            _result__lookahead = _item__lookahead()
+            if not _result__lookahead: return None
+            _lookahead, = _result__lookahead
+            # !"}"
+            def _item__lookahead_1():
+                def _atom():
+                    return self._expect("}")
+                return self._negative_lookahead(_atom)
+            _lookahead_1: Any; _result__lookahead_1: Optional[Tuple[Any]]
+            _result__lookahead_1 = _item__lookahead_1()
+            if not _result__lookahead_1: return None
+            _lookahead_1, = _result__lookahead_1
+            # !"]"
+            def _item__lookahead_2():
+                def _atom():
+                    return self._expect("]")
+                return self._negative_lookahead(_atom)
+            _lookahead_2: Any; _result__lookahead_2: Optional[Tuple[Any]]
+            _result__lookahead_2 = _item__lookahead_2()
+            if not _result__lookahead_2: return None
+            _lookahead_2, = _result__lookahead_2
+            # OP
+            def _item_op():
+                return self._op()
+            op: Any; _result_op: Optional[Tuple[Any]]
+            _result_op = _item_op()
+            if not _result_op: return None
+            op, = _result_op
+            # parse succeeded
+            return (op . string),
+        return self._alts(_alt_1, _alt_2, _alt_3, _alt_4, _alt_5, _alt_6, _alt_7, _alt_8, _alt_9, _alt_10)
 
     KEYWORDS = ()
     SOFT_KEYWORDS = ('memo',)
