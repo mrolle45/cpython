@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -17,7 +19,9 @@ T = TypeVar("T")
 P = TypeVar("P", bound="Parser")
 F = TypeVar("F", bound=Callable[..., Any])
 
-ParseResult = Union[Tuple[object], None]
+Token = tokenize.TokenInfo
+
+ParseResult = Union[Tuple[T], None]
 ParseFunc = Callable[[], ParseResult]
 
 def logger(method: F) -> F:
@@ -199,49 +203,49 @@ class Parser:
         return f"{tok.start[0]}.{tok.start[1]}: {token.tok_name[tok.type]}:{tok.string!r}"
 
     @memoize
-    def _name(self) -> Optional[tokenize.TokenInfo]:
+    def _name(self) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
         if tok.type == token.NAME and tok.string not in self.KEYWORDS:
             return self._tokenizer.getnext(),
         return None
 
     @memoize
-    def _number(self) -> Optional[tokenize.TokenInfo]:
+    def _number(self) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
         if tok.type == token.NUMBER:
             return self._tokenizer.getnext(),
         return None
 
     @memoize
-    def _string(self) -> Optional[tokenize.TokenInfo]:
+    def _string(self) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
         if tok.type == token.STRING:
             return self._tokenizer.getnext(),
         return None
 
     @memoize
-    def _op(self) -> Optional[tokenize.TokenInfo]:
+    def _op(self) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
         if tok.type == token.OP:
             return self._tokenizer.getnext(),
         return None
 
     @memoize
-    def _type_comment(self) -> Optional[tokenize.TokenInfo]:
+    def _type_comment(self) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
         if tok.type == token.TYPE_COMMENT:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def _soft_keyword(self) -> Optional[tokenize.TokenInfo]:
+    def _soft_keyword(self) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
         if tok.type == token.NAME and tok.string in self.SOFT_KEYWORDS:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def _expect(self, type: str) -> Optional[Tuple[tokenize.TokenInfo]]:
+    def _expect(self, type: str) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
         if tok.string == type:
             return self._tokenizer.getnext(),
@@ -255,7 +259,7 @@ class Parser:
             return self._tokenizer.getnext(),
         return None
 
-    def _expect_forced(self, res: Any, expectation: str) -> Optional[Tuple[tokenize.TokenInfo]]:
+    def _expect_forced(self, res: Any, expectation: str) -> Optional[Tuple[Token]]:
         if res is None:
             raise self._make_syntax_error(f"expected {expectation}")
         return res
@@ -293,19 +297,6 @@ class Parser:
         # All Alts failed.
         return None
 
-    # TODO: Remove this after generating new grammar_parser.py.
-    def _alts2(self, alts: Iterator[ParseFunc], cut = cut_sentinel) -> ParseResult:
-        mark = self._mark()
-        """ Parse an iterable of Alts.  Return first success result, or failure if an alt parses as Cut. """
-        for altfunc in alts:
-            alt = self._alt(altfunc)
-            if alt is cut:
-                # This Alt failed with a cut, quit.
-                return None
-            if alt: return alt
-            # This Alt failed, try again with the next one.
-        return None
-
     def _alt(self, alt: ParseFunc) -> ParseResult:
         """ Parse an Alt.  Restore mark on failure. """
         mark = self._mark()
@@ -313,25 +304,6 @@ class Parser:
         if result: return result
         self._reset(mark)
         return None
-
-    def _items(self, *items: Callable[..., object], fail: Optional[Cut] = None, cut: Cut = cut_sentinel
-               ) -> Union[Cut, Literal[True], None]:
-        """ Parse all of the given Items.
-        Return True if they all succeed, cut sentinel if a Cut item was parsed, else None.
-        """
-        mark = self._mark()
-        results = []
-        for item in items:
-            if item is cut:
-                fail = cut
-                continue
-            result = item()
-            if result:
-                results.append(result[0])
-            else:
-                self._reset(mark)
-                return fail
-        return results
 
     def _opt(self, func: Callable[..., object]) -> Tuple[object]:
         """ Make the result always true by replacing None with (None,). """
@@ -391,14 +363,6 @@ class Parser:
     def _get_val(self, item) -> Optional[object]:
         if item is None: return None
         return item[0]
-
-    def _get_opt_val(self, item_tup) -> Tuple[object]:
-        """ Similar to _get_val(), except that item_tup is (item,), and
-        if item is Null, returns (Null,) rather than Null.
-        """
-        item, = item_tup
-        if item is None: return None,
-        return item
 
     def _make_syntax_error(self, message: str, filename: str = "<unknown>") -> SyntaxError:
         tok = self._tokenizer.diagnose()

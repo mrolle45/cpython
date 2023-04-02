@@ -43,6 +43,7 @@ from pegen.grammar import (
     TypedName,
 )
 
+# TODO: replace self.all_rules with self.rules when there are no more artificial rules.
 
 class RuleCollectorVisitor(GrammarVisitor):
     """Visitor that invokes a provided callmaker visitor with just the NamedItem nodes"""
@@ -109,11 +110,12 @@ class RuleCheckingVisitor(GrammarVisitor, ParserGeneratorBase):
     def __init__(self, rules: Dict[str, Rule], tokens: Set[str]):
         self.rules = rules
         self.tokens = tokens
-        self.current_alt = None
         self.current_item = None
 
     def visit_Rule(self, node: Rule) -> None:
         self.current_rule = node
+        self.current_alt = None
+        self.current_item = None
         self.generic_visit(node)
         del self.current_rule
 
@@ -192,7 +194,6 @@ class ParserGenerator(ParserGeneratorBase):
         self.first_graph, self.first_sccs = compute_left_recursives(self.rules)
         self.counter = 0  # For name_rule()/name_loop()
         self.keyword_counter = 499  # For keyword_type()
-        self.all_rules: Dict[str, Rule] = self.rules.copy()  # Rules + temporal rules
         self._local_variable_stack: List[List[str]] = []
         self.verbose = verbose
 
@@ -238,7 +239,8 @@ class ParserGenerator(ParserGeneratorBase):
         return len(self.file.getvalue().splitlines()) + 1
 
     def collect_rules(self) -> None:
-        self.collect_keywords()
+        self.all_rules = dict(self.rules)
+        self.collect_keywords(self.all_rules)
         rule_collector = RuleCollectorVisitor(self, self.callmakervisitor)
         done: Set[str] = set()
         while True:
@@ -252,9 +254,9 @@ class ParserGenerator(ParserGeneratorBase):
                 rule_collector.visit(self.current_rule)
             self.current_rule = None
 
-    def collect_keywords(self) -> None:
+    def collect_keywords(self, rules: Dict[str, Rule]) -> None:
         keyword_collector = KeywordCollectorVisitor(self, self.keywords, self.soft_keywords)
-        for rule in self.all_rules.values():
+        for rule in rules.values():
             keyword_collector.visit(rule)
 
     def keyword_type(self) -> int:
