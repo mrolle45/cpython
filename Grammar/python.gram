@@ -12,15 +12,15 @@ _PyPegen_parse(Parser *p)
     // Run parser
     void *result = NULL;
     if (p->start_rule == Py_file_input) {
-        result = file_rule(p);
+        result = _file_rule(p);
     } else if (p->start_rule == Py_single_input) {
-        result = interactive_rule(p);
+        result = _interactive_rule(p);
     } else if (p->start_rule == Py_eval_input) {
-        result = eval_rule(p);
+        result = _eval_rule(p);
     } else if (p->start_rule == Py_func_type_input) {
-        result = func_type_rule(p);
+        result = _func_type_rule(p);
     } else if (p->start_rule == Py_fstring_input) {
-        result = fstring_rule(p);
+        result = _fstring_rule(p);
     }
 
     return result;
@@ -450,10 +450,10 @@ subject_expr[expr_ty]:
 
 case_block[match_case_ty]:
     | invalid_case_block
-    | "case" pattern=patterns guard=guard? ':' body=block {
-        _PyAST_match_case(pattern, guard, body, p->arena) }
+    | "case" pattern=patterns g=guard? ':' body=block {
+        _PyAST_match_case(pattern, g, body, p->arena) }
 
-guard[expr_ty]: 'if' guard=named_expression { guard }
+guard[expr_ty]: 'if' g=named_expression { g }
 
 patterns[pattern_ty]:
     | patterns[asdl_pattern_seq*]=open_sequence_pattern {
@@ -532,7 +532,7 @@ wildcard_pattern[pattern_ty]:
     | "_" { _PyAST_MatchAs(NULL, NULL, EXTRA) }
 
 value_pattern[pattern_ty]:
-    | attr=attr !('.' | '(' | '=') { _PyAST_MatchValue(attr, EXTRA) }
+    | a=attr !('.' | '(' | '=') { _PyAST_MatchValue(a, EXTRA) }
 
 attr[expr_ty]:
     | value=name_or_attr '.' attr=NAME {
@@ -543,7 +543,7 @@ name_or_attr[expr_ty]:
     | NAME
 
 group_pattern[pattern_ty]:
-    | '(' pattern=pattern ')' { pattern }
+    | '(' patt=pattern ')' { patt }
 
 sequence_pattern[pattern_ty]:
     | '[' patterns=maybe_sequence_pattern? ']' { _PyAST_MatchSequence(patterns, EXTRA) }
@@ -588,8 +588,8 @@ items_pattern[asdl_seq*]:
     | ','.key_value_pattern+
 
 key_value_pattern[KeyPatternPair*]:
-    | key=(literal_expr | attr) ':' pattern=pattern {
-        _PyPegen_key_pattern_pair(p, key, pattern) }
+    | key=(literal_expr | attr) ':' patt=pattern {
+        _PyPegen_key_pattern_pair(p, key, patt) }
 
 double_star_pattern[expr_ty]:
     | '**' target=pattern_capture_target { target }
@@ -1287,7 +1287,7 @@ invalid_class_argument_pattern[asdl_pattern_seq*]:
     | [positional_patterns ','] keyword_patterns ',' a=positional_patterns { a }
 invalid_if_stmt:
     | 'if' named_expression NEWLINE { RAISE_SYNTAX_ERROR("expected ':'") }
-    | a='if' a=named_expression ':' NEWLINE !INDENT {
+    | a='if' named_expression ':' NEWLINE !INDENT {
         RAISE_INDENTATION_ERROR("expected an indented block after 'if' statement on line %d", a->lineno) }
 invalid_elif_stmt:
     | 'elif' named_expression NEWLINE { RAISE_SYNTAX_ERROR("expected ':'") }
