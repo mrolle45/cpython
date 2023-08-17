@@ -5,29 +5,33 @@ import traceback
 
 from pegen.grammar import (
     Alt,
+    AltItem,
+    AltItems,
+    Arg,
     Args,
     Cut,
     Forced,
-    Gather,
+    Gather0,
+    Gather1,
+    Grammar,
     Group,
     Item,
     Lookahead,
     Meta,
     NameLeaf,
-    NamedItem,
-    NamedItems,
     NegativeLookahead,
     Opt,
+    Param,
     Params,
-    Plain,
     PositiveLookahead,
+    Primary,
     Repeat0,
     Repeat1,
     Rhs,
     Rule,
-    TypedName,
-    Grammar,
     StringLeaf,
+    TypedName,
+    VarItem,
 )
 """
 
@@ -39,7 +43,7 @@ grammar[Grammar]:
 meta[Meta]:
     | "@" name=NAME val=metavalue? NEWLINE { Meta(name.string, val) }
 
-metavalue[Optional[str]]:
+metavalue[str]:
     | val=NAME { val.string }
     | val=STRING { literal_eval(val.string) }
     | { None }
@@ -49,11 +53,14 @@ rule[Rule]:
           Rule(n, Rhs(a + aa), memo=m) }
 
 params[Params]:
-    | !memoflag '(' n=','.typed_name+ [','] ')' { Params(n) }
+    | !memoflag '(' n=','.param+ [','] ')' { Params(n) }
     | '(' ')' { Params([]) }
 
+param[Param]:
+    | n=typed_name { Param(n) }
+
 typed_name[TypedName]:
-    | n=NAME p=params? a=annotation? { TypedName(n.string, p, a) }
+    | n=NAME p=params? typ=annotation? { TypedName(n.string, typ, p) }
 
 # In the future this may return something more complicated
 memoflag[str]:
@@ -72,58 +79,49 @@ maybe_alts[Rhs] (memo):
 #   Indented block following a rule, each line introduced by '|', or nothing.
 more_alts[Rhs] (memo):
     | INDENT a=( "|" b=alts NEWLINE { b } )+ DEDENT { Rhs (chain (*a)) }
-    | { Rhs() }
+    | { Rhs(()) }
 
 # Single alternative.  May be nothing at all.
 alt[Alt]:
-    | i=items e=endmarker a=action? { Alt(i + e, action=a) }
+    | i=alt_items a=action? { Alt(i, action=a) }
 
-items[NamedItems]:
-    | n=named_item* { NamedItems(n) }
+alt_items[AltItems]:
+    | ii=alt_item* { AltItems(ii) }
 
-named_item[NamedItem] (memo):
-    | n=typed_name '=' ~ item {NamedItem(n, item)}
-    | it=item {NamedItem(None, it)}
-    | forced=forced_atom {NamedItem(None, forced)}
-    | it=lookahead {NamedItem(None, it)}
-    | cut=cut {NamedItem(None, cut)}
-
-forced_atom[Forced]:
-    | '&''&' ~ a=atom {Forced(a)}
-
-lookahead[Lookahead]:
-    | '&' ~ a=atom {PositiveLookahead(a)}
-    | '!' ~ a=atom {NegativeLookahead(a)}
-
-cut[Cut]:
-    | '~' {Cut()}
+alt_item[AltItem]:
+    | n=typed_name '=' ~ i=item {VarItem(n, i)}
+    | item
 
 item[Item] (memo):
-    | '[' ~ alts ']' {Opt(alts)}
-    |  a=atom '?' {Opt(a)}
-    |  a=atom '*' {Repeat0(a)}
-    |  a=atom '+' {Repeat1(a)}
-    |  sep=atom '.' node=atom '+' {Gather(sep, node)}
-    |  a=atom {a}
+    | '&' '&' ~ i=item {Forced(i)}
+    | '&' ~ i=item {PositiveLookahead(i)}
+    | '!' ~ i=item {NegativeLookahead(i)}
+    | '~' {Cut()}
+    | atom
 
-endmarker[NamedItems]:
-    | '$' { NamedItems([NamedItem(None, NameLeaf('ENDMARKER'))]) }
-    | { NamedItems() }
+atom[Atom] (memo):
+    | a=atom '?' {Opt(a)}
+    | a=atom '*' {Repeat0(a)}
+    | a=atom '+' {Repeat1(a)}
+    | sep=atom '.' node=primary '*' {Gather0(sep, node)}
+    | sep=atom '.' node=primary '+' {Gather1(sep, node)}
+    | primary
 
-atom[Plain] (memo):
-    | '(' ~ alts ')' {Group((alts))}
+primary[Primary] (memo):
+    | '(' ~ a=alts ')' typ=annotation? {Group(Rhs(a, typ))}
+    | '[' ~ a=alts ']' typ=annotation? {Opt(Group(Rhs(a, typ)))}
     | n=NAME a=arguments? {NameLeaf(n.string, a) }
     | s=STRING {StringLeaf(s.string)}
 
-# Mini-grammar for the actions and annotations and rule arguments
+# Mini-grammar for the actions and annotations and call arguments
 
 action[str]: "{" t=target_atoms "}" { t }
 annotation[str]: "[" t=target_atoms "]" { t }
 arguments[Args]:
-    | '(' a=arg "," b=",".arg+ c=[","]')'  { Args([a] + b, comma=c and c.string) } # Multiple args, comma optional
-    | '(' a=arg "," ')' { Args([a], comma=",") }                                   # One arg, comma required.
-    | '(' ')' { Args() }                                                     # No args, no comma.
-arg: a=arg_atom+ { " ".join(a) }
+    | '(' a=arg "," b=",".arg+ ","? ')'  { Args([a] + b) }  # Multiple args, comma optional
+    | '(' a=arg "," ')' { Args([a]) }                       # One arg, comma required.
+    | '(' ')' { Args() }                                    # No args, no comma.
+arg[Arg]: a=arg_atom+ { Arg(" ".join(a)) }
 arg_atom: !"," a=target_atom { a }
 
 target_atoms[str]:

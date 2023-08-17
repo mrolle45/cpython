@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import ast
 import os.path
+import contextlib
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -7,16 +10,22 @@ from typing import IO, Any, Dict, List, Optional, Set, Text, Tuple
 from token import OP
 
 from pegen import grammar
+from pegen import parse_recipe
 from pegen.grammar import (
     Alt,
+    AltItem,
+    AltItems,
+    Arg,
     Cut,
     Forced,
-    Gather,
+    Gather0,
+    Gather1,
+    #GrammarNode,
     GrammarVisitor,
     Group,
+    Item,
     Leaf,
     Lookahead,
-    NamedItem,
     NameLeaf,
     NegativeLookahead,
     Opt,
@@ -27,8 +36,12 @@ from pegen.grammar import (
     Rule,
     StringLeaf,
     TypedName,
+    VarItem,
 )
-from pegen.parser_generator import ParserGenerator
+from pegen.target_code import Code
+from pegen.parser_generator import *
+import cparser
+#from pegen import cparser
 
 EXTENSION_PREFIX = """\
 #include "pegen.h"
@@ -49,15 +62,21 @@ EXTENSION_PREFIX = """\
 
 
 EXTENSION_SUFFIX = """
+
 void *
-_PyPegen_parse(Parser *p)
+_PyPegen_parse(Parser *_p)
 {
     // Initialize keywords
-    p->keywords = reserved_keywords;
-    p->n_keyword_lists = n_keyword_lists;
-    p->soft_keywords = soft_keywords;
+    _p->keywords = reserved_keywords;
+    _p->n_keyword_lists = n_keyword_lists;
+    _p->soft_keywords = soft_keywords;
 
-    return start_rule(p);
+    _PyPegen_DECL_LOCAL_PARSE_RESULT(void *, res, );
+
+    if (_start_rule(_p, &_ptr_res))
+        return res;
+    // Parse failed
+    return NULL;
 }
 """
 
@@ -80,294 +99,167 @@ BASE_NODETYPES = {
 }
 
 
-@dataclass
-class FunctionCall:
-    function: str
-    arguments: List[Any] = field(default_factory=list)
-    assigned_variable: Optional[str] = None
-    assigned_variable_type: Optional[str] = None
-    return_type: Optional[str] = None
-    nodetype: Optional[NodeTypes] = None
-    force_true: bool = False
-    comment: Optional[str] = None
+class _Traits(TargetLanguageTraits):
+    from cparser import CParser
+    from cparser.visitor import ASTVisitor
+    #from pegen.cparser import CParser
+    #from pegen.cparser.visitor import ASTVisitor
 
-    def __str__(self) -> str:
-        parts = []
-        parts.append(self.function)
-        if self.arguments is not None:
-            parts.append(f"({', '.join(map(str, self.arguments))})")
-        if self.force_true:
-            parts.append(", !p->error_indicator")
-        if self.assigned_variable:
-            if self.assigned_variable_type:
-                parts = [
-                    "(",
-                    self.assigned_variable,
-                    " = ",
-                    "(",
-                    self.assigned_variable_type,
-                    ")",
-                    *parts,
-                    ")",
-                ]
-            else:
-                parts = ["(", self.assigned_variable, " = ", *parts, ")"]
-        if self.comment:
-            parts.append(f"  // {self.comment}")
-        return "".join(parts)
+    c_parser: CParser = None
 
+    def comment_leader(self) -> str:
+        return '// '
 
-class CCallMakerVisitor(GrammarVisitor):
-    def __init__(
-        self,
-        parser_generator: ParserGenerator,
-        exact_tokens: Dict[str, int],
-        non_exact_tokens: Set[str],
-    ):
-        self.gen = parser_generator
-        self.exact_tokens = exact_tokens
-        self.non_exact_tokens = non_exact_tokens
-        self.cache: Dict[Any, FunctionCall] = {}
-        self.cleanup_statements: List[str] = []
+    def default_type(self, type: Code = None) -> Code:
+        return type or Code('void *')
 
-    def keyword_helper(self, keyword: str) -> FunctionCall:
-        return FunctionCall(
-            assigned_variable="_keyword",
-            function="_PyPegen_expect_token",
-            arguments=["p", self.gen.keywords[keyword]],
-            return_type="Token *",
-            nodetype=NodeTypes.KEYWORD,
-            comment=f"keyword='{keyword}'",
-        )
+    def default_value(self, value: str = None) -> str:
+        return value or 'NULL'
 
-    def soft_keyword_helper(self, value: str) -> FunctionCall:
-        return FunctionCall(
-            assigned_variable="_keyword",
-            function="_PyPegen_expect_soft_keyword",
-            arguments=["p", value],
-            return_type="expr_ty",
-            nodetype=NodeTypes.SOFT_KEYWORD,
-        )
+    def default_params(self) -> str:
+        return 'void'
 
-    def visit_NameLeaf(self, node: NameLeaf) -> FunctionCall:
-        name = node.value
-        if name in self.non_exact_tokens:
-            if name in BASE_NODETYPES:
-                return FunctionCall(
-                    assigned_variable=f"{name.lower()}_var",
-                    function=f"_PyPegen_{name.lower()}_token",
-                    arguments=["p"],
-                    nodetype=BASE_NODETYPES[name],
-                    return_type="expr_ty",
-                    comment=name,
-                )
-            return FunctionCall(
-                assigned_variable=f"{name.lower()}_var",
-                function=f"_PyPegen_expect_token",
-                arguments=["p", name],
-                nodetype=NodeTypes.GENERIC_TOKEN,
-                return_type="Token *",
-                comment=f"token='{name}'",
+    def parser_param(self) -> Param:
+        return Param(TypedName('_p', Code('Parser *')))
+
+    def parse_result_ptr_param(self, assigned_name: str = None) -> Param:
+        name = assigned_name and f"&_ptr_{assigned_name}" or "_ppRes"
+        return Param(TypedName(name, Code('ParseResultPtr *')))
+
+    def return_param(self, type: str = None) -> Param:
+        return Param(TypedName('_ppRes', Code(f'{self.default_type(type)} *')))
+
+    def parse_func_params(self, name: TypedName = None) -> Params:
+        params = []
+        if not name or name.func_type.use_parser:
+            params.append(TypedName('_p', Code('Parser *')))
+        if not name or name.func_type.use_res_ptr:
+            params.append(TypedName('_ppRes', Code('ParseResultPtr *')))
+        return Params(params)
+
+    def rule_func_name(self, rule: Rule) -> ObjName:
+        return ObjName(f"_{rule.name}_rule")
+
+    def cast(self, value: str, to_type: TypedName) -> str:
+        return f"({to_type.typed_name()}) ({value})"
+
+    def cut_value(self, value: str = None) -> str:
+        return '_PyPegen_cut_sentinel'
+
+    def bool_value(self, value: bool) -> str:
+        return f"{str(bool(value)).lower()}"
+
+    def bool_type(self) -> str: return Code('ParseStatus')
+
+    def str_value(self, value: bool) -> str:
+        return value.replace('"', r'\"')
+
+    def target_names(self, code: str) -> set[str]:
+        """ All the identifiers found in given target language code.
+        This might be a call argument, an object type, or an alt action.
+        """
+        class IDVisitor(self.ASTVisitor):
+            """Visitor that collects all identifiers in the code."""
+
+            def __init__(self, ast):
+                self.names = set()
+                self.depth = 0
+                self.visit(ast)
+
+            def visit_id(self, node, debug=False):
+                self.names.add(node.value)
+                print(f"{'   ' * self.depth}name = {node.value}")
+
+            def visit(self, ast, debug=False):
+                print(f"{'   ' * self.depth}{ast.symbol.name}")
+                self.depth += 1
+                super().visit(ast)
+                self.depth -= 1
+
+        if not self.c_parser:
+            self.c_parser = self.CParser()
+            #self.c_parser = self.CParser(start_symbol='assignment_exp')
+        parser = self.c_parser
+        ast = parser.parse(code, debug=True)
+        visitor = IDVisitor(ast)
+        return visitor.names
+
+    def forward_declare_inlines(self, recipe: ParseRecipe) -> None:
+        x = 0
+        for node_recipe in recipe.inline_recipes():
+            self.print(f"static {node_recipe.func_name.decl_func(fwd=True)};")
+
+    def enter_function(
+        self, name: TypedName, comment: str = ''
+        ) -> Iterator:
+        return self.enter_scope(
+            name.decl_func(),
+            '{}',
+            comment=comment
             )
 
-        type = None
-        args = node.args
-        rule = self.gen.all_rules.get(name.lower())
-        if rule is not None:
-            type = "asdl_seq *" if rule.is_loop() or rule.is_gather() else rule.type
+    def gen_start(self, alt: Alt) -> None:
+        """ Generate code to set starting line and col variables if required by action.
+        Call before starting to parse alt if EXTRA is, or might be, contained in the action.
+        """
+        self.print()
+        if alt.action and "EXTRA" in alt.action:
+        #if alt.action and "EXTRA" in self.target_names(alt.action):
+            self.print("int _start_lineno, _start_col_offset, _end_lineno, _end_col_offset;")
+            self.print("_PyPegen_location_start(_p, &_start_lineno, &_start_col_offset);")
 
-            return FunctionCall(
-                assigned_variable=f"{name}_var",
-                function=f"{name}_rule",
-                arguments=["p"] + list(args),
-                return_type=type,
-                comment=f"{node}",
-            )
+    def gen_action(self, alt: Alt) -> _Traits.Action:
+        """ Generate code for the action in the Alt. """
+        if alt.action and "EXTRA" in alt.action:
+            self.print("_PyPegen_location_end(_p, &_end_lineno, &_end_col_offset);")
+        if self.skip_actions:
+            return self.dummy_action()
+        elif alt.action:
+            return self.action(alt)
         else:
-            return FunctionCall(
-                assigned_variable=f"{name}_var",
-                function=f"{name}",
-                arguments=args,
-                return_type=type,
-                comment=f"{node}",
-            )
+            return self.default_action(alt)
 
-    def visit_StringLeaf(self, node: StringLeaf) -> FunctionCall:
-        val = ast.literal_eval(node.value)
-        if re.match(r"[a-zA-Z_]\w*\Z", val):  # This is a keyword
-            if node.value.endswith("'"):
-                return self.keyword_helper(val)
-            else:
-                return self.soft_keyword_helper(node.value)
-        elif val in self.exact_tokens:
-            type = self.exact_tokens[val]
-            return FunctionCall(
-                assigned_variable="_literal",
-                function=f"_PyPegen_expect_token",
-                arguments=["p", type],
-                nodetype=NodeTypes.GENERIC_TOKEN,
-                return_type="Token *",
-                comment=f"token={val}",
-            )
+    def fix_parse_recipe(self, recipe: ParseRecipe) -> None:
+
+        recipe.expr_name = recipe.src.name or recipe.name
+        #if isinstance(recipe.src, Rule):
+        #    recipe.expr_name = f'_{recipe.expr_name}_rule'
+
+        if recipe.mode is recipe.Rule:
+            recipe.params = Params([*self.parse_func_params(recipe.src), *recipe.params])
+        elif isinstance(recipe.node, Rule):
+            recipe.params = Params([*self.parse_func_params(recipe.src), *recipe.params])
+        #elif recipe.mode is recipe.Loc:
+        #    pass
         else:
-            assert len(val) == 1, f"{node.value} is not a known literal"
-            return FunctionCall(
-                assigned_variable="_literal",
-                function=f"_PyPegen_expect_char",
-                arguments=["p", f"'{val[0]}'"],
-                nodetype=NodeTypes.GENERIC_TOKEN,
-                return_type="Token *",
-            )
+            recipe.params = Params([*self.parse_func_params(recipe.src), *recipe.params])
+            #recipe.params = self.inline_params(recipe.src)
 
-    def visit_Rhs(self, node: Rhs) -> FunctionCall:
-        if node in self.cache:
-            return self.cache[node]
-        if node.can_be_inlined:
-            self.cache[node] = self.generate_call(node[0].items[0])
+        func_name = recipe.name
+        if isinstance(recipe.node, Rule):
+            func_name = f'_{func_name}_rule'
+        #elif recipe.mode is recipe.Loc:
+        #    pass
         else:
-            name = self.gen.artificial_rule_from_rhs((node))
-            self.cache[node] = FunctionCall(
-                assigned_variable=f"{name}_var",
-                function=f"{name}_rule",
-                arguments=["p"],
-                comment=f"{node}",
+            func_name = recipe.node.uniq_name()
+        recipe.func_name = TypedName(
+            func_name,
+            Code('void') if recipe.node.func_type.always_true
+                else self.bool_type() if recipe.src.func_type.returns_status
+                else recipe.src.type,
+            recipe.params)
+
+    def parse_recipe(self, recipe: ParseRecipe, **kwds) -> None:
+        # Save the recipe, to generate the code at file scope later,
+        # but only if it's a not a local variable.
+        
+        if True:
+        #if recipe.mode in (recipe.Inl, recipe.Ext, recipe.Rule):
+            self.pending_recipes.append(
+                lambda: recipe(self, **kwds)
             )
-        return self.cache[node]
 
-    def visit_NamedItem(self, node: NamedItem) -> FunctionCall:
-        call = self.generate_call(node.item)
-        if node.name:
-            call.assigned_variable = node.name
-        if node.type:
-            call.assigned_variable_type = node.type
-        return call
-
-    def lookahead_call_helper(self, node: Lookahead, positive: int) -> FunctionCall:
-        call = self.generate_call(node.node)
-        def func(function: str, comment: Optional[str] = None) -> FunctionCall:
-            return FunctionCall(
-                assigned_variable="_lookahead_var",
-                function=function,
-                arguments=[positive, call.function, *call.arguments],
-                return_type="int",
-                comment=comment,
-            )
-        if call.nodetype == NodeTypes.NAME_TOKEN:
-            return func("_PyPegen_lookahead_with_name")
-        elif call.nodetype == NodeTypes.SOFT_KEYWORD:
-            return func("_PyPegen_lookahead_with_string")
-        elif call.nodetype in {NodeTypes.GENERIC_TOKEN, NodeTypes.KEYWORD}:
-            return func(
-                "_PyPegen_lookahead_with_int",
-                comment=f"token={node.node}",
-            )
-        else:
-            return func("_PyPegen_lookahead")
-
-    def visit_PositiveLookahead(self, node: PositiveLookahead) -> FunctionCall:
-        return self.lookahead_call_helper(node, 1)
-
-    def visit_NegativeLookahead(self, node: NegativeLookahead) -> FunctionCall:
-        return self.lookahead_call_helper(node, 0)
-
-    def visit_Forced(self, node: Forced) -> FunctionCall:
-        call = self.generate_call(node.node)
-        if isinstance(node.node, Leaf):
-            assert isinstance(node.node, Leaf)
-            val = ast.literal_eval(node.node.value)
-            assert val in self.exact_tokens, f"{node.node.value} is not a known literal"
-            type = self.exact_tokens[val]
-            return FunctionCall(
-                assigned_variable="_literal",
-                function=f"_PyPegen_expect_forced_token",
-                arguments=["p", type, f'"{val}"'],
-                nodetype=NodeTypes.GENERIC_TOKEN,
-                return_type="Token *",
-                comment=f"forced_token='{val}'",
-            )
-        if isinstance(node.node, Group):
-            call = self.visit(node.node.rhs)
-            call.assigned_variable = None
-            call.comment = None
-            return FunctionCall(
-                assigned_variable="_literal",
-                function=f"_PyPegen_expect_forced_result",
-                arguments=["p", str(call), f'"{node.node.rhs!s}"'],
-                return_type="void *",
-                comment=f"forced_token=({node.node.rhs!s})",
-            )
-        else:
-            raise NotImplementedError(f"Forced tokens don't work with {node.node} nodes")
-
-    def visit_Opt(self, node: Opt) -> FunctionCall:
-        call = self.generate_call(node.node)
-        return FunctionCall(
-            assigned_variable="_opt_var",
-            function=call.function,
-            arguments=call.arguments,
-            force_true=True,
-            comment=f"{node}",
-        )
-
-    def visit_Repeat0(self, node: Repeat0) -> FunctionCall:
-        if node in self.cache:
-            return self.cache[node]
-        name = self.gen.artificial_rule_from_repeat(node.node, False)
-        self.cache[node] = FunctionCall(
-            assigned_variable=f"{name}_var",
-            function=f"{name}_rule",
-            arguments=["p"],
-            return_type="asdl_seq *",
-            comment=f"{node}",
-        )
-        return self.cache[node]
-
-    def visit_Repeat1(self, node: Repeat1) -> FunctionCall:
-        if node in self.cache:
-            return self.cache[node]
-        name = self.gen.artificial_rule_from_repeat(node.node, True)
-        self.cache[node] = FunctionCall(
-            assigned_variable=f"{name}_var",
-            function=f"{name}_rule",
-            arguments=["p"],
-            return_type="asdl_seq *",
-            comment=f"{node}",
-        )
-        return self.cache[node]
-
-    def visit_Gather(self, node: Gather) -> FunctionCall:
-        if node in self.cache:
-            return self.cache[node]
-        name = self.gen.artificial_rule_from_gather(node)
-        self.cache[node] = FunctionCall(
-            assigned_variable=f"{name}_var",
-            function=f"{name}_rule",
-            arguments=["p"],
-            return_type="asdl_seq *",
-            comment=f"{node}",
-        )
-        return self.cache[node]
-
-    def visit_Group(self, node: Group) -> FunctionCall:
-        return self.generate_call(node.rhs)
-
-    def visit_Cut(self, node: Cut) -> FunctionCall:
-        return FunctionCall(
-            assigned_variable="_cut_var",
-            return_type="int",
-            function="1",
-            nodetype=NodeTypes.CUT_OPERATOR,
-        )
-
-    def return_type(self, node: Any) -> Optional[str]:
-        """ The return type associated with the node, to be compatible with the Python generator. """
-        return self.generate_call(node).return_type
-
-    def generate_call(self, node: Any) -> FunctionCall:
-        return super().visit(node)
-
-
-class CParserGenerator(ParserGenerator, GrammarVisitor):
+class CParserGenerator(ParserGenerator, _Traits):
     def __init__(
         self,
         grammar: grammar.Grammar,
@@ -377,112 +269,72 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
         file: Optional[IO[Text]],
         debug: bool = False,
         skip_actions: bool = False,
-    ):
-        super().__init__(grammar, set(tokens.values()), file)
-        self.callmakervisitor: CCallMakerVisitor = CCallMakerVisitor(
-            self, exact_tokens, non_exact_tokens
-        )
+        ):
+        super().__init__(grammar, tokens, exact_tokens, non_exact_tokens, file)
+        self.token_types = {name: type for type, name in tokens.items()}
         self._varname_counter = 0
         self.debug = debug
         self.skip_actions = skip_actions
         self.cleanup_statements: List[str] = []
-
-    def add_level(self) -> None:
-        self.print("if (p->level++ == MAXSTACK) {")
-        with self.indent():
-            self.print("p->error_indicator = 1;")
-            self.print("PyErr_NoMemory();")
-        self.print("}")
-
-    def remove_level(self) -> None:
-        self.print("p->level--;")
+        self.pending_recipes: List[Callable[[], None]] = []
 
     def add_return(self, ret_val: str) -> None:
         for stmt in self.cleanup_statements:
             self.print(stmt)
-        self.remove_level()
         self.print(f"return {ret_val};")
 
-    def unique_varname(self, name: str = "tmpvar") -> str:
-        new_var = name + "_" + str(self._varname_counter)
-        self._varname_counter += 1
-        return new_var
-
-    def call_with_errorcheck_return(self, call_text: str, returnval: str) -> None:
-        error_var = self.unique_varname()
-        self.print(f"int {error_var} = {call_text};")
-        self.print(f"if ({error_var}) {{")
-        with self.indent():
-            self.add_return(returnval)
-        self.print("}")
-
-    def call_with_errorcheck_goto(self, call_text: str, goto_target: str) -> None:
-        error_var = self.unique_varname()
-        self.print(f"int {error_var} = {call_text};")
-        self.print(f"if ({error_var}) {{")
-        with self.indent():
-            self.print(f"goto {goto_target};")
-        self.print(f"}}")
-
-    def out_of_memory_return(
-        self,
-        expr: str,
-        cleanup_code: Optional[str] = None,
-    ) -> None:
-        self.print(f"if ({expr}) {{")
-        with self.indent():
-            if cleanup_code is not None:
-                self.print(cleanup_code)
-            self.print("p->error_indicator = 1;")
-            self.print("PyErr_NoMemory();")
-            self.add_return("NULL")
-        self.print(f"}}")
-
-    def out_of_memory_goto(self, expr: str, goto_target: str) -> None:
-        self.print(f"if ({expr}) {{")
-        with self.indent():
-            self.print("PyErr_NoMemory();")
-            self.print(f"goto {goto_target};")
-        self.print(f"}}")
+    def fwd_decl_func(self, name: str, type: str, params: Params | None) -> None:
+        params_str = params and params.in_func() or self.default_params()
+        self.print(f"static {type} {name}({params_str});")
 
     def generate(self, filename: str) -> None:
-        self.collect_rules()
+
         basename = os.path.basename(filename)
-        self.print(f"// @generated by pegen from {basename}")
+        self.print(self.comment(f"@generated by pegen from {basename}"))
         header = self.grammar.metas.get("header", EXTENSION_PREFIX)
         if header:
             self.print(header.rstrip("\n"))
-        subheader = self.grammar.metas.get("subheader", "")
+        trailer = self.grammar.metas.get("trailer", None)
+        start_name = ObjName("start")
+        if not trailer and start_name in self.grammar.rules:
+            trailer = EXTENSION_SUFFIX
+            self.print('#include "pegen.h"')
+        subheader = self.grammar.metas.get("subheader", "") or self.grammar.metas.get("subheader_c", "")
         if subheader:
             self.print(subheader)
         self._setup_keywords()
         self._setup_soft_keywords()
-        for i, (rulename, rule) in enumerate(self.all_rules.items(), 1000):
-            comment = "  // Left-recursive" if rule.left_recursive else ""
+        for i, (rulename, rule) in enumerate(self.rules.items(), 1000):
+            rule.memo_key = i
+            comment = "Left-recursive" if rule.left_recursive else ""
+            if rule.leader: comment += " leader"
+            if comment: comment = f"  {self.comment(comment)}"
             self.print(f"#define {rulename}_type {i}{comment}")
         self.print()
-        for rulename, rule in self.all_rules.items():
-            if rule.is_loop() or rule.is_gather():
-                type = "asdl_seq *"
-            elif rule.type:
-                type = rule.type + " "
+        for rulename, rule in self.rules.items():
+            if rule.type:
+                type = rule.type
             else:
-                type = "void *"
-            self.print(f"static {type}{rulename}_rule{self.rule_params(rule)};")
+                type = self.default_type()
+            self.fwd_decl_func(f"_{rulename}_rule", "ParseStatus", rule.parse_recipe.params)
         self.print()
-        for rulename, rule in list(self.all_rules.items()):
+        for rulename, rule in list(self.rules.items()):
             self.print()
             if rule.left_recursive:
-                self.print("// Left-recursive")
-            self.visit(rule)
+                if rule.leader:
+                    self.print(comment="Left-recursive leader")
+                else:
+                    self.print(comment="Left-recursive")
+            self.print(comment=str(rule))
+            self.gen_node(rule)
+            self.gen_pending_recipes()
         if self.skip_actions:
             mode = 0
         else:
-            mode = int(self.rules["start"].type == "mod_ty") if "start" in self.rules else 1
+            mode = int(self.rules[start_name].type == "mod_ty") if start_name in self.rules else 1
             if mode == 1 and self.grammar.metas.get("bytecode"):
                 mode += 1
         modulename = self.grammar.metas.get("modulename", "parse")
-        trailer = self.grammar.metas.get("trailer", EXTENSION_SUFFIX)
         if trailer:
             self.print(trailer.rstrip("\n") % dict(mode=mode, modulename=modulename))
 
@@ -526,391 +378,440 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
             self.print("NULL,")
         self.print("};")
 
-    def _set_up_token_start_metadata_extraction(self) -> None:
-        self.print("if (p->mark == p->fill && _PyPegen_fill_token(p) < 0) {")
-        with self.indent():
-            self.print("p->error_indicator = 1;")
-            self.add_return("NULL")
-        self.print("}")
-        self.print("int _start_lineno = p->tokens[_mark]->lineno;")
-        self.print("UNUSED(_start_lineno); // Only used by EXTRA macro")
-        self.print("int _start_col_offset = p->tokens[_mark]->col_offset;")
-        self.print("UNUSED(_start_col_offset); // Only used by EXTRA macro")
-
-    def _set_up_token_end_metadata_extraction(self) -> None:
-        self.print("Token *_token = _PyPegen_get_last_nonnwhitespace_token(p);")
-        self.print("if (_token == NULL) {")
-        with self.indent():
-            self.add_return("NULL")
-        self.print("}")
-        self.print("int _end_lineno = _token->end_lineno;")
-        self.print("UNUSED(_end_lineno); // Only used by EXTRA macro")
-        self.print("int _end_col_offset = _token->end_col_offset;")
-        self.print("UNUSED(_end_col_offset); // Only used by EXTRA macro")
-
-    def _check_for_errors(self) -> None:
-        self.print("if (p->error_indicator) {")
-        with self.indent():
-            self.add_return("NULL")
-        self.print("}")
-
-    def _set_up_rule_memoization(self, node: Rule, result_type: str) -> None:
-        self.print("{")
-        with self.indent():
-            self.add_level()
-            self.print(f"{result_type} _res = NULL;")
-            self.print(f"if (_PyPegen_is_memoized(p, {node.name}_type, &_res)) {{")
-            with self.indent():
-                self.add_return("_res")
-            self.print("}")
-            self.print("int _mark = p->mark;")
-            self.print("int _resmark = p->mark;")
-            self.print("while (1) {")
-            with self.indent():
-                self.call_with_errorcheck_return(
-                    f"_PyPegen_update_memo(p, _mark, {node.name}_type, _res)", "_res"
-                )
-                self.print("p->mark = _mark;")
-                self.print(f"void *_raw = {node.name}_raw(p);")
-                self.print("if (p->error_indicator) {")
-                with self.indent():
-                    self.add_return("NULL")
-                self.print("}")
-                self.print("if (_raw == NULL || p->mark <= _resmark)")
-                with self.indent():
-                    self.print("break;")
-                self.print(f"_resmark = p->mark;")
-                self.print("_res = _raw;")
-            self.print("}")
-            self.print(f"p->mark = _resmark;")
-            self.add_return("_res")
-        self.print("}")
-        self.print(f"static {result_type}")
-        self.print(f"{node.name}_raw{self.rule_params(node)}")
-
     def _should_memoize(self, node: Rule) -> bool:
         return node.memo and not node.left_recursive
 
-    def _handle_default_rule_body(self, node: Rule, rhs: Rhs, result_type: str) -> None:
-        memoize = self._should_memoize(node)
+    def gen_rule(self, rule: Rule, **kwds) -> None:
+        """ Writes the full definition of the given Rule. """
 
-        with self.indent():
-            self.add_level()
-            self._check_for_errors()
-            self.print(f"{result_type} _res = NULL;")
-            if memoize:
-                self.print(f"if (_PyPegen_is_memoized(p, {node.name}_type, &_res)) {{")
-                with self.indent():
-                    self.add_return("_res")
-                self.print("}")
-            self.print("int _mark = p->mark;")
-            if any(alt.action and "EXTRA" in alt.action for alt in rhs):
-                self._set_up_token_start_metadata_extraction()
-            self.visit(
-                rhs,
-                is_loop=False,
-                is_gather=node.is_gather(),
-                rulename=node.name,
-            )
-            if self.debug:
-                self.print(f'D(fprintf(stderr, "Fail at %d: {node.name}\\n", p->mark));')
-            self.print("_res = NULL;")
-        self.print("  done:")
-        with self.indent():
-            if memoize:
-                self.print(f"_PyPegen_insert_memo(p, _mark, {node.name}_type, _res);")
-            self.add_return("_res")
+        rhs = rule.flatten()
 
-    def _handle_loop_rule_body(self, node: Rule, rhs: Rhs) -> None:
-        memoize = self._should_memoize(node)
-        is_repeat1 = node.name.startswith("_loop1")
+        result_type = self.default_type(rule.type)
 
-        with self.indent():
-            self.add_level()
-            self._check_for_errors()
-            self.print("void *_res = NULL;")
-            if memoize:
-                self.print(f"if (_PyPegen_is_memoized(p, {node.name}_type, &_res)) {{")
-                with self.indent():
-                    self.add_return("_res")
-                self.print("}")
-            self.print("int _mark = p->mark;")
-            self.print("int _start_mark = p->mark;")
-            self.print("void **_children = PyMem_Malloc(sizeof(void *));")
-            self.out_of_memory_return(f"!_children")
-            self.print("Py_ssize_t _children_capacity = 1;")
-            self.print("Py_ssize_t _n = 0;")
-            if any(alt.action and "EXTRA" in alt.action for alt in rhs):
-                self._set_up_token_start_metadata_extraction()
-            self.visit(
-                rhs,
-                is_loop=True,
-                is_gather=node.is_gather(),
-                rulename=node.name,
-            )
-            if is_repeat1:
-                self.print("if (_n == 0 || p->error_indicator) {")
-                with self.indent():
-                    self.print("PyMem_Free(_children);")
-                    self.add_return("NULL")
-                self.print("}")
-            self.print("asdl_seq *_seq = (asdl_seq*)_Py_asdl_generic_seq_new(_n, p->arena);")
-            self.out_of_memory_return(f"!_seq", cleanup_code="PyMem_Free(_children);")
-            self.print("for (int i = 0; i < _n; i++) asdl_seq_SET_UNTYPED(_seq, i, _children[i]);")
-            self.print("PyMem_Free(_children);")
-            if node.name:
-                self.print(f"_PyPegen_insert_memo(p, _start_mark, {node.name}_type, _seq);")
-            self.add_return("_seq")
-
-    def rule_params(self, rule: Rule, parser_name: str = 'p') -> str:
-        """ The text for parameters to declare a rule.  The name 'p' can be suppressed. """
-        params = ''.join([f', {self.param_type(param)} {param.name}' for param in rule.params])
-        return f"(Parser *{parser_name}{params})"
-
-    def rule_params(self, rule: Rule, parser_name: str = 'p') -> str:
-        """ The text for parameters to declare a rule.  The name 'p' can be suppressed. """
-        params = ''.join([f', {self.param_type(param)} {param.name}' for param in rule.params])
-        return f"(Parser *{parser_name}{params})"
-
-    def param_type(self, param: TypedName) -> str:
-        """ What is generated for the type of a parameter, following '{param.name}:'
-        The name may have its own parameters, which are generated recursively.
-        """
-        base_type = param.type or "void *"
-        if param.params and len(param.params):
-            # This node is a callable type.
-            subtypes = [self.param_type(subparam) for subparam in param.params]
-            return f'{base_type}({", ".join(subtypes)})'
-        else:
-            return base_type
-
-    def visit_Rule(self, node: Rule) -> None:
-        self.current_rule = node
-        is_loop = node.is_loop()
-        is_gather = node.is_gather()
-        rhs = node.flatten()
-        if is_loop or is_gather:
-            result_type = "asdl_seq *"
-        elif node.type:
-            result_type = node.type
-        else:
-            result_type = "void *"
-
-        for line in str(node).splitlines():
-            self.print(f"// {line}")
-        if node.left_recursive and node.leader:
-            self.print(f"static {result_type} {node.name}_raw{self.rule_params(node, '')};")
-
-        self.print(f"static {result_type}")
-        self.print(f"{node.name}_rule{self.rule_params(node)}")
-
-        if node.left_recursive and node.leader:
-            self._set_up_rule_memoization(node, result_type)
-
-        self.print("{")
-
-        if node.name.endswith("without_invalid"):
+        if rule.name.string.endswith("without_invalid"):
             with self.indent():
-                self.print("int _prev_call_invalid = p->call_invalid_rules;")
-                self.print("p->call_invalid_rules = 0;")
-                self.cleanup_statements.append("p->call_invalid_rules = _prev_call_invalid;")
+                self.print("int _prev_call_invalid = _p->call_invalid_rules;")
+                self.print("_p->call_invalid_rules = 0;")
+                self.cleanup_statements.append("_p->call_invalid_rules = _prev_call_invalid;")
 
-        if is_loop:
-            self._handle_loop_rule_body(node, rhs)
-        else:
-            self._handle_default_rule_body(node, rhs, result_type)
+        # Create the rule return as local variable.
+        #self.print("ParseStatus _res;")
 
-        if node.name.endswith("without_invalid"):
+        # Capture pointers to the rule return and rule parameters (if any) in local array.
+        if rule.max_local_vars:
+            dim = str(rule.max_local_vars) if rule.max_local_vars > len(rule.params) else ""
+            with self.enter_scope(f"void * _local_values [{dim}] =", '{};'):
+                #self.print("& _res,")
+                for param in rule.params:
+                    self.print(f"& {param.name},")
+
+        # Create the rule descriptor.
+        child_name = rule.rhs.parse_recipe.func_name
+        rhs_str = self.str_value(str(rule.rhs))
+
+        self.print(f"DECL_RULE_DESCR(_rule_descriptor, {rule.name}, {rule.type}, \"{rhs_str}\");")
+        #with self.enter_scope(f"RuleDescr _rule_descriptor ="):
+            
+        #    rhs_str = self.str_value(str(rule.rhs))
+        #    self.print(f'{{{child_name}, "{rule.name}", "{rhs_str}"'
+        #               f'}};'
+        #               )
+
+        if rule.name.string.endswith("without_invalid"):
             self.cleanup_statements.pop()
 
-        self.print("}")
-        self.current_rule = None
+    def gen_pending_recipes(self) -> None:
+        """ Recursively execute the pending recipes.
+        Any recipe can add more pending recipes.
+        """
+        recipes = self.pending_recipes[:]
+        self.pending_recipes[:] = []
+        for recipe in recipes:
+            recipe()
+            self.gen_pending_recipes()
 
-    def visit_NamedItem(self, node: NamedItem) -> None:
-        call = self.callmakervisitor.generate_call(node)
-        if call.assigned_variable:
-            call.assigned_variable = self.dedupe(call.assigned_variable)
-        self.print(call)
+    def gen_rhs_descriptors(self, rhs: Rhs, alt_names: List[str]) -> Tuple[str, Callable[[], Nonr]]:
+        """ Generate code to parse the individual alts and create descriptor(s) for them.
+        Return the name of the descriptor(s) variable and the function to generate the code.
+        """
+        def gen() -> None:
 
-    def visit_Rhs(
-        self, node: Rhs, is_loop: bool, is_gather: bool, rulename: Optional[str]
-    ) -> None:
-        if is_loop:
-            assert len(node) == 1
-        for alt in node:
-            self.visit(alt, is_loop=is_loop, is_gather=is_gather, rulename=rulename)
+            def do_alt(alt: Alt, term: str = '') -> None:
+                func_name = alt.uniq_name()
+                alt_name = alt.parse_recipe.name
+                alt_str = self.str_value(str(alt))
+                self.print(f'{{{func_name}, "{alt_name}", "{alt_str}"}}{term}')
 
-    def join_conditions(self, keyword: str, node: Any) -> None:
-        if not node.items:
-            return
-        self.print(f"{keyword} (")
-        with self.indent():
-            first = True
-            for item in node.items:
-                if first:
-                    first = False
-                else:
-                    self.print("&&")
-                self.visit(item)
+            if len(rhs) == 1:
+                name = alt_names[0]
+                with self.enter_scope(f"RuleAltDescr _alt_descriptor ="):
+                    do_alt(rhs[0], ';')
+            else:
+                names = []
+                # Make descriptor table.
+                with self.enter_scope(f"RuleAltDescr _alt_descriptors[] =", '{};'):
+                    for alt in rhs:
+                        do_alt(alt, ',')
 
-        self.print(")")
+        if len(rhs) == 1:
+            name = '&_alt_descriptor'
+        else:
+            name = '_alt_descriptors'
+        return name, gen
 
-    def emit_action(self, node: Alt, cleanup_code: Optional[str] = None) -> None:
-        self.print(f"_res = {node.action};")
+    def setup_parent_name(self, name: str, var: TypedName, node: GrammarNode) -> str | None:
+        """ Returns declaration and initialization of local variable of node's parent,
+        but only if the name is not also a local variable of the node.
+        """
 
-        self.print("if (_res == NULL && PyErr_Occurred()) {")
-        with self.indent():
-            self.print("p->error_indicator = 1;")
-            if cleanup_code:
-                self.print(cleanup_code)
-            self.add_return("NULL")
-        self.print("}")
+        if node.parent.local_env.lookup(name) is var:
+            ptr_type = var.decl_var('*')
+            return (f"_PyPegen_GET_GLOBAL_PARSE_RESULT("
+                    f"{var.type}, {name}, {var.func_params()}, {node.local_env.index(name)});"
+                    )
+            #return f"{var.decl_var()} = * {self.gen_cast(ptr_type)}&{self.gen_var_ptr(var)};"
+        # Node has own local variable.
+        return None
 
+    def setup_local_name(self, item: VarItem) -> str | None:
+        """ Returns declaration and initialization of local variable.
+        with value of a parameter of given rule.
+        If the var is new to the given Node, its address is stored in the Parser.
+        A ParseResultPtr is also defined;
+        """
+
+        if not item.func_type.has_result:
+            return None
+        var: TypedName = TypedName(item.assigned_name.string, item.value_type(), item.params)
+        if not item.var_name:
+            # An anonymous VarItem.
+            #   Just declare the variable.
+            return f"_PyPegen_DECL_LOCAL_PARSE_RESULT({var.type}, {var.name}, {var.func_params()});"
+        else:
+            index = item.parent.local_env.index(var.name)
+            return f"_PyPegen_ADD_GLOBAL_PARSE_RESULT({var.type}, {var.name}, {var.func_params()}, {index});"
+
+    @staticmethod
+    def gen_cast(dst_type: str, src_type: str = 'void * *', *, sep: str = ' ') -> str:
+        if not dst_type or dst_type == src_type: return ''
+        return f"({dst_type}){sep}"
+
+    @staticmethod
+    def gen_var_ptr(item: TypedName) -> str:
+        """ Where the pointer to the value is stored in the parser. """
+        return f"_p->local_values[{item.local_env.index(item.var_name.name)}]"
+
+    def gen_copy_local_vars(self, node: GrammarTree) -> None:
+        """ Code to define inherited names and set their values stored in the parser. """
+        items = list(node.local_env.items())
+        vars_used = set(node.vars_used())
+        for name, var in items:
+            # Check if the name is actually used.
+            if name in vars_used:
+                self.print(self.setup_parent_name(name, var, node))
+        x = 0
+
+    def gen_return_var(self, name: TypedName) -> None:
+        """ Code to define local variable for the return value.
+        No pointer is stored in the parser. """
+        self.print(f"{name.decl_var()};")
+
+    def gen_alt(self, alt: Alt) -> str:
+        """ Extra code to generate body of Alt parser.
+        Returns the return value.
+        """
+
+        def gen() -> str:
+            parent_vars = set(alt.parent.local_env)
+            alt_vars = set(alt.var_names())
+
+            for item in alt.items():
+                self.print(self.setup_local_name(item))
+            if alt.action and "EXTRA" in alt.action:
+                self.gen_start(alt)
+
+            # Generate a function for each item, using the corresponding variable name
+            for item in alt.items():
+                self.print(comment=f"{item}")
+                # Create local variables for the item values.
+
+                self.gen_alt_item(item)
+
+            self.print(comment="parse succeeded.")
+
+            # Prepare to emit the rule action and do so
+            ret_action: self.Action = self.gen_action(alt)
+            # If the alt returns a different type from the action, use a cast.
+            self.print(f"_PyPegen_RETURN_RESULT(_ppRes, {alt.type}, {self.gen_cast(alt.type, ret_action.type)}{ret_action.expr});")
+
+        invalid = len(alt) == 1 and str(alt[0]).startswith("invalid_")
+        if invalid:
+            self.print(f"if (!_p->call_invalid_rules) return {self.bool_value(True)};")
+        gen()
+        return ""
+
+
+    def gen_alt_item(self, item: VarItem) -> None:
+        """ Code which parses a single item in an alt.
+        Exits the alt if the parse fails.
+            It is up to the caller of the alt to reset the mark.
+        Otherwise assigns the result to a variable.
+        """
+
+        assert isinstance (item, VarItem)
+
+        # The item node has a recipe to get its value.
+        
+        recipe = item.parse_recipe
+        name = item.assigned_name
+
+        item_type = recipe.value_type()
+        #var_type = self.default_type(info.vartype or item_type)
+        rawname = f"_result_{name}"
+        #rawtype = f"{var_type}"
+        #if recipe.mode is recipe.Local:
+        #    expr = recipe.func_name
+        #else:
+        #    expr = recipe.func_name
+            #expr = f"{recipe.func_name}(_p)"
+        cast = ''
+        #cast = f"({var_type}) "
+        #self.print(f"{item_type} {name};")
+        #if var_type != rawtype:
+        #    expr = f"({var_type}) {expr}"
+        if recipe.mode is recipe.Inl:
+            expr = recipe.outer_call.value_expr()
+            if not recipe.outer_call.func_type.returns_status:
+                expr = f"{item.name} = {expr}"
+        elif recipe.mode is recipe.Loc:
+            expr = f"{item.name} = {recipe.inner_call.value_expr()}"
+        else:
+            expr = recipe.outer_call.value_expr()
+            if not recipe.src.func_type.returns_status:
+                expr = f"{item.name} = {expr}"
+        fail_value = self.bool_value(False)
+        if recipe.src.func_type.always_true:
+            self.print(f"if (({cast}{expr}), _p->error_indicator) return {fail_value};")
+        elif name in item.local_env:
+            self.print(f"if (!{cast}{expr}) return {fail_value};")
+
+        else:
+            self.print(f"if (!({expr})) return {fail_value};")
+
+    #def generic_visit(self, node, **kwds) -> None:
+    #    """ This is for a visit function not yet directly implemented. """
+    #    assert 0, f"PythonParserGenerator has no visitor for {node!r}"
+
+    def decl_inline(self, node: GrammarNode) -> None:
+        """ Generate forward declaration of parser for the node, at file scope. """
+        info = node.parse_recipe.func_info(self)
+        self.print(f"static {info.type}{info.name}(NodeDescr *);")
+
+    def gen_parse(self, recipe: ParseRecipe,
+        **kwds
+        ) -> None:
+        self.print()
+        self.forward_declare_inlines(recipe)
+        #lead = recipe.node.depth() * '    '
+        #print(f"{lead}{recipe.node!r}")
+        #print(f"{lead}{recipe.mode.name} {recipe.func_name}")
+
+        return_type = recipe.src.type
+        if isinstance(recipe.node, Rule):
+            return_type = recipe.node.type
+        if recipe.mode is not recipe.Loc or 0x00001:
+            with self.enter_function(
+                recipe.func_name,
+                ):
+                for inline in recipe.inline_recipes():
+                    # Expand the inline items.
+                    self.gen_node(inline.node)
+                self.gen_copy_local_vars(recipe.node)
+                if recipe.node is not recipe.alt:
+                    self.print(comment=str(recipe.node))
+                #if recipe.mode is recipe.Rule:
+                #    self.gen_return_var(TypedName('_result'))
+                call: str | None = None
+                if recipe.extra:
+                    call = recipe.extra()
+                if call is None:
+                    # Was not supplied by extra()
+                    call = recipe.value_expr()
+
+                    if not recipe.inner_call.func_type.always_true:
+                        if recipe.mode is recipe.Loc or 0x0000:
+                            call = f"_PyPegen_RETURN_RESULT(_ppRes, {recipe.node.type}, {call})"
+                        else:
+                            call = f"return {call}"
+                            #call = f"return {self.gen_cast(recipe.node.type, return_type)}{call}"
+                    call += ';'
+                #if recipe.comment:
+                #    call = f"{call}   {self.comment(recipe.comment)}"
+                if call: self.print(call)
+
+    def action(self, alt: Alt) -> str:
         if self.debug:
             self.print(
-                f'D(fprintf(stderr, "Hit with action [%d-%d]: %s\\n", _mark, p->mark, "{node}"));'
+                f'D(fprintf(stderr, "Hit with action [%d-%d]: %s\\n", _mark, _p->mark, "{alt}"));'
             )
+        return self.Action(alt.action, "void *")
 
-    def emit_default_action(self, is_gather: bool, node: Alt) -> None:
-        if len(self.local_variable_names) > 1:
-            if is_gather:
-                assert len(self.local_variable_names) == 2
+    def default_action(self, alt: Alt) -> _Traits.Action:
+        expr: str
+        type: str
+        vars = alt.all_vars()
+        if len(vars) > 1:
+            if self.debug:
                 self.print(
-                    f"_res = _PyPegen_seq_insert_in_front(p, "
-                    f"{self.local_variable_names[0]}, {self.local_variable_names[1]});"
+                    f'D(fprintf(stderr, "Hit without action [%d:%d]: %s\\n", _mark, _p->mark, "{alt}"));'
                 )
-            else:
-                if self.debug:
-                    self.print(
-                        f'D(fprintf(stderr, "Hit without action [%d:%d]: %s\\n", _mark, p->mark, "{node}"));'
-                    )
-                self.print(
-                    f"_res = _PyPegen_dummy_name(p, {', '.join(self.local_variable_names)});"
-                )
+            expr = f"_PyPegen_dummy_name(_p, {', '.join(var.name.string for var in vars)})"
+            type = "expr_ty"
         else:
             if self.debug:
                 self.print(
-                    f'D(fprintf(stderr, "Hit with default action [%d:%d]: %s\\n", _mark, p->mark, "{node}"));'
+                    f'D(fprintf(stderr, "Hit with default action [%d:%d]: %s\\n", _mark, _p->mark, "{node}"));'
                 )
-            if node.items:
-                self.print(f"_res = {self.local_variable_names[0]};")
+            if len(vars):
+                cast = ""
+                expr = f"{cast}{vars[0].name}"
+                type = vars[0].type
             else:
-                self.print(f"_res = true;")
+                expr = f"{self.default_value()}"
+                type = f"{self.default_type()}"
+        return self.Action(expr, type)
 
-    def emit_dummy_action(self) -> None:
-        self.print("_res = _PyPegen_dummy_name(p);")
+    def dummy_action(self) -> _Traits.Action:
+        return Action("_PyPegen_dummy_name(_p)", "expr_ty")
 
-    def handle_alt_normal(self, node: Alt, is_gather: bool, rulename: Optional[str]) -> None:
-        self.join_conditions(keyword="if", node=node)
-        self.print("{")
-        # We have parsed successfully all the conditions for the option.
-        with self.indent():
-            node_str = str(node).replace('"', '\\"')
-            self.print(
-                f'D(fprintf(stderr, "%*c+ {rulename}[%d-%d]: %s succeeded!\\n", p->level, \' \', _mark, p->mark, "{node_str}"));'
+    # Descriptions of helper parsing functions...
+
+    @functools.cached_property
+    def parse_rule(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_rule', None,
+            ('rule', 'RuleDescr *'),
+            ('vars', 'void **'),
+        )
+    @functools.cached_property
+    def parse_rule_memo(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_memo_rule', None,
+            ('rule', 'RuleDescr *'),
+            ('vars', 'void **'),
+        )
+    @functools.cached_property
+    def parse_rule_recursive(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_recursive_rule', None,
+            ('rule', 'RuleDescr *'),
+            ('vars', 'void **'),
+        )
+    @functools.cached_property
+    def parse_alt(self) -> TypedName:
+        return self.make_parser_name(
+        '_PyPegen_parse_alt', None,
+        ('alt', 'const RuleAltDescr *'),
+        )
+    @functools.cached_property
+    def parse_alts(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_PARSE_ALT_ARRAY', None,
+            ('alts', 'const RuleAltDescr []'),
+        )
+    @functools.cached_property
+    def parse_NAME(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_name', 'expr_ty',
+        )
+    @functools.cached_property
+    def parse_NUMBER(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_number_token', 'expr_ty',
+            func_type=parse_recipe.ParseData,
+        )
+    @functools.cached_property
+    def parse_STRING(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_string', 'Token *',
+        )
+    @functools.cached_property
+    def parse_OP(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_op', 'Token *',
+        )
+    @functools.cached_property
+    def parse_TYPE_COMMENT(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_type_comment_token', 'Token *',
+            func_type=parse_recipe.ParseData,
+        )
+    @functools.cached_property
+    def parse_SOFT_KEYWORD(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_any_soft_keyword', 'Token *',
+        )
+    @functools.cached_property
+    def parse_token(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_token', 'Token *',
+            ('type', 'int'),
             )
-            # Prepare to emit the rule action and do so
-            if node.action and "EXTRA" in node.action:
-                self._set_up_token_end_metadata_extraction()
-            if self.skip_actions:
-                self.emit_dummy_action()
-            elif node.action:
-                self.emit_action(node)
-            else:
-                self.emit_default_action(is_gather, node)
-
-            # As the current option has parsed correctly, do not continue with the rest.
-            self.print(f"goto done;")
-        self.print("}")
-
-    def handle_alt_loop(self, node: Alt, is_gather: bool, rulename: Optional[str]) -> None:
-        # Condition of the main body of the alternative
-        self.join_conditions(keyword="while", node=node)
-        self.print("{")
-        # We have parsed successfully one item!
-        with self.indent():
-            # Prepare to emit the rule action and do so
-            if node.action and "EXTRA" in node.action:
-                self._set_up_token_end_metadata_extraction()
-            if self.skip_actions:
-                self.emit_dummy_action()
-            elif node.action:
-                self.emit_action(node, cleanup_code="PyMem_Free(_children);")
-            else:
-                self.emit_default_action(is_gather, node)
-
-            # Add the result of rule to the temporary buffer of children. This buffer
-            # will populate later an asdl_seq with all elements to return.
-            self.print("if (_n == _children_capacity) {")
-            with self.indent():
-                self.print("_children_capacity *= 2;")
-                self.print(
-                    "void **_new_children = PyMem_Realloc(_children, _children_capacity*sizeof(void *));"
-                )
-                self.out_of_memory_return(f"!_new_children", cleanup_code="PyMem_Free(_children);")
-                self.print("_children = _new_children;")
-            self.print("}")
-            self.print("_children[_n++] = _res;")
-            self.print("_mark = p->mark;")
-        self.print("}")
-
-    def visit_Alt(
-        self, node: Alt, is_loop: bool, is_gather: bool, rulename: Optional[str]
-    ) -> None:
-        if len(node.items) == 1 and str(node.items[0]).startswith("invalid_"):
-            self.print(f"if (p->call_invalid_rules) {{ // {node}")
-        else:
-            self.print(f"{{ // {node}")
-        with self.indent():
-            self._check_for_errors()
-            node_str = str(node).replace('"', '\\"')
-            self.print(
-                f'D(fprintf(stderr, "%*c> {rulename}[%d-%d]: %s\\n", p->level, \' \', _mark, p->mark, "{node_str}"));'
-            )
-            # Prepare variable declarations for the alternative
-            vars = self.collect_vars(node)
-            for v, var_type in sorted(item for item in vars.items() if item[0] is not None):
-                if not var_type:
-                    var_type = "void *"
-                else:
-                    var_type += " "
-                if v == "_cut_var":
-                    v += " = 0"  # cut_var must be initialized
-                self.print(f"{var_type}{v};")
-                if v and v.startswith("_opt_var"):
-                    self.print(f"UNUSED({v}); // Silence compiler warnings")
-
-            with self.local_variable_context():
-                if is_loop:
-                    self.handle_alt_loop(node, is_gather, rulename)
-                else:
-                    self.handle_alt_normal(node, is_gather, rulename)
-
-            self.print("p->mark = _mark;")
-            node_str = str(node).replace('"', '\\"')
-            self.print(
-                f"D(fprintf(stderr, \"%*c%s {rulename}[%d-%d]: %s failed!\\n\", p->level, ' ',\n"
-                f'                  p->error_indicator ? "ERROR!" : "-", _mark, p->mark, "{node_str}"));'
-            )
-            if "_cut_var" in vars:
-                self.print("if (_cut_var) {")
-                with self.indent():
-                    self.add_return("NULL")
-                self.print("}")
-        self.print("}")
-
-    def collect_vars(self, node: Alt) -> Dict[Optional[str], Optional[str]]:
-        types = {}
-        with self.local_variable_context():
-            for item in node.items:
-                name, type = self.add_var(item)
-                types[name] = type
-        return types
-
-    def add_var(self, node: NamedItem) -> Tuple[Optional[str], Optional[str]]:
-        call = self.callmakervisitor.generate_call(node.item)
-        name = node.name if node.name else call.assigned_variable
-        if name is not None:
-            name = self.dedupe(name)
-        return_type = call.return_type if node.type is None else node.type
-        return name, return_type
+    @functools.cached_property
+    def parse_char(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_char', 'Token *',
+            ('c', 'char'),
+        )
+    @functools.cached_property
+    def parse_forced(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_forced', None,
+            ('item', 'ParseFunc *'),
+            ('expected', 'const char *'),
+            func_type=parse_recipe.ParseTrue,
+        )
+    @functools.cached_property
+    def parse_soft_keyword(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_soft_keyword', 'Token *',
+            ('keyword', 'const char *'),
+        )
+    @functools.cached_property
+    def parse_repeat(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_repeat', 'asdl_seq *',
+            ('item', 'ParseFunc *'),
+            ('item_size', 'size_t'),
+            ('repeat1', 'int'),
+        )
+    @functools.cached_property
+    def parse_gather(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_gather', 'asdl_seq *',
+            ('item', 'ParseFunc *'),
+            ('item_size', 'size_t'),
+            ('sep', 'ParseFunc *'),
+            ('repeat1', 'int'),
+        )
+    @functools.cached_property
+    def parse_opt(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_opt', 'asdl_seq *',
+            ('item', 'ParseFunc *'),
+            ('item_size', 'size_t'),
+        )
+    @functools.cached_property
+    def parse_lookahead(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_lookahead', None,
+            ('positive', 'ParseStatus'),
+            ('atom', 'ParseTest *'),
+            func_type=parse_recipe.ParseTest,
+        )
+    @functools.cached_property
+    def parse_cut(self) -> TypedName:
+        return self.make_parser_name(
+            '_PyPegen_parse_cut', None,
+            func_type=parse_recipe.ParseVoid,
+        )

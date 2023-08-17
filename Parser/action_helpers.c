@@ -9,10 +9,10 @@ _create_dummy_identifier(Parser *p)
     return _PyPegen_new_identifier(p, "");
 }
 
-void *
+expr_ty
 _PyPegen_dummy_name(Parser *p, ...)
 {
-    static void *cache = NULL;
+    static expr_ty cache = NULL;
 
     if (cache != NULL) {
         return cache;
@@ -131,7 +131,7 @@ _PyPegen_seq_first_item(asdl_seq *seq)
 
 /* Creates a new name of the form <first_name>.<second_name> */
 expr_ty
-_PyPegen_join_names_with_dot(Parser *p, expr_ty first_name, expr_ty second_name)
+_PyPegen_join_names_with_dot(Parser *_p, expr_ty first_name, expr_ty second_name)
 {
     assert(first_name != NULL && second_name != NULL);
     PyObject *first_identifier = first_name->v.Name.id;
@@ -176,7 +176,7 @@ _PyPegen_join_names_with_dot(Parser *p, expr_ty first_name, expr_ty second_name)
         return NULL;
     }
     PyUnicode_InternInPlace(&uni);
-    if (_PyArena_AddPyObject(p->arena, uni) < 0) {
+    if (_PyArena_AddPyObject(_p->arena, uni) < 0) {
         Py_DECREF(uni);
         return NULL;
     }
@@ -308,47 +308,47 @@ _set_seq_context(Parser *p, asdl_expr_seq *seq, expr_context_ty ctx)
 }
 
 static expr_ty
-_set_name_context(Parser *p, expr_ty e, expr_context_ty ctx)
+_set_name_context(Parser *_p, expr_ty e, expr_context_ty ctx)
 {
     return _PyAST_Name(e->v.Name.id, ctx, EXTRA_EXPR(e, e));
 }
 
 static expr_ty
-_set_tuple_context(Parser *p, expr_ty e, expr_context_ty ctx)
+_set_tuple_context(Parser *_p, expr_ty e, expr_context_ty ctx)
 {
     return _PyAST_Tuple(
-            _set_seq_context(p, e->v.Tuple.elts, ctx),
+            _set_seq_context(_p, e->v.Tuple.elts, ctx),
             ctx,
             EXTRA_EXPR(e, e));
 }
 
 static expr_ty
-_set_list_context(Parser *p, expr_ty e, expr_context_ty ctx)
+_set_list_context(Parser *_p, expr_ty e, expr_context_ty ctx)
 {
     return _PyAST_List(
-            _set_seq_context(p, e->v.List.elts, ctx),
+            _set_seq_context(_p, e->v.List.elts, ctx),
             ctx,
             EXTRA_EXPR(e, e));
 }
 
 static expr_ty
-_set_subscript_context(Parser *p, expr_ty e, expr_context_ty ctx)
+_set_subscript_context(Parser *_p, expr_ty e, expr_context_ty ctx)
 {
     return _PyAST_Subscript(e->v.Subscript.value, e->v.Subscript.slice,
                             ctx, EXTRA_EXPR(e, e));
 }
 
 static expr_ty
-_set_attribute_context(Parser *p, expr_ty e, expr_context_ty ctx)
+_set_attribute_context(Parser *_p, expr_ty e, expr_context_ty ctx)
 {
     return _PyAST_Attribute(e->v.Attribute.value, e->v.Attribute.attr,
                             ctx, EXTRA_EXPR(e, e));
 }
 
 static expr_ty
-_set_starred_context(Parser *p, expr_ty e, expr_context_ty ctx)
+_set_starred_context(Parser *_p, expr_ty e, expr_context_ty ctx)
 {
-    return _PyAST_Starred(_PyPegen_set_expr_context(p, e->v.Starred.value, ctx),
+    return _PyAST_Starred(_PyPegen_set_expr_context(_p, e->v.Starred.value, ctx),
                           ctx, EXTRA_EXPR(e, e));
 }
 

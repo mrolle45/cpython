@@ -1,7 +1,14 @@
+from __future__ import annotations
+
 import ast
 import contextlib
+import functools
+import itertools
 import re
-from abc import abstractmethod
+from abc import abstractmethod, ABC
+from dataclasses import dataclass, field, replace
+from enum import Enum, auto
+
 from typing import (
     IO,
     AbstractSet,
@@ -24,17 +31,22 @@ from pegen.grammar import (
     Attr,
     Cut,
     Forced,
-    Gather,
+    Gather0,
+    Gather1,
     Grammar,
+    GrammarTree,
     GrammarError,
     GrammarVisitor,
     Group,
     Lookahead,
-    NamedItem,
+    VarItem,
     NameLeaf,
+    NoArgs,
     Opt,
+    ObjName,
+    Param,
     Params,
-    Plain,
+    ParseExpr,
     Repeat0,
     Repeat1,
     Rhs,
@@ -43,51 +55,41 @@ from pegen.grammar import (
     TypedName,
 )
 
-# TODO: replace self.all_rules with self.rules when there are no more artificial rules.
-
-class RuleCollectorVisitor(GrammarVisitor):
-    """Visitor that invokes a provided callmaker visitor with just the NamedItem nodes"""
-
-    def __init__(self, gen: "ParserGenerator", callmakervisitor: GrammarVisitor) -> None:
-        self.gen = gen
-        self.rules: Dict[str, Rule] = gen.rules
-        self.callmaker = callmakervisitor
-
-    def visit_Rule(self, rule: Rule) -> None:
-        self.visit(rule.flatten())
-
-    def visit_NamedItem(self, item: NamedItem) -> None:
-        self.callmaker.visit(item)
-
+from pegen.target_code import Code
+from pegen.parse_recipe import ParseSource
+from pegen.tokenizer import TokenMatch, TokenLocations
 
 class KeywordCollectorVisitor(GrammarVisitor):
-    """Visitor that collects all the keywods and soft keywords in the Grammar"""
+    """Visitor that collects all the keywords and soft keywords in the Grammar.
+    Constructor provides collection objects for the results.
+    """
 
-    def __init__(self, gen: "ParserGenerator", keywords: Dict[str, int], soft_keywords: Set[str]):
-        self.generator = gen
+    def __init__(self, keywords: Dict[str, int], soft_keywords: Set[str]):
         self.keywords = keywords
         self.soft_keywords = soft_keywords
 
     def visit_StringLeaf(self, node: StringLeaf) -> None:
         val = ast.literal_eval(node.value)
         if re.match(r"[a-zA-Z_]\w*\Z", val):  # This is a keyword
-            if node.value.endswith("'") and node.value not in self.keywords:
-                self.keywords[val] = self.generator.keyword_type()
+            if node.value.endswith("'"):
+                if val not in self.keywords:
+                    self.keywords[val] = node.gen.keyword_type()
             else:
                 return self.soft_keywords.add(node.value.replace('"', ""))
 
+
 class DumpVisitor(GrammarVisitor):
-    def __init__(self, all: bool = False):
+    def __init__(self, all: bool = False, env: bool = False):
         self.level = 0
         self.all = all
+        self.env = env
 
     def visit(self, node) -> None:
-        leader = "    " * self.level
-        if isinstance(node, Attr):
-            print(f'{leader}{node}')
-            return
         if node.showme or self.all:
-            print(f'{leader}{type(node).__name__} = {node.show(leader)}')
+            node.message(f'{type(node).__name__} = {node.show()}')
+            #if self.env:
+            #    if hasattr(node, 'local_env'):
+            #        node.local_env.dump(node)
             self.level += 1
             self.generic_visit(node)
             self.level -= 1
@@ -96,6 +98,10 @@ class DumpVisitor(GrammarVisitor):
 
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Any:
         """Called if no explicit visitor function exists for a node."""
+        leader = "    " * self.level
+        for attr in node.attrs():
+            if attr:
+                node.message(str(attr))
         for value in (node if self.all else node.itershow()):
             if type(value) is list:
                 for item in value:
@@ -104,113 +110,239 @@ class DumpVisitor(GrammarVisitor):
                 self.visit(value, *args, **kwargs)
 
 
-class ParserGeneratorBase: pass
-
-class RuleCheckingVisitor(GrammarVisitor, ParserGeneratorBase):
-    def __init__(self, rules: Dict[str, Rule], tokens: Set[str]):
+class RuleCheckingVisitor(GrammarVisitor):
+    def __init__(self, rules: Dict[str, Rule], tokens: Set[str], gen: ParserGenerator):
         self.rules = rules
         self.tokens = tokens
-        self.current_item = None
+        self.gen = gen
 
     def visit_Rule(self, node: Rule) -> None:
-        self.current_rule = node
-        self.current_alt = None
-        self.current_item = None
         self.generic_visit(node)
-        del self.current_rule
 
     def visit_Alt(self, node: Alt) -> None:
-        save = self.current_alt, self.current_item
-        self.current_alt = node
-        self.current_item = None
         self.generic_visit(node)
-        self.current_alt, self.current_item = save
 
     def visit_NameLeaf(self, node: NameLeaf) -> None:
         self.validate_rule_args(node)
 
-    def visit_NamedItem(self, node: NamedItem) -> None:
-        if node.name and node.name.startswith("_"):
+    def visit_VarItem(self, node: VarItem) -> None:
+        if node.name and node.name.string.startswith("_"):
             raise GrammarError(f"Variable names cannot start with underscore: '{node.name}'")
-        self.current_item = node
         self.generic_visit(node)
 
     def validate_rule_args(self, node: NameLeaf) -> None:
         """ Verify that the name corresponds to a known Rule, and the arguments match.
         This is called after the entire grammar is parsed.
         """
-        name = node.value
-        if name in self.tokens:
+        if node.value.string in self.tokens:
             return
-        def check(params: Optional[Params], is_rule: bool = False) -> None:
-            # If is_rule, then an empty args is same as not empty.
+        name = node.resolve()
+        params = name.params
+        # If a rule name, then an empty args is same as not empty.
 
-            args = node.args
-            if params is None:
-                if args.empty: return
-                raise GrammarError(f"Calling {node}, no arguments allowed.")
-            if args.empty and not is_rule:
-                raise GrammarError(f"Calling {node}, arguments required.")
-            nparams = len(params)
-            if len (args) != nparams:
-                raise GrammarError(f"Calling {node}, requires exactly {nparams} arguments.")
+        args = node.args
+        if params is None:
+            if args.empty: return
+            if name.name in self.rules and not len(args): return
+            raise GrammarError(f"Calling {node}, no arguments allowed.")
+        if args.empty and not isinstance(name, Rule):
+            raise GrammarError(f"Calling {node}, arguments required.")
+        nparams = len(params)
+        if len (args) != nparams:
+            raise GrammarError(f"Calling {node}, requires exactly {nparams} arguments.")
+
+
+# TODO: Remove these classes when no longer used by Py Generator.
+class FuncCtx:
+    """ Specifies how the generation of the parse function was requested.
+    Determines some properties of the generated function.
+    """
+    @abstractmethod
+    def name(self, dflt_name: str) -> str: ...
+
+    @abstractmethod
+    def varname(self, dflt_name: str) -> str: ...
+
+    @abstractmethod
+    def type(self) -> str: ...
+
+    @abstractmethod
+    def vartype(self) -> str: ...
+
+
+class AltFuncCtx(FuncCtx):
+    """ A parse function for a VarItem in an Alt. """
+    def __init__(self, item: VarItem, gen: ParserGenerator):
+        self.item = item
+        self.gen = gen
+        self._varname = None
+
+    def varname(self, dflt_name: str) -> str:
+        if not self._varname:
+            self._varname = self.item.dedupe(self.item.name or (dflt_name + '_var'))
+        return self._varname
+
+    def name(self, dflt_name: str) -> str:
+        return f"_item_{self.varname(dflt_name)}"
+
+    def type(self) -> str:
+        return ""
+
+    def vartype(self) -> str:
+        return self.item.type
+
+
+class InlFuncCtx(FuncCtx):
+    """ A parse function for an inline node in another parse function. """
+    def __init__(self, name: str):
+        self._name = name
+
+    def varname(self, dflt_name: str) -> str:
+        return self._name or dflt_name
+
+    def name(self, dflt_name: str) -> str:
+        return self._name or dflt_name
+
+    def type(self) -> str:
+        return ""
+
+    def vartype(self) -> str:
+        return ""
+
+
+class TargetLanguageTraits(ABC):
+    """ Methods of a ParserGenerator which vary with the target language. """
+    @abstractmethod
+    def comment_leader(self) -> str: ...
+
+    @abstractmethod
+    def default_type(self, type: str = None) -> str: ...
+
+    @abstractmethod
+    def default_value(self, value: str = None) -> str: ...
+
+    @abstractmethod
+    def cut_value(self, value: str = None) -> str: ...
+
+    @abstractmethod
+    def bool_value(self, value: bool) -> str: ...
+
+    @abstractmethod
+    def bool_type(self) -> str: ...
+
+    @abstractmethod
+    def str_value(self, value: bool) -> str: ...
+
+    @abstractmethod
+    def default_params(self) -> str: ...
+
+    @abstractmethod
+    def parser_param(self) -> Param: ...
+
+    @abstractmethod
+    def parse_result_ptr_param(self, assigned_name: str = None) -> Param: ...
+
+    @abstractmethod
+    def return_param(self) -> Param: ...
+
+    @abstractmethod
+    def parse_func_params(self, name: TypedName = None) -> Params: ...
+
+    @abstractmethod
+    def rule_func_name(self, rule: Rule) -> ObjName: ...
+
+    @abstractmethod
+    def cast(self, value: str, to_type: TypedName) -> str:
+        """ String for given value coerced to given type. """
+        ...
+
+    @abstractmethod
+    def forward_declare_inlines(self, recipe: ParseRecipe) -> None:
+        """ When the current function has inlines which are generated at file scope,
+        this declares those inline function so that the current function can call them.
+        """
+
+    @abstractmethod
+    def enter_function(
+        self, name: str, type: str, params: Params, comment: str = ''
+        ) -> Iterator: ...
+
+    @abstractmethod
+    def gen_start(self, alt: Alt) -> None:
+        """ Generate code to set starting line and col variables if required by action """
+
+    @dataclass
+    class Action:
+        expr: str           # Expression for the value of the action
+        type: str           # Expression for the type of the value.
+
+    @abstractmethod
+    def gen_action(self, node: Alt) -> Action:
+        """ Generate code to return the action in the Alt. """
+
+    @abstractmethod
+    def fix_parse_recipe(self, recipe: ParseRecipe) -> None:
+        """ Alter a given recipe appropriately for the target language. """
+
+    @abstractmethod
+    def parse_recipe(self, recipe: ParseRecipe, **kwds) -> None:
+        """ Generate code to parse the recipe, either inline now, or save for later. """
+        ...
+
+    @contextlib.contextmanager
+    def enter_scope(self, stmt: str, brackets: str = '', comment: str = '', enable: bool = True) -> Iterator:
+        if not enable:
+            yield
             return
-        # Try a rule name
-        rule = self.rules.get(name)
-        if rule:
-            return check(rule.params, is_rule=True)
-        # Try a parameter name in the current rule
-        param = self.current_rule.params.get(name)
-        if param:
-            return check(param.params)
-        # Try an earlier variable name in the current alt
-        # Check the named items in the alt until the current item is reached.
-        for item in self.current_alt.items:
-            if item is self.current_item: break     # Search failed.
-            if item.name == name:
-                return check(item.params)
-
-        raise GrammarError(f"Dangling reference to name {node.value!r}")
+        if brackets:
+            stmt = (stmt and f"{stmt} " or "") + brackets[0]
+        self.print(stmt, comment=comment)
+        with self.indent():
+            yield
+        if brackets:
+            self.print(brackets[1:])
 
 
-class ParserGenerator(ParserGeneratorBase):
+class ParserGenerator(ABC):
 
-    callmakervisitor: GrammarVisitor
-
-    def __init__(self, grammar: Grammar, tokens: Set[str], file: Optional[IO[Text]], *, verbose: bool = False):
+    def __init__(
+        self,
+        grammar: Grammar,
+        tokens: Dict[int, str],
+        exact_tokens: Dict[str, int],
+        non_exact_tokens: Set[str],
+        file: Optional[IO[Text]],
+        *,
+        verbose: bool = False,
+        ):
         self.grammar = grammar
-        self.tokens = tokens
+        grammar._thread_vars.gen = self
+        self.tokens = set(tokens.values())
         self.keywords: Dict[str, int] = {}
         self.soft_keywords: Set[str] = set()
+        self.token_types = {name: type for type, name in tokens.items()}
         self.rules = grammar.rules
-        self.validate_rule_names()
-        if "trailer" not in grammar.metas and "start" not in self.rules:
-            raise GrammarError("Grammar without a trailer must have a 'start' rule")
-        checker = RuleCheckingVisitor(self.rules, self.tokens)
-        for rule in self.rules.values():
-            checker.visit(rule)
+        self.collect_keywords(self.rules)
+        self.exact_tokens = exact_tokens
+        self.non_exact_tokens = non_exact_tokens
+
         self.file = file
-        self.level = 0
         self.first_graph, self.first_sccs = compute_left_recursives(self.rules)
+        grammar.initialize()
+        self.validate_rule_names()
+        checker = RuleCheckingVisitor(self.rules, self.tokens, self)
+        for rule in self.rules.values():
+            try: checker.visit(rule)
+            except GrammarError: pass
+
+        self.level = 0
         self.counter = 0  # For name_rule()/name_loop()
-        self.keyword_counter = 499  # For keyword_type()
-        self._local_variable_stack: List[List[str]] = []
         self.verbose = verbose
 
     def validate_rule_names(self) -> None:
         for rule in self.rules:
-            if rule.startswith("_"):
+            if rule.string.startswith("_"):
                 raise GrammarError(f"Rule names cannot start with underscore: '{rule}'")
-
-    @contextlib.contextmanager
-    def local_variable_context(self) -> Iterator[None]:
-        self._local_variable_stack.append([])
-        yield
-        self._local_variable_stack.pop()
-
-    @property
-    def local_variable_names(self) -> List[str]:
-        return self._local_variable_stack[-1]
 
     @abstractmethod
     def generate(self, filename: str) -> None:
@@ -224,38 +356,71 @@ class ParserGenerator(ParserGeneratorBase):
         finally:
             self.level -= levels
 
-    def print(self, *args: object) -> None:
-        if not args:
+    break_lines: List[int] = [892]
+    break_tokens: TokenMatch = TokenMatch('''
+        52, 25 - 37
+        ''')
+
+    def print(self, *args: object, comment: str = None) -> None:
+        if not (args or comment):
             print(file=self.file)
         else:
-            print("    " * self.level, end="", file=self.file)
-            print(*args, file=self.file)
+            if args == (None,): return
+            leader = "    " * self.level
+            lines = [f"{leader}{' '.join(args)}"]
+            if comment:
+                comment = f"{self.comment_leader()}{comment}"
+                if args:
+                    lines[0] += "  "
+                # wrap the comment over multiple lines.
+                import textwrap
+                lines = textwrap.wrap(
+                    comment, width=80,
+                    initial_indent=lines[0],
+                    subsequent_indent=leader + self.comment_leader() + '    '
+                    )
+
+            for line in lines:
+                print(line, file=self.file)
 
     def printblock(self, lines: str) -> None:
         for line in lines.splitlines():
             self.print(line)
 
-    def lineno(self) -> int:
-        return len(self.file.getvalue().splitlines()) + 1
+    def showout(self, last: int = 0) -> None:
+        lines = self.file.getvalue().splitlines()
+        for i, line in enumerate(lines, 1):
+            if last and i <= len(lines) - last: continue
+            print(f"{i}\t{line}")
 
-    def collect_rules(self) -> None:
-        self.all_rules = dict(self.rules)
-        self.collect_keywords(self.all_rules)
-        rule_collector = RuleCollectorVisitor(self, self.callmakervisitor)
-        done: Set[str] = set()
-        while True:
-            computed_rules = list(self.all_rules)
-            todo = [i for i in computed_rules if i not in done]
-            if not todo:
-                break
-            done = set(self.all_rules)
-            for rulename in todo:
-                self.current_rule = self.all_rules[rulename]
-                rule_collector.visit(self.current_rule)
-            self.current_rule = None
+    def comment(self, text: str) -> str:
+        return self.comment_leader() + text
+
+    def typed_param(self, param: Param, name: str = None) -> str:
+        """ What is generated for the type of a parameter, including the name.
+        The param may have its own parameters, which are generated recursively.
+        """
+        base_type = param.type
+        p = f"{base_type} {name}" if name else base_type
+        if param.params:
+            # This node is a callable type.
+            subtypes = [self.typed_param(subparam) for subparam in param.params]
+            return f'{p}({", ".join(subtypes)})'
+        else:
+            return p
+
+    def gen_node(self, node: GrammarTree, **kwds) -> None:
+        """ Generate the code (possibly at a later time) to parse given node. """
+        if hasattr(node, 'parse_recipe'):
+            self.parse_recipe(node.parse_recipe, **kwds)
+
+    def lineno(self) -> int:
+        try: return len(self.file.getvalue().splitlines()) + 1
+        except: pass
 
     def collect_keywords(self, rules: Dict[str, Rule]) -> None:
-        keyword_collector = KeywordCollectorVisitor(self, self.keywords, self.soft_keywords)
+        self.keyword_counter = 499          # For keyword_type()
+        keyword_collector = KeywordCollectorVisitor(self.keywords, self.soft_keywords)
         for rule in rules.values():
             keyword_collector.visit(rule)
 
@@ -263,65 +428,45 @@ class ParserGenerator(ParserGeneratorBase):
         self.keyword_counter += 1
         return self.keyword_counter
 
-    def artificial_rule_from_rhs(self, rhs: Rhs) -> str:
-        self.counter += 1
-        name = f"_group_{self.counter}"
-        self.all_rules[name] = Rule.simple(name, self.current_rule.params, rhs)
-        return name
+    def make_parser_name(
+        self,
+        name: str, typ: str, *params: Tuple[str, str],
+        **kwds,
+        ) -> ParseSource:
+        return ParseSource(
+            name, Code(typ), Params(tuple(Param(TypedName(name, Code(type)))
+                                    for name, type in params)),
+            **kwds,
+            )
 
-    # TODO: Remove these artificial rules when no longer called in c_generator.
-    # They are not called in python_generator.
+    # Older version, still used by Py generator
+    @staticmethod
+    def _make_parser_name(
+        name: str, typ: str, *params: Tuple[str, str], use_parser: bool = True,
+        ) -> TypedName:
+        return TypedName(
+            name, typ, Params(tuple(TypedName(name, type) for name, type in params)),
+            use_parser=use_parser
+            )
 
-    def artificial_rule_from_repeat(self, node: Plain, is_repeat1: bool) -> str:
-        self.counter += 1
-        if is_repeat1:
-            prefix = "_loop1_"
-        else:
-            prefix = "_loop0_"
-        name = f"{prefix}{self.counter}"
-        self.all_rules[name] = Rule.simple(
-            name,
-            self.current_rule.params,
-            Rhs([Alt([NamedItem(None, node)])])
-        )
-        return name
-
-    def artificial_rule_from_gather(self, node: Gather) -> str:
-        self.counter += 1
-        name = f"_gather_{self.counter}"
-
-        elem = NamedItem(TypedName("elem"), node.node)
-        sep = NamedItem(TypedName("sep"), node.separator)
-        group = Group(Rhs([Alt([sep, elem])]))
-        rep = Repeat0(group)
-        alt = Alt([NamedItem(TypedName("elem"), elem), NamedItem(TypedName("seq"), rep)])
-        self.all_rules[name] = Rule.simple(
-            name,
-            self.current_rule.params,
-            Rhs([alt]),
-        )
-
-        return name
-
-    def dedupe(self, name: str) -> str:
-        """ Add a suffix to given name if it appears earlier.
-        Any parameter names are searched before current local variable names.
+    def brk(self, delta: int = 0) -> bool:
+        """ True if current output line + delta is in break_lines container.
+        Used as a breakpoint condition with a debugger.
         """
-        origname = name
-        counter = 0
-        param_names = self.current_rule.param_names
-        while name in param_names + self.local_variable_names:
-            counter += 1
-            name = f"{origname}_{counter}"
-        self.local_variable_names.append(name)
-        return name
+        return self.lineno() + delta in self.break_lines
+
+    def brk_token(self, node: GrammarTree) -> bool:
+        """ True if input range of given node matches with break_tokens matcher.
+        Used as a breakpoint condition with a debugger.
+        """
+        return self.break_tokens.match(node.locations)
 
 
 class NullableVisitor(GrammarVisitor):
     def __init__(self, rules: Dict[str, Rule]) -> None:
         self.rules = rules
         self.visited: Set[Any] = set()
-        self.nullables: Set[Union[Rule, NamedItem]] = set()
+        self.nullables: Set[Union[Rule, VarItem]] = set()
 
     def visit_Rule(self, rule: Rule) -> bool:
         if rule in self.visited:
@@ -338,7 +483,7 @@ class NullableVisitor(GrammarVisitor):
         return False
 
     def visit_Alt(self, alt: Alt) -> bool:
-        for item in alt.items:
+        for item in alt:
             if not self.visit(item):
                 return False
         return True
@@ -365,9 +510,9 @@ class NullableVisitor(GrammarVisitor):
         return False
 
     def visit_Group(self, group: Group) -> bool:
-        return self.visit(group.rhs)
+        return self.visit_Rhs(group)
 
-    def visit_NamedItem(self, item: NamedItem) -> bool:
+    def visit_VarItem(self, item: VarItem) -> bool:
         if self.visit(item.item):
             self.nullables.add(item)
         return item in self.nullables
@@ -411,7 +556,7 @@ class InitialNamesVisitor(GrammarVisitor):
 
     def visit_Alt(self, alt: Alt) -> Set[Any]:
         names: Set[str] = set()
-        for item in alt.items:
+        for item in alt:
             names |= self.visit(item)
             if item not in self.nullables:
                 break
@@ -456,7 +601,7 @@ def compute_left_recursives(
                             f"SCC {scc} has no leadership candidate (no element is included in all cycles)"
                         )
             # print("Leaders:", leaders)
-            leader = min(leaders)  # Pick an arbitrary leader from the candidates.
+            leader = min(leaders, key=str)  # Pick an arbitrary leader from the candidates.
             rules[leader].leader = True
         else:
             name = min(scc)  # The only element.
