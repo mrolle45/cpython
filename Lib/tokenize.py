@@ -601,7 +601,7 @@ def _tokenize(readline, encoding):
                         parenlev -= 1
                     yield TokenInfo(OP, token, spos, epos, line)
             else:
-                yield TokenInfo(ERRORTOKEN, line[pos],
+                yield TokenInfo(CHAR, line[pos],
                            (lnum, pos), (lnum, pos+1), line)
                 pos += 1
 

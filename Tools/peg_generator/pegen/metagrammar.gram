@@ -20,7 +20,9 @@ from pegen.grammar import (
     Meta,
     NameLeaf,
     NegativeLookahead,
+    ObjName,
     Opt,
+    OptGroup,
     Param,
     Params,
     PositiveLookahead,
@@ -33,15 +35,17 @@ from pegen.grammar import (
     TypedName,
     VarItem,
 )
+
+from pegen.target_code import Code
 """
 
-start[Grammar]: grammar=grammar ENDMARKER { grammar }
+start[Grammar]: g=grammar ENDMARKER { g }
 
 grammar[Grammar]:
     | metas=meta* rules=rule+ { Grammar(rules, metas) }
 
 meta[Meta]:
-    | "@" name=NAME val=metavalue? NEWLINE { Meta(name.string, val) }
+    | "@" name=NAME val=metavalue NEWLINE { Meta(name.string, val) }
 
 metavalue[str]:
     | val=NAME { val.string }
@@ -50,7 +54,7 @@ metavalue[str]:
 
 rule[Rule]:
     | n=typed_name m=memoflag? ":" a=maybe_alts? NEWLINE aa=more_alts? {
-          Rule(n, Rhs(a + aa), memo=m) }
+          Rule(n, Rhs([*chain (*a, *aa)]), memo=m) }
 
 params[Params]:
     | !memoflag '(' n=','.param+ [','] ')' { Params(n) }
@@ -60,7 +64,7 @@ param[Param]:
     | n=typed_name { Param(n) }
 
 typed_name[TypedName]:
-    | n=NAME p=params? typ=annotation? { TypedName(n.string, typ, p) }
+    | n=NAME p=params? typ=annotation? { TypedName(n.string, Code(typ.val), p) }
 
 # In the future this may return something more complicated
 memoflag[str]:
@@ -83,7 +87,7 @@ more_alts[Rhs] (memo):
 
 # Single alternative.  May be nothing at all.
 alt[Alt]:
-    | i=alt_items a=action? { Alt(i, action=a) }
+    | i=alt_items a=action? { Alt(i, action=Code(a.val)) }
 
 alt_items[AltItems]:
     | ii=alt_item* { AltItems(ii) }
@@ -108,10 +112,10 @@ atom[Atom] (memo):
     | primary
 
 primary[Primary] (memo):
-    | '(' ~ a=alts ')' typ=annotation? {Group(Rhs(a, typ))}
-    | '[' ~ a=alts ']' typ=annotation? {Opt(Group(Rhs(a, typ)))}
-    | n=NAME a=arguments? {NameLeaf(n.string, a) }
-    | s=STRING {StringLeaf(s.string)}
+    | '(' ~ a=alts ')' typ=annotation? {Group(Rhs(a, Code(typ.val)))}
+    | '[' ~ a=alts ']' typ=annotation? {OptGroup(Rhs(a, Code(typ.val)))}
+    | n=NAME a=arguments? {NameLeaf(n, a.val) }
+    | s=STRING {StringLeaf(s)}
 
 # Mini-grammar for the actions and annotations and call arguments
 
@@ -125,16 +129,16 @@ arg[Arg]: a=arg_atom+ { Arg(" ".join(a)) }
 arg_atom: !"," a=target_atom { a }
 
 target_atoms[str]:
-    | a=target_atom+ { " ".join(a) }
+    | a=target_atom+ { [*chain.from_iterable(a)] }
 
 target_atom[str] (memo):
-    | "(" atoms=target_atoms? ")" { "(" + (atoms or "") + ")" }
-    | "{" atoms=target_atoms? "}" { "{" + (atoms or "") + "}" }
-    | "[" atoms=target_atoms? "]" { "[" + (atoms or "") + "]" }
-    | n=NAME "*" { n.string + "*" }
-    | n=NAME { n.string }
-    | n=NUMBER { n.string }
-    | s=STRING { s.string }
+    | l="(" atoms=target_atoms? r=")" { [l, *chain(*(atoms)), r] }
+    | l="{" atoms=target_atoms? r="}" { [l, *chain(*(atoms)), r] }
+    | l="[" atoms=target_atoms? r="]" { [l, *chain(*(atoms)), r] }
+    | n=NAME star="*" { [n, star] }
+    | n=NAME { [n] }
+    | n=NUMBER { [n] }
+    | s=STRING { [s] }
     | "?" { "?" }
     | ":" { ":" }
-    | !")" !"}" !"]" op=OP { op.string }
+    | !")" !"}" !"]" op=OP { [op] }

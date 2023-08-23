@@ -6,6 +6,7 @@ code to parse a particular Grammar parse expression object.
 from __future__ import annotations
 
 from enum import Enum, auto
+import dataclasses
 import functools
 
 from pegen import grammar
@@ -20,11 +21,10 @@ class ParseFuncType(Enum):
     def __init__(self):
         pass
 
-
-class FuncBase:
+@dataclasses.dataclass
+class ParseFuncType:
     """ Base class for indicating how an expression is parsed.
-    The class itself is used to designate the type, rather than an instance.
-    The name of the subclass can be used to generate a type name for the generated function.
+    #The name of the subclass can be used to generate a type name for the generated function.
     """
     always_true: bool = False
     has_result: bool = True
@@ -32,60 +32,91 @@ class FuncBase:
     use_parser: bool = True
     use_res_ptr: bool = True
 
+    def __repr__(self) -> str:
+        return f"<{self._name}>"
 
-class ParseFunc(FuncBase):
-    """ Function returns both status and result object. """
+def make_func_types(
+    **kwds: ParseFuncType
+    ) -> None:
+    for name, value in kwds.items():
+        globals()[name] = value
+        value._name = name
 
+make_func_types(
+    # Function returns both status and result object.
+    ParseFunc = ParseFuncType(
+        ),
 
-class ParseTrue(FuncBase):
-    """ Function returns result object only, no status.  Always succeeds. """
-    always_true: bool = True
+    # Function returns result object only, no status.  Always succeeds.
+    ParseTrue = ParseFuncType(
+        always_true = True,
+        ),
 
+    # Function returns status only, no result object.
+    ParseTest = ParseFuncType(
+        use_res_ptr = False,
+        has_result = False,
+        ),
 
-class ParseTest(FuncBase):
-    """ Function returns status only, no result object. """
-    use_res_ptr: bool = False
-    has_result: bool = False
+    # Function returns neither status nor result object.
+    ParseVoid = ParseFuncType(
+        use_res_ptr = False,
+        always_true = True,
+        ),
 
+    # Function returns result directly, status is truth value of result.
+    ParseData = ParseFuncType(
+        returns_status = False,
+        use_res_ptr = False,
+        ),
 
-class ParseVoid(FuncBase):
-    """ Function returns neither status nor result object. """
-    use_res_ptr: bool = False
-    always_true: bool = True
+    # Function with neither parser nor status nor result pointer.
+    # For function defined locally in the calling function.
+    ParseLocal = ParseFuncType(
+        use_parser = False,
+        use_res_ptr = False,
+        ),
 
+    ParseTestLocal = ParseFuncType(
+        use_parser = False,
+        use_res_ptr = False,
+        has_result = False,
+        ),
 
-class ParseData(FuncBase):
-    """ Function returns result directly, status is truth value of result. """
-    returns_status: bool = False
-    use_res_ptr: bool = False
+    ParseTrueLocal = ParseFuncType(
+        use_parser = False,
+        use_res_ptr = False,
+        always_true = True,
+        ),
 
+    #Function with neither parser nor status nor result pointer.
+    #For local names.  Always true.
+    ParseNone = ParseFuncType(
+        always_true = True,
+        use_parser = False,
+        use_res_ptr = False,
+        ),
 
-class ParseNone(FuncBase):
-    """ Function with neither parser nor status nor result pointer.
-    For local names.  Always true.
-    """
-    always_true: bool = True
-    use_parser: bool = False
-    use_res_ptr: bool = False
-
+    )
 
 class ParseCall(grammar.TypedName):
     """ How to generate the code to call either the inner or the outer function of a Recipe.
     """
     args: Args
-    func_type: ParseFuncType = ParseFunc    # Used to augment args and params in fixup.
+    func_type: ParseFuncType                # Used to augment args and params in fixup.
     assigned_name: ObjName = None           # Used to augment args in fixup.
                                             # Is the arg corresponding to use_result_ptr (if any).
 
     def __init__(self,
-            name: TypedName, args: Args,
-            func_type: ParseFuncType = None,
+            name: TypedName,
+            args: Args,
+            func_type: ParseFuncType,
             assigned_name: ObjName = None,
             value_type: Code = None,
             ) -> None:
         super().__init__(name.name, value_type or name.type, name.params)
         self.args = args
-        if func_type: self.func_type = func_type
+        self.func_type = func_type
         if assigned_name: self.assigned_name = assigned_name
 
     def pre_init(self) -> None:
@@ -96,29 +127,30 @@ class ParseCall(grammar.TypedName):
 
 
         call_params = []
-        if self.func_type.use_parser:
-            call_params.append(gen.parser_param())
-        if self.func_type.use_res_ptr:
-            call_params.append(gen.return_param())
+        #if self.func_type.use_parser:
+        #    call_params.append(gen.parser_param())
+        #if self.func_type.use_res_ptr:
+        #    call_params.append(gen.return_param())
         if self.params:
             call_params += self.params[:]
 
         self.call_params = grammar.Params(call_params)
 
         args = []
-        if recipe.mode is not recipe.Loc:
-            if self.func_type.use_parser:
-                # The src is a function which needs a parser argument.
-                args.append(gen.parser_param().name.string)
-            if recipe.src.func_type.use_res_ptr:
-                # The src is a function which needs a return pointer.
-                args.append(gen.parse_result_ptr_param(self.assigned_name).name.string)
+        #if recipe.mode is not recipe.Loc:
+        #    if self.func_type.use_parser:
+        #        # The src is a function which needs a parser argument.
+        #        args.append(gen.parser_param().name.string)
+        #    if recipe.src.func_type.use_res_ptr:
+        #        # The src is a function which needs a return pointer.
+        #        args.append(gen.parse_result_ptr_param(self.assigned_name).name.string)
         if args:
             self.args = grammar.Args([*args, *(self.args[:])])
 
     def value_expr(self) -> str:
         """ The expression which evaluates to the value of this recipe. """
         args = self.args.show_typed(self.call_params)
+        return self.gen.parse_value_expr(self.name, args, self.func_type)
         return f"{self.name}{args}"
 
 
@@ -138,11 +170,11 @@ class ParseSource(grammar.TypedName):
 
     def __init__(self,
         *name_args,
-        func_type: FuncBase = ParseFunc,
+        func_type: FuncBase = None,
         args: Args = None,
         ):
         super().__init__(*name_args)
-        self.func_type = func_type
+        self.func_type = func_type or self.gen.default_func_type()
 
 
 class ParseRecipe(grammar.GrammarTree):
@@ -180,7 +212,7 @@ class ParseRecipe(grammar.GrammarTree):
         *args: str | Tuple[str, GrammarTree] | Args,
         params: Params = None,
         value_type: Code = None,            # Replaces src.type when src.type is None.
-        func_type: FuncType = None,         # Overrides src.func_type in outer_call.
+        func_type: ParseFuncType,           # Overrides src.func_type in outer_call.
         inlines: list[GrammarTree] = [],
         inline_locals: bool = True,
         assigned_name: str = None,
@@ -240,6 +272,10 @@ class ParseRecipe(grammar.GrammarTree):
         assert isinstance(self.params, grammar.Params)
         self.src.validate(visited, level + 1)
         pass
+
+    @property
+    def func_type(self) -> ParseFuncType:
+        return self.outer_call.func_type
 
     def value_expr(self) -> str:
         """ The expression which evaluates to the value of this recipe. """

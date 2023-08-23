@@ -4,6 +4,7 @@ import ast
 import contextlib
 import functools
 import itertools
+import os
 import re
 from abc import abstractmethod, ABC
 from dataclasses import dataclass, field, replace
@@ -98,7 +99,6 @@ class DumpVisitor(GrammarVisitor):
 
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Any:
         """Called if no explicit visitor function exists for a node."""
-        leader = "    " * self.level
         for attr in node.attrs():
             if attr:
                 node.message(str(attr))
@@ -212,6 +212,14 @@ class InlFuncCtx(FuncCtx):
 
 class TargetLanguageTraits(ABC):
     """ Methods of a ParserGenerator which vary with the target language. """
+    language: ClassVar[str]
+
+    @abstractmethod
+    def default_header(self) -> str: ...
+
+    @abstractmethod
+    def default_trailer(self) -> str: ...
+
     @abstractmethod
     def comment_leader(self) -> str: ...
 
@@ -263,6 +271,11 @@ class TargetLanguageTraits(ABC):
         """
 
     @abstractmethod
+    def gen_copy_local_vars(self, node: GrammarTree) -> None:
+        """ Code to define inherited names and set their values stored in the parser. """
+        ...
+
+    @abstractmethod
     def enter_function(
         self, name: str, type: str, params: Params, comment: str = ''
         ) -> Iterator: ...
@@ -305,6 +318,10 @@ class TargetLanguageTraits(ABC):
 
 class ParserGenerator(ABC):
 
+    # Macro definitions for target language Code objects.
+    # Any occurrence of a macro name is replaced with the macro value.
+    macros: Mapping[str, str] = {}
+
     def __init__(
         self,
         grammar: Grammar,
@@ -328,6 +345,27 @@ class ParserGenerator(ABC):
 
         self.file = file
         self.first_graph, self.first_sccs = compute_left_recursives(self.rules)
+        defs = self.grammar.metas.get("defs")
+        if defs:
+            self.macros = {}
+            active: bool = False
+            for line in defs.splitlines():
+                line = line.strip()
+                if line.startswith('#'):
+                    continue
+                if line == f"[{self.language}]":
+                    active = True
+                    continue
+                if not active:
+                    continue
+                if line.startswith('['):
+                    active = False
+                    continue
+                # Here's a definition.
+                if '=' not in line:
+                    raise GrammarError(f"Invalid definition {line!r} in @defs meta.")
+                name, value = line.split('=', 1)
+                self.macros[name.strip()] = Code(value.strip())
         grammar.initialize()
         self.validate_rule_names()
         checker = RuleCheckingVisitor(self.rules, self.tokens, self)
@@ -346,7 +384,30 @@ class ParserGenerator(ABC):
 
     @abstractmethod
     def generate(self, filename: str) -> None:
-        raise NotImplementedError
+        """ Generate the result parser file.
+        This is what is common to all target languages.
+        Subclass will add more text.
+        """
+        pass
+
+    @contextlib.contextmanager
+    def gen_header_and_trailer(self, filename: str) -> Iterator[None]:
+        header = self.grammar.metas.get("header", self.default_header())
+        if header is not None:
+            basename = os.path.basename(filename)
+            self.print(header.rstrip("\n").format(filename=basename))
+        subheader = self.grammar.metas.get("subheader", "")
+        if subheader:
+            self.print(subheader)
+        subheader = self.grammar.metas.get(f"subheader_{self.language}", "")
+        if subheader:
+            self.print(subheader)
+
+        yield
+
+        trailer = self.grammar.metas.get("trailer", self.default_trailer())
+        if trailer is not None:
+            self.print(trailer.rstrip("\n"))
 
     @contextlib.contextmanager
     def indent(self, levels: int = 1) -> Iterator[None]:
@@ -356,9 +417,9 @@ class ParserGenerator(ABC):
         finally:
             self.level -= levels
 
-    break_lines: List[int] = [892]
+    break_lines: List[int] = [224]
     break_tokens: TokenMatch = TokenMatch('''
-        52, 25 - 37
+        #52, 25 - 37
         ''')
 
     def print(self, *args: object, comment: str = None) -> None:
@@ -580,6 +641,8 @@ class InitialNamesVisitor(GrammarVisitor):
     def visit_Attr(self, node: Attr) -> Set[Any]:
         return set()
 
+    def visit_ObjName(self, node: ObjName) -> Set[Any]:
+        return set()
 
 def compute_left_recursives(
     rules: Dict[str, Rule]

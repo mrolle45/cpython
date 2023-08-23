@@ -161,6 +161,7 @@ class Tokenizer:
         """ Prints all the tokens, without consuming any input or altering the index.
         Optionally, prints only several items before and after the current size.
         """
+        list(map(print, (self.showtokens())))
         index = self._index
         size = len(self._tokens)
         # Fill the array.

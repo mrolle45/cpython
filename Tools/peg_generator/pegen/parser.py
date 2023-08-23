@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import dataclasses
 import time
 import token
 import tokenize
@@ -12,8 +13,8 @@ from typing import (
     Type, TypeVar, Union, cast
     )
 
-from pegen.tokenizer import Mark, Tokenizer, exact_token_types
-from pegen.grammar import Cut
+from pegen.tokenizer import Mark, Tokenizer, exact_token_types, TokenRange
+from pegen.grammar import Cut, Alt, OptVal
 
 T = TypeVar("T")
 P = TypeVar("P", bound="Parser")
@@ -21,8 +22,21 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 Token = tokenize.TokenInfo
 
+ParseStatus = bool
 ParseResult = Union[Tuple[T], None]
 ParseFunc = Callable[[], ParseResult]
+
+@dataclasses.dataclass
+class RuleDescr:
+    parse: Callable[[], ParseResult]        # Function to call to parse the rule
+    name: str                               # For debugging.
+    expr: str                               # For debugging.
+
+@dataclasses.dataclass
+class RuleAltDescr:
+    parse: Callable[[], Any]
+    name: str
+    expr: str
 
 def logger(method: F) -> F:
     """For non-memoized functions that we want to be logged.
@@ -36,14 +50,15 @@ def logger(method: F) -> F:
             return method(self, *args)
         argsr = ",".join(repr(arg) for arg in args)
         fill = "  " * self._level
-        print(f"{fill}{method_name}({argsr}) .... (looking at {self._showpeek()})")
+        self._log(f"{method_name}({argsr}) .... (looking at {self._showpeek()})")
         self._level += 1
         tree = method(self, *args)
         self._level -= 1
-        print(f"{fill}... {method_name}({argsr}) --> {tree!s:.200}")
+        self._log(f"... {method_name}({argsr}) --> {tree!s:.200}")
         return tree
 
     logger_wrapper.__wrapped__ = method  # type: ignore
+    logger_wrapper._nolog = True
     return cast(F, logger_wrapper)
 
 
@@ -65,22 +80,23 @@ def memoize(method: F) -> F:
         fill = "  " * self._level
         if key not in self._cache:
             if verbose:
-                print(f"{fill}{method_name}({argsr}) ... (looking at {self._showpeek()})")
+                self._log(f"{method_name}({argsr}) ... (looking at {self._showpeek()})")
             self._level += 1
             tree = method(self, *args)
             self._level -= 1
             if verbose:
-                print(f"{fill}... {method_name}({argsr}) -> {tree!s:.200}")
+                self._log(f"... {method_name}({argsr}) -> {tree!s:.200}")
             endmark = self._mark()
             self._cache[key] = tree, endmark
         else:
             tree, endmark = self._cache[key]
             if verbose:
-                print(f"{fill}{method_name}({argsr}) -> {tree!s:.200}")
+                self._log(f"{method_name}({argsr}) -> {tree!s:.200}")
             self._reset(endmark)
         return tree
 
     memoize_wrapper.__wrapped__ = method  # type: ignore
+    memoize_wrapper._nolog = True
     return cast(F, memoize_wrapper)
 
 
@@ -101,7 +117,7 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
         fill = "  " * self._level
         if key not in self._cache:
             if verbose:
-                print(f"{fill}{method_name} ... (looking at {self._showpeek()})")
+                self._log(f"{method_name} ... (looking at {self._showpeek()})")
             self._level += 1
 
             # For left-recursive rules we manipulate the cache and
@@ -117,7 +133,7 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
             lastresult, lastmark = None, mark
             depth = 0
             if verbose:
-                print(f"{fill}Recursive {method_name} at {mark} depth {depth}")
+                self._log(f"Recursive {method_name} at {mark} depth {depth}")
 
             while True:
                 self._reset(mark)
@@ -134,11 +150,11 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
                     )
                 if not result:
                     if verbose:
-                        print(f"{fill}Fail with {lastresult!s:.200} to {lastmark}")
+                        self._log(f"Fail with {lastresult!s:.200} to {lastmark}")
                     break
                 if endmark <= lastmark:
                     if verbose:
-                        print(f"{fill}Bailing with {lastresult!s:.200} to {lastmark}")
+                        self._log(f"Bailing with {lastresult!s:.200} to {lastmark}")
                     break
                 self._cache[key] = lastresult, lastmark = result, endmark
 
@@ -147,7 +163,7 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
 
             self._level -= 1
             if verbose:
-                print(f"{fill}{method_name}() -> {tree!s:.200} [cached]")
+                self._log(f"{method_name}() -> {tree!s:.200} [cached]")
             if tree:
                 endmark = self._mark()
             else:
@@ -157,12 +173,13 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
         else:
             tree, endmark = self._cache[key]
             if verbose:
-                print(f"{fill}{method_name}() -> {tree!s:.200} [fresh]")
+                self._log(f"{method_name}() -> {tree!s:.200} [fresh]")
             if tree:
                 self._reset(endmark)
         return tree
 
     memoize_left_rec_wrapper.__wrapped__ = method  # type: ignore
+    memoize_left_rec_wrapper._nolog = True
     return memoize_left_rec_wrapper
 
 
@@ -176,7 +193,7 @@ cut_sentinel = _CutSentinel()
 
 
 class Parser:
-    """Parsing base class."""
+    """Parsing base class for Python parser."""
 
     KEYWORDS: ClassVar[Tuple[str, ...]]
 
@@ -190,13 +207,58 @@ class Parser:
         # Integer tracking whether we are in a left recursive rule or not. Can be useful
         # for error reporting.
         self.in_recursive_rule = 0
+        if verbose:
+            # Apply logger() to some methods to make instance variables with same name.
+            for name in dir(self):
+                if name.startswith('__'): continue
+                method = getattr(self, name)
+                if not callable(method): continue
+                if name.startswith('_'):
+                    # Log sunder methods 
+                    continue
+                else:
+                    # Log regular methods (which are rules) unless they have method._nolog = True.
+                    if getattr(method, '_nolog', False): continue
+                setattr(self, name,
+                    self._call_verbose(method),
+                    )
+                x = 0
         # Pass through common tokenizer methods.
         self._mark = self._tokenizer.mark
         self._reset = self._tokenizer.reset
+        self.start_mark: int = 0                # Tokenizer position at start of parsing the current Alt.
+                                                # Saved and restored by self._alt().
+
+    def _call_verbose(self, method) -> Callable:
+        def wrapper(*args):
+            method_name = method.__name__
+            if not self._verbose:
+                return method(self, *args)
+            argsr = ",".join(repr(arg) for arg in args)
+            self._log(f"{method_name}({argsr}) .... (looking at {self._showpeek()})")
+            self._level += 1
+            tree = method(*args)
+            self._level -= 1
+            self._log(f"... {method_name}({argsr}) --> {tree!s:.200}")
+            return tree
+        return wrapper
 
     @abstractmethod
     def start(self) -> Any:
         pass
+
+    @property
+    def locations(self) -> TokenRange:
+        """ The tokenizer start and end positions for the node being parsed.
+        Called by the node's constructor, to be stored in the node.
+        """
+        return TokenRange(self._tokenizer._tokens[self.start_mark],
+                   self._tokenizer.get_last_non_whitespace_token())
+
+    @property
+    def _lineno(self) -> int:
+        """ The line number in the grammar file where the next token is found. """
+        return self._tokenizer.peek().start[0]
 
     def _showpeek(self) -> str:
         tok = self._tokenizer.peek()
@@ -244,51 +306,45 @@ class Parser:
             return self._tokenizer.getnext()
         return None
 
-    @memoize
-    def _expect(self, type: str) -> ParseResult[Token]:
+    def _expect_name(self, name: str) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
-        if tok.string == type:
+        if tok.type == token.NAME and tok.string == name:
             return self._tokenizer.getnext(),
-        if type in exact_token_types:
-            if tok.type == exact_token_types[type]:
-                return self._tokenizer.getnext(),
-        if type in token.__dict__:
-            if tok.type == token.__dict__[type]:
-                return self._tokenizer.getnext(),
-        if tok.type == token.OP and tok.string == type:
+
+    def _expect_type(self, type: int) -> ParseResult[Token]:
+        tok = self._tokenizer.peek()
+        if tok.exact_type == type:
             return self._tokenizer.getnext(),
         return None
 
-    def _expect_forced(self, res: Any, expectation: str) -> Optional[Tuple[Token]]:
+    def _expect_char(self, char: str) -> ParseResult[Token]:
+        tok = self._tokenizer.peek()
+        if tok.type == token.CHAR and tok.string == char:
+            return self._tokenizer.getnext(),
+        return None
+
+    def _expect_forced(self, res: Any, expectation: str) -> Any:
         if res is None:
             raise self._make_syntax_error(f"expected {expectation}")
         return res
 
-    def _positive_lookahead(self, func: Callable[..., T], *args: object) -> T:
+    def _lookahead(self, positive: bool, func: Callable[..., T], *args: object) -> ParseStatus:
         mark = self._mark()
-        item = func(*args)
+        item = bool(func(*args))
         self._reset(mark)
-        return (item,) if item else None
+        return item == positive
 
-    def _negative_lookahead(self, func: Callable[..., object], *args: object) -> bool:
-        mark = self._mark()
-        item = func(*args)
-        self._reset(mark)
-        return None if item else (True,)
+    def _rule(self, rule: RuleDescr) -> ParseResult:
+        """ Calls the rule's parse function and returns the result.
+        This function is nested within the rule's main body.
+        """
+        return rule.parse()
 
-    def _rhs(self, *alts: Callable[..., object]) -> Optional[Tuple[object]]:
-        mark = self._mark()
-        results = map(self._alt, alts)
-        result = next(results, None)
-        if result: return result
-        self._reset(mark)
-        return None
-
-    def _alts(self, *alts: ParseFunc, cut = cut_sentinel) -> ParseResult:
-        mark = self._mark()
+    def _alts(self, alts: List[RuleAltDescr], cut = cut_sentinel) -> ParseResult:
         """ Parse several Alts.  Return first success result, or failure if an alt parses as Cut. """
-        for altfunc in alts:
-            alt = self._alt(altfunc)
+
+        for alt in alts:
+            alt = self._alt(alt)
             if alt is cut:
                 # This Alt failed with a cut, quit.
                 return None
@@ -297,76 +353,95 @@ class Parser:
         # All Alts failed.
         return None
 
-    def _alt(self, alt: ParseFunc) -> ParseResult:
+    def _alt(self, alt: RuleAltDescr) -> ParseResult:
         """ Parse an Alt.  Restore mark on failure. """
-        mark = self._mark()
-        result = alt()
+        save = self.start_mark
+        mark = self.start_mark = self._mark()
+        result = alt.parse()
+        self.start_mark = save
         if result: return result
         self._reset(mark)
-        return None
+        return result
 
-    def _opt(self, func: Callable[..., object]) -> Tuple[object]:
-        """ Make the result always true by replacing None with (None,). """
-        obj = func()
-        return obj and obj or (None, )
+    def _opt(self, item_func: Callable[..., ParseResult]) -> ParseResult[OptVal]:
+        """ A list of (the item if parsed) or (empty if not parsed).
+        This is wrapped in an OptVal object.
+        """
+        obj = item_func()
+        return OptVal(obj and [obj[0]] or []),
 
-    def _repeat0(self, elem_func: Callable[..., object], ) -> Optional[Tuple[List[object]]]:
-        result = []
-        while True:
-            mark = self._mark()
-            child = elem_func()
-            if not child:
-                self._reset(mark)
-                break
-            result.append(child[0])
-        return result,
+    def _loop(self,
+            item_func: Callable[[], ParseResult],
+            sep_func: Callable[[], ParseResult],
+            min: int,
+            max: int = 0,
+            ) -> ParseResult[List[GrammarNode]]:
+        """ Parse some item some number of times, possibly with a separator between items.
+        Specify min and max number of items.  Parse fails is min number is not reached.
+        If the maximum number is reached, no more items are attempted.  max <= 0 means no limit.
+        Result is a list of all the parsed items.
+        """
 
-    def _repeat1(self, elem_func: Callable[..., object], ) -> Optional[Tuple[List[object]]]:
-        mark = self._mark()
-        child = elem_func()
+        child: ParseResult = item_func()
         if not child:
-            self._reset(mark)
-            return None
-        result = [child[0]]
-        while True:
+            if min:
+                # Only way to fail is a Repeat1 or Gather1, with no elements parsed.
+                return None
+            else:
+                # Success is an empty list.
+                return [],
+        result: List[GrammarNode] = [child[0]]
+        while max <= 0 or len(result) < max:
             mark = self._mark()
-            child = elem_func()
+            if sep_func:
+                sep = sep_func()
+                if not sep:
+                    self._reset(mark)
+                    break
+            child = item_func()
             if not child:
                 self._reset(mark)
                 break
             result.append(child[0])
+        if len(result) < min:
+            return None
         return result,
+
+    def _repeat(self,
+                item_func: Callable[[], ParseResult],
+                repeat1: int,
+                ) -> ParseResult[list]:
+        return self._loop(item_func, None, repeat1)
 
     def _gather(self,
-            elem_func: Callable[..., object],
-            sep_func: Callable[..., object],
-            ) -> Optional[Tuple[List[object]]]:
-        mark = self._mark()
-        child = elem_func()
-        if not child:
-            self._reset(mark)
-            return None
-        result = [child[0]]
-        while True:
-            mark = self._mark()
-            sep = sep_func()
-            if not sep:
-                self._reset(mark)
-                break
-            child = elem_func()
-            if not child:
-                self._reset(mark)
-                break
-            result.append(child[0])
-        return result,
+                item_func: Callable[[], ParseResult],
+                sep_func: Callable[[], ParseResult],
+                repeat1: int,
+                ) -> ParseResult[list]:
+        return self._loop(item_func, sep_func, repeat1)
 
-    def _get_val(self, item) -> Optional[object]:
+    def _get_val(self, item: ParseResult[GrammarNode]) -> Optional[GrammarNode]:
         if item is None: return None
         return item[0]
 
     def _make_syntax_error(self, message: str, filename: str = "<unknown>") -> SyntaxError:
         tok = self._tokenizer.diagnose()
         return SyntaxError(message, (filename, tok.start[0], 1 + tok.start[1], tok.line))
+
+    def _log(self, msg: str) -> None:
+        """ Print the message, with indentation and text wrapping. """
+        fill = "  " * self._level
+        import textwrap
+        lines = textwrap.wrap(
+            msg, width=80,
+            initial_indent=fill,
+            subsequent_indent=fill + '    '
+            )
+        for line in lines:
+            print(line)
+
+    def __repr__(self) -> str:
+        return f"<Parser [{self._mark()}] at {self._tokenizer.peek().start}>"
 
 def simple_parser_main(parser_class: Type[Parser]) -> None:
     argparser = argparse.ArgumentParser()

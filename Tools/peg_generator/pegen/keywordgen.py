@@ -59,7 +59,7 @@ def main() -> None:
     with args.tokens_file as tok_file:
         all_tokens, exact_tok, non_exact_tok = generate_token_definitions(tok_file)
     gen = CParserGenerator(grammar, all_tokens, exact_tok, non_exact_tok, file=None)
-    gen.collect_rules()
+    gen.collect_keywords(self.rules)
 
     with args.keyword_file as thefile:
         all_keywords = sorted(list(gen.keywords.keys()) + EXTRA_KEYWORDS)

@@ -1,15 +1,72 @@
+""" pegen/test.py
+Run as standalone script to exercise various parser generator functionality.
+
+"""
 import os, sys
-cur = os.path.abspath('Tools/peg_generator')
+#import inspect
+#print(inspect.stack())
+print("Current dir =", os.path.abspath('.'))
+cur = os.path.abspath('./Tools/peg_generator')
 print(cur)
+sys.path.insert(0, os.path.abspath('Lib/MyLib'))
+sys.modules.pop('token', None)
+sys.modules.pop('tokenize', None)
 sys.path.append(cur)
+sys.path.append(os.path.abspath('Tools/scripts'))
 os.chdir(cur)
+print("Current dir =", os.path.abspath('.'))
+
+#import pegen.parser_generator
+
+import token, tokenize
+#del sys.path[0]
+
 
 import pegen.build
 from pegen.validator import validate_grammar
 
-grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator('pegen/test.gram', 'result_python.txt', verify=False)
-validate_grammar(grammar)
-pegen.build.build_c_parser_and_generator('pegen/test.gram', '../../Grammar/Tokens', 'result_c.txt')
-validate_grammar(grammar)
+# GENERATE Grammar/Tokens -> Lib/token.py
+
+#import generate_token
+#generate_token.make_py('../../Grammar/Tokens', '../../Lib/MyLib/token.py')
+
+##### GENERATE PYTHON (NO VERIFY) pegen/metagrammar.gram -> pegen/result_meta.py
+
+grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator(
+    'pegen/metagrammar.gram', 'pegen/result_meta.py', verify=False)
+#validate_grammar(grammar)
+
+# GENERATE PYTHON from the result_meta.py parser.  metagrammar -> result_meta_meta.py.
+import result_meta
+grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator(
+    'pegen/metagrammar.gram', 'pegen/result_meta_meta.py', verify=False, parser_class=result_meta.GeneratedParser)
+
+# GENERATE PYTHON (NO VERIFY) pegen/test.gram -> pegen/pegen/result_python.py
+
+#grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator(
+#    'pegen/test.gram', 'pegen/result_python.py', verify=False)
+#validate_grammar(grammar)
+#grammar.dump()
+
+# Test recursive rules, both C and Python.
+#grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator('pegen/test_rec.gram', 'pegen/result_rec.py', verify=False)
+#import result_rec
+#from pegen.parser import simple_parser_main
+#sys.argv.append('pegen/rec.txt')
+#sys.argv.append('-vv')
+#simple_parser_main(result_rec.GeneratedParser)
+
+#grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator('pegen/test_rec.gram', '../../Grammar/Tokens', 'pegen/result_rec.c')
+
+##### GENERATE C pegen/test.gram, Grammar/Tokens -> pegen/result_c.c
+
+#grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator('pegen/test.gram', '../../Grammar/Tokens', 'pegen/result_c.c')
+#grammar.dump()
+#validate_grammar(grammar)
+
+# GENERATE Grammar/Python.gram, Grammar/Tokens -> Parser/parser.c
+
+#grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator('../../Grammar/Python.gram', '../../Grammar/Tokens', '../../Parser/parser.c')
+#validate_grammar(grammar)
 
 x = 0
