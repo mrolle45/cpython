@@ -26,22 +26,11 @@ ParseStatus = bool
 ParseResult = Union[Tuple[T], None]
 ParseFunc = Callable[[], ParseResult]
 
-@dataclasses.dataclass
-class RuleDescr:
-    parse: Callable[[], ParseResult]        # Function to call to parse the rule
-    name: str                               # For debugging.
-    expr: str                               # For debugging.
-
-@dataclasses.dataclass
-class RuleAltDescr:
-    parse: Callable[[], Any]
-    name: str
-    expr: str
 
 def logger(method: F) -> F:
     """For non-memoized functions that we want to be logged.
-
-    (In practice this is only non-leader left-recursive functions.)
+    In practice, this is only generated when the parser._verbose is true,
+    and not for memoized or left-recursive leader functions (which do their own logging).
     """
     method_name = method.__name__
 
@@ -183,15 +172,6 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
     return memoize_left_rec_wrapper
 
 
-class _CutSentinel:
-    def __bool__(self) -> bool: return False
-
-    def __repr__(self) -> str: return '<Cut parsed>'
-
-# Singleton object returned by an Alt which parsed a Cut.
-cut_sentinel = _CutSentinel()
-
-
 class Parser:
     """Parsing base class for Python parser."""
 
@@ -199,10 +179,14 @@ class Parser:
 
     SOFT_KEYWORDS: ClassVar[Tuple[str, ...]]
 
+    _cut_occurred: bool = False             # Set by parsing a Cut, cleared at start of every Alt.
+
     def __init__(self, tokenizer: Tokenizer, *, verbose: bool = False):
         self._tokenizer = tokenizer
         self._verbose = verbose
         self._level = 0
+        self.start_mark: int = 0                # Tokenizer position at start of parsing the current Alt.
+                                                # Saved and restored by self._alt().
         self._cache: Dict[Tuple[Mark, str, Tuple[Any, ...]], Tuple[Any, Mark]] = {}
         # Integer tracking whether we are in a left recursive rule or not. Can be useful
         # for error reporting.
@@ -226,8 +210,7 @@ class Parser:
         # Pass through common tokenizer methods.
         self._mark = self._tokenizer.mark
         self._reset = self._tokenizer.reset
-        self.start_mark: int = 0                # Tokenizer position at start of parsing the current Alt.
-                                                # Saved and restored by self._alt().
+
 
     def _call_verbose(self, method) -> Callable:
         def wrapper(*args):
@@ -248,7 +231,7 @@ class Parser:
         pass
 
     @property
-    def locations(self) -> TokenRange:
+    def _locations(self) -> TokenRange:
         """ The tokenizer start and end positions for the node being parsed.
         Called by the node's constructor, to be stored in the node.
         """
@@ -334,30 +317,34 @@ class Parser:
         self._reset(mark)
         return item == positive
 
-    def _rule(self, rule: RuleDescr) -> ParseResult:
+    def _rule(self, rule: ParseFunc) -> ParseResult:
         """ Calls the rule's parse function and returns the result.
         This function is nested within the rule's main body.
         """
-        return rule.parse()
+        # TODO: Can add some diagnostic info in self._verbose mode, similar to the memoize* wrappers.
 
-    def _alts(self, alts: List[RuleAltDescr], cut = cut_sentinel) -> ParseResult:
+        return rule()
+
+    def _alts(self, alts: List[ParseFunc]) -> ParseResult:
         """ Parse several Alts.  Return first success result, or failure if an alt parses as Cut. """
+        # TODO: Can add some diagnostic info in self._verbose mode, similar to pegen.c for a C parser.
 
         for alt in alts:
             alt = self._alt(alt)
-            if alt is cut:
+            if alt: return alt
+            if self._cut_occurred:
                 # This Alt failed with a cut, quit.
                 return None
-            if alt: return alt
             # This Alt failed, try again with the next one.
         # All Alts failed.
         return None
 
-    def _alt(self, alt: RuleAltDescr) -> ParseResult:
+    def _alt(self, alt: ParseFunc) -> ParseResult:
         """ Parse an Alt.  Restore mark on failure. """
         save = self.start_mark
         mark = self.start_mark = self._mark()
-        result = alt.parse()
+        self._cut_occurred = False
+        result = alt()
         self.start_mark = save
         if result: return result
         self._reset(mark)
@@ -419,6 +406,9 @@ class Parser:
                 repeat1: int,
                 ) -> ParseResult[list]:
         return self._loop(item_func, sep_func, repeat1)
+
+    def _cut(self) -> None:
+        self._cut_occurred = True
 
     def _get_val(self, item: ParseResult[GrammarNode]) -> Optional[GrammarNode]:
         if item is None: return None
@@ -512,4 +502,3 @@ def simple_parser_main(parser_class: Type[Parser]) -> None:
         print("Caches sizes:")
         print(f"  token array : {len(tokenizer._tokens):10}")
         print(f"        cache : {len(parser._cache):10}")
-        ## print_memstats()

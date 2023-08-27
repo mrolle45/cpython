@@ -38,38 +38,102 @@ _PyPegen_byte_offset_to_character_offset(PyObject *line, Py_ssize_t col_offset)
     return size;
 }
 
-// Here, mark is the start of the node, while p->mark is the end.
-// If node==NULL, they should be the same.
-int
-_PyPegen_insert_memo(Parser *p, int mark, int type, void *node)
+// Functions for handling memoizing of rule parse results.
+// A Memo object holds the mark after the parse and a copy of the parse result, if successful,
+//  or a failure indicator if parse failure.
+// Also holds a unique number for the rule being parsed.
+// Memo resides in a chain beginning at the Token where the rule parse started.
+
+// Get previous parse result and success status for the current rule at the current input location, if any.
+// Returns:
+//      If the rule has not been parsed at this location, return false.
+//      If the rule was parsed successfully, return true, with *pStat = true and **ppRes = the result.
+//      If the rule parse failed, return true, with *pStat = false.
+
+static ParseStatus
+is_memoized(Parser *p, ParseResultPtr * ppRes, ParseStatus * pStat)
+{
+    if (p->mark == p->fill) {
+        if (_PyPegen_fill_token(p) < 0) {
+            p->error_indicator = 1;
+            return false;
+        }
+    }
+
+    Token *t = p->tokens[p->mark];
+    int type = p->rule->rule->type;
+    for (Memo *m = t->memo; m != NULL; m = m->next) {
+        if (m->type == type) {
+#if defined(PY_DEBUG)
+            if (0 <= type && type < NSTATISTICS) {
+                long count = m->mark - p->mark;
+                // A memoized negative result counts for one.
+                if (count <= 0) {
+                    count = 1;
+                }
+                memo_statistics[type] += count;
+            }
+#endif
+            // Yes, this rule has been tried before.  Check for success.
+            * pStat = m->mark >= 0;
+            if (*pStat) {
+                p->mark = m->mark;
+                _PyPegen_PARSE_COPY_FROM(&m->result, ppRes)
+            }
+            return true;
+        }
+    }
+    // Not tried before at this location.
+    return false;
+}
+
+static void
+store_in_memo(Memo * m, int mark, ParseResultPtr * ppRes, ParseStatus stat)
+{
+    if (stat) {
+        _PyPegen_PARSE_COPY_FROM(m->result, ppRes);
+        m->mark = mark;
+    }
+    else
+        m->mark = -1;
+}
+
+// Create a Memo to record rule parse result.
+// Here, mark is where the parse began, while p->mark is where it ended.
+// If stat == False, they should be the same.
+// Returns -1 if something went wrong.
+static int
+insert_memo(Parser *p, int mark, ParseResultPtr * ppRes, ParseStatus stat)
 {
     // Insert in front
-    Memo *m = _PyArena_Malloc(p->arena, sizeof(Memo));
+    Memo *m = _PyArena_Malloc(p->arena, offsetof(Memo, ppRes) + ppRes->size);
     if (m == NULL) {
         return -1;
     }
+    int type = p->rule->rule->type;
     m->type = type;
-    m->node = node;
-    m->mark = p->mark;
-    m->next = p->tokens[mark]->memo;
-    p->tokens[mark]->memo = m;
+    Token * tok = p->tokens[mark];
+    m->next = tok->memo;
+    tok->memo = m;
+    store_in_memo(m, p->mark, ppRes, stat);
     return 0;
 }
 
-// Like _PyPegen_insert_memo(), but updates an existing node if found.
-int
-_PyPegen_update_memo(Parser *p, int mark, int type, void *node)
+// Like insert_memo(), but updates an existing node if found.
+static int
+update_memo(Parser *p, int mark, ParseResultPtr * ppRes, ParseStatus stat)
 {
-    for (Memo *m = p->tokens[mark]->memo; m != NULL; m = m->next) {
+    Token* tok = p->tokens[mark];
+    int type = p->rule->rule->type;
+    for (Memo *m = tok->memo; m != NULL; m = m->next) {
         if (m->type == type) {
             // Update existing node.
-            m->node = node;
-            m->mark = p->mark;
+            store_in_memo(m, p->mark, ppRes, stat);
             return 0;
         }
     }
     // Insert new node.
-    return _PyPegen_insert_memo(p, mark, type, node);
+    return insert_memo(p, mark, ppRes, stat);
 }
 
 static int
@@ -292,36 +356,168 @@ _PyPegen_get_memo_statistics()
 }
 #endif
 
-int  // bool
-_PyPegen_is_memoized(Parser *p, int type, void *pres)
+// Helper functions to parse some grammar node, returning the parse result via a result pointer.
+// If the parse succeeds, the result is copied into the caller's value and true is returned.
+// If the parse fails, or if something went wrong, false is returned and the mark is left unchanged.
+
+// Common to all Rules.
+static
+RuleInfo * enter_rule(Parser * p, RuleDescr * rule, void * local_values[]) {
+    RuleInfo new_rule = { rule, local_values };
+    p->level++;
+    p->rule = new_rule;
+    return old_rule;
+}
+
+static
+void leave_rule(Parser * p, const RuleInfo * old_rule) {
+    p->level--;
+    p->rule = old_rule;
+}
+
+// Parse current rule.  enter_rule() has been called already.
+static
+ParseStatus parse_rule(Parser * p, ParseResultPtr * ppRes) {
+    if (p->level == MAXSTACK) {
+        p->error_indicator = 1;
+        PyErr_NoMemory();
+        return false;
+    }
+    return p->rule->rule->parse(p, ppRes);
+}
+
+// Parser for a simple Rule, including a left-recursive Rule that is not the group leader.
+ParseStatus _PyPegen_parse_rule(Parser* p, ParseResultPtr * ppRes, RuleDescr * rule, void * local_values[])
 {
-    if (p->mark == p->fill) {
-        if (_PyPegen_fill_token(p) < 0) {
-            p->error_indicator = 1;
-            return -1;
-        }
-    }
+    const RuleInfo * old_rule = enter_rule(p, rule, local_values);
+    ParseStatus stat = parse_rule(p, ppRes);
+    leave_rule(p, old_rule);
+    return stat;
+}
 
-    Token *t = p->tokens[p->mark];
-
-    for (Memo *m = t->memo; m != NULL; m = m->next) {
-        if (m->type == type) {
-#if defined(PY_DEBUG)
-            if (0 <= type && type < NSTATISTICS) {
-                long count = m->mark - p->mark;
-                // A memoized negative result counts for one.
-                if (count <= 0) {
-                    count = 1;
-                }
-                memo_statistics[type] += count;
-            }
-#endif
-            p->mark = m->mark;
-            *(void **)(pres) = m->node;
-            return 1;
-        }
+// Parser for memoized Rule, not a left-recursive group leader.
+ParseStatus _PyPegen_parse_memo_rule(Parser* p, ParseResultPtr * ppRes, RuleDescr* rule, void* local_vars[])
+{
+    const RuleInfo * old_rule = enter_rule(p, rule, local_values);
+    ParseStatus stat;
+    if (!is_memoized(p, ppRes, &stat))
+    {
+        // Not done before.  Parse it and remember the result.
+        ParseStatus result = parse_rule(p, ppRes);
+        insert_memo(p, res ? p->mark : -1, type, ppRes, rule->result_size);
     }
-    return 0;
+    leave_rule(p, old_rule);
+    return stat;
+}
+
+// Parser helper for left-recursive group leader Rule.
+static
+ParseStatus parse_recursive_rule(Parser * p, ParseResultPtr * ppRes)
+{
+    void* _raw = NULL;
+    ParseStatus stat;
+    if (is_memoized(p, ppRes, &stat, rule->type))
+    {
+        return stat;
+    }
+    int _mark = p->mark;
+    int _resmark = p->mark;
+    stat = false;
+    while (1) {
+        int err = update_memo(p, _mark, ppRes, stat);
+        if (err) {
+            return false;
+        }
+        p->mark = _mark;
+        stat = parse_rule(p, ppRes);
+
+        if (p->error_indicator) {
+            return false;
+        }
+        if (!stat || p->mark <= _resmark)
+            break;
+        _resmark = p->mark;
+    }
+    p->mark = _resmark;
+    return stat;
+}
+
+// Parser for left-recursive group leader Rule.
+ParseStatus _PyPegen_parse_recursive_rule(Parser* p, ParseResultPtr * ppRes, RuleDescr* rule, void* local_vars[])
+{
+    const RuleInfo * old_rule = enter_rule(p, rule, local_values);
+    ParseStatus stat = parse_recursive_rule(p, ppRes);
+done:
+    leave_rule(p, old_rule);
+    return stat;
+}
+
+
+// Helper function to parse a rule alternative, returning the parse result.
+// If the parse fails, NULL is returned and the mark is left unchanged.
+ParseStatus _PyPegen_parse_alt(Parser* p, ParseResultPtr * ppRes, const RuleAltDescr* alt)
+{
+    int _mark = p->mark;
+    p->cut_indicator = false;
+    ParseStatus _res = alt->parse(p, ppRes);
+    D(fprintf(stderr, "%*c> %s[%d-%d]: %s\n", p->level, ' ', alt->name, _mark, p->mark, alt->expr));
+    if (!_res)
+    {
+        p->mark = _mark;
+        //if (p->error_indicator) _res = NULL;
+        const char * flag = p->error_indicator ? "ERROR!" : "-";
+        D(fprintf(stderr, "%*c%s %s[%d-%d]: %s failed!\n", p->level, ' ', flag, alt->name, _mark, p->mark, alt->expr));
+    }
+    else
+    {
+        D(fprintf(stderr, "%*c+ %s[%d-%d]: %s succeeded!\n", p->level, ' ', alt->name, _mark, p->mark, alt->expr));
+    }
+    return _res;
+}
+
+// Helper function to parse several rule alternatives, returning the first successful parse result.
+// However, if a parse result is the cut sentinel, or an error occurred,
+// then no more alternatives are tried, and NULL is returned.
+// If the parse fails, NULL is returned and the mark is left unchanged.
+ParseStatus _PyPegen_parse_alts(Parser* p, ParseResultPtr * ppRes, const RuleAltDescr alts[], int count)
+{
+    ParseStatus _res;
+    while (count-- > 0) {
+        _res = _PyPegen_parse_alt(p, ppRes, alts++);
+        if (p->error_indicator || p->cut_indicator)
+            return false;
+        else if (_res)
+            return _res;
+    }
+    // All alts failed.
+    return false;
+}
+
+// Parse an item, requiring it to succeed.  If the item parse fails, raise a SyntaxError.
+void _PyPegen_parse_forced(Parser *p, ParseResultPtr * ppRes, ParseFunc item);
+
+// Parse any soft keyword.
+// Same as _PyPegen_parse_name(), but fails if the name is not an actual soft keyword. 
+ParseStatus _PyPegen_parse_any_soft_keyword(Parser * p, ParseResultPtr * ppRes) {
+    expr_ty result = _PyPegen_soft_keyword_token(p);
+    if (result) {
+        _PyPegen_PARSE_COPY_TO(ppRes, &result);
+        return true;
+    }
+    else
+    return false;
+}
+
+// Parse a specific soft keyword.
+// Same as _PyPegen_parse_name(), but fails if the name is not the given keyword. 
+ParseStatus _PyPegen_parse_soft_keyword(Parser * p, ParseResultPtr * ppRes, const char * keyword) {
+    expr_ty result = _PyPegen_expect_soft_keyword(p, keyword);
+    if (result) {
+        _PyPegen_PARSE_COPY_TO(ppRes, &result);
+        return true;
+    }
+    else
+        return false;
 }
 
 int
@@ -360,6 +556,15 @@ _PyPegen_lookahead(int positive, void *(func)(Parser *), Parser *p)
     return (res != NULL) == positive;
 }
 
+ParseStatus
+_PyPegen_expect_lookahead(Parser * p, _Bool positive, ParseTest func)
+{
+    int mark = p->mark;
+    ParseStatus res = func(p);
+    p->mark = mark;
+    return res == positive;
+}
+
 Token *
 _PyPegen_expect_token(Parser *p, int type)
 {
@@ -391,14 +596,29 @@ _PyPegen_expect_char(Parser* p, char c)
     if (t->type != OP) {
         return NULL;
     }
-    if (t->bytes->ob_sval[0] != c) {
+    if (((PyBytesObject *)(t->bytes))->ob_sval[0] != c) {
         return NULL;
     }
     p->mark += 1;
     return t;
 }
 
-void*
+ParseStatus
+_PyPegen_parse_char(Parser *p, ParseResultPtr * ppRes, char c) {
+    Token * tok = _PyPegen_expect_char(p, c);
+    _PyPegen_PARSE_COPY_TO(ppRes, &tok);
+
+    return tok != NULL;
+}
+
+// Parse a Cut expression.  This doesn't parse anything of the input, but just
+//  sets an indication that if the current Alt faile, then no more Alts will be tried.
+void
+_PyPegen_parse_cut(Parser *p)
+    p->cut_indicator = true;
+
+
+void *
 _PyPegen_expect_forced_result(Parser *p, void* result, const char* expected) {
 
     if (p->error_indicator == 1) {
@@ -455,6 +675,77 @@ _PyPegen_expect_soft_keyword(Parser *p, const char *keyword)
         return NULL;
     }
     return _PyPegen_name_token(p);
+}
+
+// Parse an item some number of times, returning an asdl_seq * with the parsed results as elements.
+// Given a minimum and maximum number of items.  If the minimum number is not reached, the parse fails.
+// If the maximum number is reached, no more items are attempted.  max = 0 means no limit.
+// Optionally provide a separator item, which must be parsed between consecutive items.
+
+ParseStatus _PyPegen_parse_seq(Parser * p, ParseResultPtr * ppRes,
+    ParseFunc item, size_t item_size, ParseFunc * sep, int min, int max
+    ) {
+    if (p->level == MAXSTACK) {
+        p->error_indicator = 1;
+        PyErr_NoMemory();
+    }
+    if (p->error_indicator) {
+        return NULL;
+    }
+
+    void* _res = NULL;
+    int _mark = p->mark;
+    int _start_mark = p->mark;
+    size_t _children_capacity = 0;
+    // _children contains the child results, all packed into a single buffer.
+    char * _children = NULL;
+    size_t _n = 0;
+    {
+        while (!max || _n < max)
+        {
+            // We want to parse next item into _children[_n * element_size].
+            if (_n == _children_capacity) {
+                _children_capacity = _children_capacity ? _children_capacity * 2 : 4;
+                _new_children = PyMem_Realloc(_children, _children_capacity * element_size);
+                if (!_new_children) {
+                    PyMem_Free(_children);
+                    p->error_indicator = 1;
+                    PyErr_NoMemory();
+                    return false;
+                }
+                _children = _new_children;
+            }
+            ParseResultPtr ppRes = { &_children[_n++ * element_size], element_size };
+
+            if (sep && !(*sep)(p, NULL))
+                break;
+            if (!item(p, &ppRes))
+                break;
+            _mark = p->mark;
+        }
+        p->mark = _mark;
+        p->level--;
+        // _n = # items parsed plus 1, since the last one failed.
+        if (--_n < min)
+        {
+            // Not enough items parsed.
+            PyMem_Free(_children);
+            return false;     // Failure when expecting at least one item
+        }
+    }
+
+    // Make asdl_seq for return result and populate it from _children.
+    asdl_seq* _seq = (asdl_seq*)_Py_asdl_generic_seq_new(_n, p->arena);
+    if (!_seq) {
+        PyMem_Free(_children);
+        p->error_indicator = 1;
+        PyErr_NoMemory();
+        return NULL;
+    }
+    asdl_seq_SET_ALL(_seq, element_size, _children);
+    PyMem_Free(_children);
+    _PyPegen_PARSE_COPY_TO(ppRes, &_seq)
+
 }
 
 Token *
@@ -554,10 +845,22 @@ _PyPegen_name_token(Parser *p)
     return _PyPegen_name_from_token(p, t);
 }
 
-void *
-_PyPegen_string_token(Parser *p)
+Token*
+_PyPegen_string_token(Parser* p)
 {
     return _PyPegen_expect_token(p, STRING);
+}
+
+Token*
+_PyPegen_type_comment_token(Parser* p)
+{
+    return _PyPegen_expect_token(p, TYPE_COMMENT);
+}
+
+Token *
+_PyPegen_op_token(Parser* p)
+{
+    return _PyPegen_expect_token(p, OP);
 }
 
 expr_ty _PyPegen_soft_keyword_token(Parser *p) {
@@ -574,6 +877,28 @@ expr_ty _PyPegen_soft_keyword_token(Parser *p) {
         }
     }
     return NULL;
+}
+
+int _PyPegen_location_start(Parser* p, int* lineno, int* col_offset) {    // Current location in input.
+    if (p->mark == p->fill && _PyPegen_fill_token(p) < 0) {
+        p->error_indicator = 1;
+        return -1;
+    }
+    Token * tok = p->tokens[p->mark];
+    *lineno = tok->lineno;
+    *col_offset = tok->col_offset;
+    return 0;
+}
+
+int _PyPegen_location_end(Parser* p, int* lineno, int* col_offset) {      // Current location in input, but backs up over whitespace
+    Token * tok = _PyPegen_get_last_nonnwhitespace_token(p);
+    if (tok == NULL) {
+        p->error_indicator = 1;
+        return -1;
+    }
+    *lineno = tok->lineno;
+    *col_offset = tok->col_offset;
+    return 0;
 }
 
 static PyObject *
@@ -818,6 +1143,7 @@ _PyPegen_Parser_New(struct tok_state *tok, int start_rule, int flags,
     p->known_err_token = NULL;
     p->level = 0;
     p->call_invalid_rules = 0;
+    p->local_values = NULL;
     return p;
 }
 
@@ -856,7 +1182,6 @@ void *
 _PyPegen_run_parser(Parser *p)
 {
     void *res = _PyPegen_parse(p);
-    assert(p->level == 0);
     if (res == NULL) {
         if ((p->flags & PyPARSE_ALLOW_INCOMPLETE_INPUT) &&  _is_end_of_source(p)) {
             PyErr_Clear();

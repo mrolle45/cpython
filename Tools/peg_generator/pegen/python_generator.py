@@ -105,7 +105,7 @@ class _Traits(TargetLanguageTraits):
             from typing import Any, Optional, Callable, cast
 
             from pegen.parser import (
-                memoize, memoize_left_rec, logger, Parser, ParseResult, RuleDescr, RuleAltDescr, cut_sentinel
+                memoize, memoize_left_rec, logger, Parser, ParseResult
                 )
 
             """
@@ -135,6 +135,9 @@ class _Traits(TargetLanguageTraits):
 
     def parser_param(self) -> TypedName:
         return TypedName('_p', Code('Parser'))
+
+    def parse_result_ptr_arg(self, assigned_name: ObjName = None) -> Arg:
+        return
 
     def return_param(self, type: str = None) -> TypedName:
         if not type: type = self.default_type()
@@ -169,12 +172,12 @@ class _Traits(TargetLanguageTraits):
         """ Create a recipe for a Rule. """
         return ParseRecipeExternal(
             rule, rule.name, src,
-            # Add an argument for the rule descriptor.
-            '_rule_descriptor',
+            '_rhs',
             func_type=ParseFunc,
             extra=lambda: self.gen_rule(rule),
             inlines = [rule.rhs],
             value_type=rule.type,
+            use_inline=False,           # Call as parser method.
             )
 
     def sequence_recipe_args(self, seq: Seq, *seq_args: Args) -> Args:
@@ -191,9 +194,13 @@ class _Traits(TargetLanguageTraits):
     def default_func_type(self) -> ParseFunc:
         return ParseFunc
 
-    def parse_value_expr(self, name: ObjName, args: Args, func_type: Type[FuncBase] = None):
+    def parse_value_expr(
+            self, name: ObjName, args: Args, params: Params, *,
+            func_type: Type[FuncBase] = None,
+            assigned_name: ObjName = None,
+        ) -> str:
         """ An expression which produces the desired parse result. """
-        if func_type and func_type.use_parser:
+        if func_type and func_type.use_parser and not func_type.nested:
             name = f"self.{name}"
         return f"{name}{args}"
 
@@ -256,7 +263,7 @@ class _Traits(TargetLanguageTraits):
             type = f"ParseResult[{type}]"
         name = func.name
         params = func.params
-        if func_type.use_parser:
+        if func_type.use_parser and not func_type.nested:
             params = Params([Param(TypedName('self', Code(''))), *params])
         return f"def {name}({ObjName(params.in_func())}) -> {type}:"
 
@@ -265,12 +272,7 @@ class _Traits(TargetLanguageTraits):
         if recipe.outer_call.assigned_name:
             func_name = f"_item_{recipe.outer_call.assigned_name}"
         else:
-            func_name = str(recipe.name)
-        #if not isinstance(recipe.node, Rule):
-        #    func_name = f"_item_{func_name}"
-        #if recipe.src.use_parser:
-        #    # The src is a method of the parser.
-        #    recipe.src.name = 'self.' + recipe.src.name
+            func_name = str(recipe.node.name)
         recipe.func_name = TypedName(
             func_name,
             recipe.outer_call.type,
@@ -279,6 +281,9 @@ class _Traits(TargetLanguageTraits):
 
     def parse_recipe(self, recipe: ParseRecipe, **kwds) -> None:
         """ Generate inline code now. """
+        if recipe.node.alt is recipe.node:
+            self.print()
+            self.print(comment=str(recipe.node))
         if type(recipe.node.parent) is VarItem:
             return
         recipe(self, **kwds)
@@ -331,8 +336,10 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
                             # but they must still be logged.
                             self.print(comment="Left-recursive")
                             self.print("@logger")
-                    elif rule.memo or self.verbose:
+                    elif rule.memo:
                         self.print("@memoize")
+                    elif self.verbose:
+                        self.print("@logger")
                     self.gen_node(rule)
                     #self.visit(rule)
 
@@ -342,36 +349,24 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
 
     def gen_rule(self, rule: Rule) -> None:
         """ Generate extra code inside a Rule parse function. """
-        # Make a rule descriptor.
-        self.print(f"_rule_descriptor = RuleDescr(_rhs, {str(rule.name)!r}, {str(rule.rhs)!r})")
         return
-
-    #def gen_alt(self, rule: Rule) -> None:
-    #    return
 
     def gen_alt(
         self, alt: Alt, **kwds
-    ) -> str:
-        def gen():
-            # Generate a function for each item, using the corresponding variable name
-            fail_value = self.default_value()
-            for item in alt.items():
-                self.print()
-                self.print(comment=f"{item}")
-                # If the item is a Cut, then there's no item name, but there's a Cut function
-                if isinstance(item.item, Cut):
-                    fail_value = self.cut_value()
-                    continue
-        
-                self.gen_alt_item(item, fail_value)
-
+        ) -> str:
+        # Generate a function for each item, using the corresponding variable name
+        fail_value = self.default_value()
+        for item in alt.items():
             self.print()
-            self.print(comment="parse succeeded")
+            self.print(comment=f"{item}")
+            self.gen_alt_item(item, fail_value)
 
-            action = f"return {self.gen_action(alt)},"
-            return action
+        self.print()
+        self.print(comment="parse succeeded")
 
-        return gen()
+        action = f"return {self.gen_action(alt)},"
+        return action
+
 
     def gen_alt_item(self, item: VarItem, fail_value: str = None) -> None:
         """ Code which parses a single named item in an alt.
@@ -392,8 +387,11 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         self.gen_parse(item.parse_recipe)
         parse_name = item.parse_recipe.outer_call.name
         if item.parse_recipe.outer_call.func_type.always_true:
-            self.print(f"{name}: {var_type}")
-            self.print(f"{name}, = {parse_name}()")
+            if item.parse_recipe.outer_call.func_type.has_result:
+                self.print(f"{name}: {var_type}")
+                self.print(f"{name}, = {parse_name}()")
+            else:
+                self.print(f"{parse_name}()")
         elif not item.parse_recipe.outer_call.func_type.has_result:
             self.print(f"if not {parse_name}(): return {fail_value}")
 
@@ -429,54 +427,6 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         else:
             return base_type
 
-    def visit_Rule(self, node: Rule) -> None:
-
-        rhs = node.flatten()
-        if node.left_recursive:
-            if node.leader:
-                self.print("@memoize_left_rec")
-            else:
-                # Non-leader rules in a cycle are not memoized,
-                # but they must still be logged.
-                self.print("@logger")
-        elif node.memo or self.verbose:
-            self.print("@memoize")
-        node_type = node.type or "Any"
-        self.print(comment=f"{node.name}: {rhs}")
-        with self.enter_function(TypedName(node.name, Code(f"ParseResult[{node_type}]"), self.rule_params(node))):
-            self.visit(rhs, ctx=InlFuncCtx('_rhs'))
-            #self.gen_rhs(rhs)
-            self.print('return _rhs()')
-
-    #def visit_Rhs(self, node: Rhs,
-    #    ctx: FuncCtx,
-    #    **kwds) -> FuncInfo:
-    #    """ Generate function definition for the Rhs.
-    #    Used only within a Group.
-    #    """
-    #    self.print(f"def {ctx.name('_rhs')}():")
-    #    with self.indent():
-    #        self.gen_rhs(node)
-
-    #    return ctx.func_info('_rhs', 'Any')
-
-    #def gen_rhs(self, node: Rhs) -> None:
-
-    #    def gen_alt(alt: Alt, suffix: int = 0) -> str:
-    #        name = f"_alt{f'_{suffix}' if suffix else ''}"
-    #        # The body of the alternative, returns (result,) or None.
-    #        self.visit(alt, ctx=InlFuncCtx(name))
-    #        return name
-
-    #    alts = node
-    #    if len(alts) == 1:
-    #        gen_alt(alts[0])
-    #        self.print("return self._alt(_alt)")
-    #    else:
-    #        names = []
-    #        for n, alt in enumerate(node, 1):
-    #            names.append(gen_alt(alt, n))
-    #        self.print(f"return self._alts({', '.join(names)})")
 
     def gen_rhs_descriptors(self, rhs: Rhs, alt_names: List[str]) -> Tuple[str, Callable[[], None]]:
         """ Generate code to parse the individual alts and create descriptor(s) for them.
@@ -485,77 +435,40 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         def gen() -> None:
             # Make descriptor table.
             self.print()
-            with self.enter_scope(f"_alt_descriptors =", '[]'):
+            with self.enter_scope(f"_alts =", '[]'):
                 for name, alt in zip(alt_names, rhs):
-                    self.print(f'RuleAltDescr({name}, {name!r}, {str(alt)!r}),')
+                    self.print(f'{name},')
 
-        descr_name = '_alt_descriptors'
+        descr_name = '_alts'
         return descr_name, gen
-
-    # Older version
-    #def gen_parse(self, recipe: ParseRecipe,
-    #    **kwds
-    #    ) -> None:
-
-    #    node: GrammarNode = recipe.src
-    #    dflt_name: str = recipe.dflt_name
-    #    function: TypedName = TypedName(recipe.name, recipe.src.type)
-    #    args: Args = recipe.args
-    #    extra: Callable[[], None] = recipe.extra
-    #    assert isinstance(args, Args)
-    #    call = recipe.value_expr()
-    #    comment: str = recipe.comment
-    #    self.forward_declare_inlines(recipe)
-    #    inlines = {arg.name: arg.inline for arg in recipe.args if arg.inline}
-    #    if args is not None:
-    #        call = f"{call}{args}"
-    #    return_type = self.default_type(function.type)
-
-    #    with self.enter_function(TypedName(recipe.func_name, return_type, self.default_params())):
-    #        for inline in recipe.inline_recipes():
-    #            # Expand the inline items.
-    #            self.visit(inline.node)
-    #        if comment:
-    #            call = f"{call}   # {comment}"
-    #        if extra:
-    #            extra()
-    #        self.print(f"return {call}")
 
     # Newer version, copied from c_generator.
     def gen_parse(self, recipe: ParseRecipe,
         **kwds
         ) -> None:
         self.forward_declare_inlines(recipe)
-        #lead = recipe.node.depth() * '    '
-        #print(f"{lead}{recipe.node!r}")
-        #print(f"{lead}{recipe.mode.name} {recipe.func_name}")
 
         return_type = recipe.src.type
         if isinstance(recipe.node, Rule):
             return_type = recipe.node.type
-        if recipe.mode is not recipe.Loc or 0x00001:
-            #if recipe.node is not recipe.alt:
-            #    self.print(comment=str(recipe.node))
-            with self.enter_function(
-                recipe.func_name,
-                recipe.func_type,
-                ):
-                for inline in recipe.inline_recipes():
-                    # Expand the inline items.
-                    self.gen_node(inline.node)
-                self.gen_copy_local_vars(recipe.node)
-                #if recipe.mode is recipe.Rule:
-                #    self.gen_return_var(TypedName('_result'))
-                call: str | None = None
-                if recipe.extra:
-                    call = recipe.extra()
-                if call is None:
-                    # Was not supplied by extra()
-                    call = recipe.value_expr()
+        with self.enter_function(
+            recipe.func_name,
+            recipe.func_type,
+            ):
+            for inline in recipe.inline_recipes():
+                # Expand the inline items.
+                self.gen_node(inline.node)
+            call: str | None = None
+            if recipe.extra:
+                call = recipe.extra()
+            if call is None:
+                # Was not supplied by extra()
+                call = recipe.value_expr()
+                if recipe.func_type.returns_status:
                     call = f"return {call}"
-                    if recipe.comment:
-                        call = f"{call}   {self.comment(recipe.comment)}"
-                if call: self.print(call)
+                if recipe.comment:
+                    call = f"{call}   {self.comment(recipe.comment)}"
+            if call: self.print(call)
 
     # Descriptions of helper parsing functions...
 
@@ -638,6 +551,7 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         '_expect_forced', 'Any',
         ('result', 'Any'),
         ('expected', 'str'),
+        func_type=parse_recipe.ParseTrue,
         )
     @functools.cached_property
     def parse_soft_keyword(self) -> TypedName:
@@ -694,7 +608,6 @@ from pegen.parse_recipe import (
     ParseTest,
     ParseTrue,
     ParseData,
-    ParseLocal,
     ParseNone,
     )
 

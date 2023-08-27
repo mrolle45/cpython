@@ -1,10 +1,23 @@
-ENDMARKER
+# Grammar/Tokens
+#
+# Specifies names of tokens used by the tokenizer.
+# Non-exact tokens:
+#   Line consisting solely of the token name, possibly followed by empty string.
+#   The empty string signifies that the token is considered as whitespace.
+# Exact tokens:
+#   Line consisting of the token name followed by a non-empty value string.
+#   This token corresponds to the value string appearing verbatim in the parsed input.
+#   If several tokens' values appear, then it matches the one with the longest value.
+#   For example, '+' matches PLUS, but '+=' matches PLUSEQUAL.
+
+ENDMARKER		''  # whitespace
 NAME
 NUMBER
 STRING
-NEWLINE
-INDENT
-DEDENT
+CHAR
+NEWLINE			''  # whitespace
+INDENT			''  # whitespace
+DEDENT			''  # whitespace
 
 LPAR                    '('
 RPAR                    ')'

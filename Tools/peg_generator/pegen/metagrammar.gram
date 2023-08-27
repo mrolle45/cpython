@@ -64,7 +64,7 @@ param[Param]:
     | n=typed_name { Param(n) }
 
 typed_name[TypedName]:
-    | n=NAME p=params? typ=annotation? { TypedName(n.string, Code(typ.val), p) }
+    | n=NAME p=params? typ=annotation? { TypedName(n.string, Code(typ.val), p.val) }
 
 # In the future this may return something more complicated
 memoflag[str]:
@@ -94,7 +94,7 @@ alt_items[AltItems]:
 
 alt_item[AltItem]:
     | n=typed_name '=' ~ i=item {VarItem(n, i)}
-    | item
+    | i=item {VarItem(None, i)}
 
 item[Item] (memo):
     | '&' '&' ~ i=item {Forced(i)}
@@ -119,19 +119,19 @@ primary[Primary] (memo):
 
 # Mini-grammar for the actions and annotations and call arguments
 
-action[str]: "{" t=target_atoms "}" { t }
-annotation[str]: "[" t=target_atoms "]" { t }
+action[list[Token]]: "{" t=target_atoms "}" { t }
+annotation[list[Token]]: "[" t=target_atoms "]" { t }
 arguments[Args]:
     | '(' a=arg "," b=",".arg+ ","? ')'  { Args([a] + b) }  # Multiple args, comma optional
     | '(' a=arg "," ')' { Args([a]) }                       # One arg, comma required.
     | '(' ')' { Args() }                                    # No args, no comma.
-arg[Arg]: a=arg_atom+ { Arg(" ".join(a)) }
-arg_atom: !"," a=target_atom { a }
+arg[Arg]: a=arg_atom+ { Arg(Code([*chain(*a)])) }
+arg_atom[list[Token]]: !"," a=target_atom { a }
 
-target_atoms[str]:
+target_atoms[list[Token]]:
     | a=target_atom+ { [*chain.from_iterable(a)] }
 
-target_atom[str] (memo):
+target_atom[list[Token]] (memo):
     | l="(" atoms=target_atoms? r=")" { [l, *chain(*(atoms)), r] }
     | l="{" atoms=target_atoms? r="}" { [l, *chain(*(atoms)), r] }
     | l="[" atoms=target_atoms? r="]" { [l, *chain(*(atoms)), r] }
@@ -139,6 +139,6 @@ target_atom[str] (memo):
     | n=NAME { [n] }
     | n=NUMBER { [n] }
     | s=STRING { [s] }
-    | "?" { "?" }
-    | ":" { ":" }
+    | c="?" { [c] }
+    | c=":" { [c] }
     | !")" !"}" !"]" op=OP { [op] }

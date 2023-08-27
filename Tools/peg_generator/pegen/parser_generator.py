@@ -152,64 +152,6 @@ class RuleCheckingVisitor(GrammarVisitor):
             raise GrammarError(f"Calling {node}, requires exactly {nparams} arguments.")
 
 
-# TODO: Remove these classes when no longer used by Py Generator.
-class FuncCtx:
-    """ Specifies how the generation of the parse function was requested.
-    Determines some properties of the generated function.
-    """
-    @abstractmethod
-    def name(self, dflt_name: str) -> str: ...
-
-    @abstractmethod
-    def varname(self, dflt_name: str) -> str: ...
-
-    @abstractmethod
-    def type(self) -> str: ...
-
-    @abstractmethod
-    def vartype(self) -> str: ...
-
-
-class AltFuncCtx(FuncCtx):
-    """ A parse function for a VarItem in an Alt. """
-    def __init__(self, item: VarItem, gen: ParserGenerator):
-        self.item = item
-        self.gen = gen
-        self._varname = None
-
-    def varname(self, dflt_name: str) -> str:
-        if not self._varname:
-            self._varname = self.item.dedupe(self.item.name or (dflt_name + '_var'))
-        return self._varname
-
-    def name(self, dflt_name: str) -> str:
-        return f"_item_{self.varname(dflt_name)}"
-
-    def type(self) -> str:
-        return ""
-
-    def vartype(self) -> str:
-        return self.item.type
-
-
-class InlFuncCtx(FuncCtx):
-    """ A parse function for an inline node in another parse function. """
-    def __init__(self, name: str):
-        self._name = name
-
-    def varname(self, dflt_name: str) -> str:
-        return self._name or dflt_name
-
-    def name(self, dflt_name: str) -> str:
-        return self._name or dflt_name
-
-    def type(self) -> str:
-        return ""
-
-    def vartype(self) -> str:
-        return ""
-
-
 class TargetLanguageTraits(ABC):
     """ Methods of a ParserGenerator which vary with the target language. """
     language: ClassVar[str]
@@ -248,7 +190,7 @@ class TargetLanguageTraits(ABC):
     def parser_param(self) -> Param: ...
 
     @abstractmethod
-    def parse_result_ptr_param(self, assigned_name: str = None) -> Param: ...
+    def parse_result_ptr_arg(self, assigned_name: ObjName = None) -> Arg: ...
 
     @abstractmethod
     def return_param(self) -> Param: ...
@@ -417,9 +359,9 @@ class ParserGenerator(ABC):
         finally:
             self.level -= levels
 
-    break_lines: List[int] = [224]
+    break_lines: List[int] = [139, 141]
     break_tokens: TokenMatch = TokenMatch('''
-        #52, 25 - 37
+        60, 34 - 39
         ''')
 
     def print(self, *args: object, comment: str = None) -> None:
