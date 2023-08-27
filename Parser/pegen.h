@@ -98,7 +98,7 @@ typedef struct {
     // It is set parsing any Rule alternative when it parses a Cut.
     // If set after parsing a Rule alternative which fails, then
     //  any remaining alternatives are skipped.
-    int cut_indicator;
+    _Bool cut_indicator;
 
     int flags;
     int feature_version;
@@ -327,7 +327,6 @@ struct RuleDescr {
 struct RuleInfo {
     const RuleDescr * descr;        // Which Rule.
     void ** local_vars;             // Local variables visible within the rule.
-    int level;                      // Depth of Rule parse calls.
 };
 
 typedef struct RuleAltDescr {
@@ -411,6 +410,7 @@ _PyPegen_parse_gather(Parser * p, ParseResultPtr * ppRes, ParseFunc item, size_t
 ParseStatus _PyPegen_parse_lookahead(Parser *, ParseStatus positive, ParseTest item);
 
 // Parse an item, requiring it to succeed.  If the item parse fails, raise a SyntaxError.
+// If the function returns, then the parse succeeded.  No status is returned.
 void _PyPegen_parse_forced(Parser *p, ParseResultPtr * ppRes, ParseFunc item, const char* expected);
 
 // Parse a NAME Token.  Result value is an AST expr_ty object with Name_kind.
@@ -437,7 +437,8 @@ ParseStatus _PyPegen_parse_op(Parser *p, ParseResultPtr * ppRes);
 // Parse an OP Token with given character as its string.  Result value is a Token *.
 ParseStatus _PyPegen_parse_char(Parser *p, ParseResultPtr * ppRes, char c);
 
-
+// Parse a Cut expression.  This doesn't parse anything of the input, but just
+//  sets an indication that if the current Alt faile, then no more Alts will be tried.
 void _PyPegen_parse_cut(Parser *p);
 
 int _PyPegen_lookahead_with_name(int, expr_ty (func)(Parser *), Parser *);

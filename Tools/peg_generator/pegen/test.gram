@@ -1,4 +1,4 @@
-@subheader """\
+@subheader_python """\
 from ast import literal_eval
 
 from pegen.grammar import (
@@ -6,6 +6,7 @@ from pegen.grammar import (
     Cut,
     Forced,
     Gather,
+    Grammar,
     Group,
     Item,
     Lookahead,
@@ -13,7 +14,7 @@ from pegen.grammar import (
     MetaTuple,
     MetaList,
     NameLeaf,
-    NamedItem,
+    VarItem,
     NamedItemList,
     NegativeLookahead,
     Opt,
@@ -26,25 +27,108 @@ from pegen.grammar import (
     RuleList,
     RuleName,
     RuleParams,
-    TypedName,
-    Grammar,
     StringLeaf,
+    TypedName,
 )
 """
 
+@subheader_c """\
+typedef const char * _foo_type;
+typedef int foo_a_type;
+typedef void * _x_type;
+#define list asdl_seq *
+#define tuple asdl_seq *x
+#define t1 void *
+#define t2 int
+#define t3 void *
+#define t4 void *
+"""
 # Test parsing for rules with parameters.
 
-@trailer '' # required if there is no 'start' rule
+@trailer ''
 
-foo:
-    | bar()		# No args
-    | bar (bar)		# (bar) is NOT an arg list, but a Group.
-    | bar(1,)		# One arg, comma is required.
-    | bar(1, 2)		# Two args, comma is optional.
-    | bar(1, 2,)	# Two args, comma is optional.
-    | bar		# Last, so it doesn't hide the others.
+@defs '''
+[python]
+    #foo_type = str
+    char_ptr = str
+    ptr_cast =
+    num_cast =
+[c]
+    #foo_type = const char *
+    char_ptr = const char *
+    ptr_cast = (void *)
+    num_cast = (size_t)
+    #phony
+'''
+bar9(a): a=NAME b=NAME aa=a b?
+#bar91(a): a a=NAME b=NAME                   # ERROR: 'a' used before parse.
+#bar92(a): b a=NAME b=NAME                   # ERROR: 'b' used before parse.
+#bar93(a): (a=STRING b) a=NAME b=NAME        # ERROR: 'b' used before parse.
+#bar94(a): (b=STRING a) a=NAME b=NAME        # ERROR: 'a' used before parse.
+bar95(a): a=NAME b=NAME (a=STRING b)
+bar96(a): a=NAME b=NAME (b=STRING a)
+bar97(a): (a=STRING {a}) a=NAME b=NAME
 
-bar2(x[int], y) [list] (memo): NAME
-bar (memo): NAME			    # (memo) is NOT a parameter list
+xx: (NAME
+
+    NAME) nnn=NAME nnn
+    
+x [_x_type]: (DEDENT NAME | TYPE_COMMENT) NEWLINE NUMBER STRING
+
+foo(a[foo_a_type], bar) [_foo_type]:
+
+    | a bar? a* a bar? bar* x x? x* n=NAME n+
+    | bar0() bar0()		            # No args
+#   | bar()                         # Note, bar() is an error.
+    | bar a=NUMBER (bar) a (NAME)	# (bar) is NOT an arg list, but a Group.
+    | bar		                    # Later, so it doesn't hide the above.
+    | bar1(a,) bar1(a,)	            # One arg, comma is required.
+    | bar2(1, 2)?	                # Two args, comma is optional.
+    | bar2(1, 3,)	                # Two args, comma is optional.
+    | ( bar | bar | a {num_cast a}) [char_ptr]
+    | bar?
+    | '.'.bar1(a,)+
+    | '.'.'.'+
+    | b=bar*
+    | bar+
+    | &',' !',' n='abc' "def" '?' {n}
+    | ({ptr_cast 3}) n=NAME {n}
+    | &&bar1(2,)
+    | {ptr_cast 3}                  # Last alt (<always>)
+
+bar (memo): && NAME { "foo + bar" }			            # (memo) is NOT a parameter list
+bar0(): NAME { "foo + bar" }
+bar1(x[int],) [int] (memo): NAME x |                    # parameters and memo.
+bar1(x[int],) [int]: NAME x { 'S' } | { num_cast 43 }
+#bar22(x[int], y[int]) (memo): n n=NAME y		        # ERROR.  'n' not parsed before use
+#bar23(x[int], y[int]) (memo): n=n? y			        # ERROR.  'n' not parsed before use
+#bar24(x[int], y[int]): bar1((size_t) n,) n=NAME n y    # ERROR.  Arg 'n' not parsed before use.
+bar2(x[int], y[int]): n=NAME bar1(num_cast n,) n y
+bar3(x[int], y,):
+    | ~ NAME | g = ([b=bar1(x,) {ptr_cast num_cast b}] | NAME) {g + 1}
+#bar4(bar[int]) [list]: bar bar=bar1(bar,) bar2=bar6    # ERROR.  'n' not parsed before use
+bar5(x[int], yfun(n[int])):
+    | n[expr_ty]=NAME n2=NAME yfun(x,)+ yfun(x,) { n + x }
+bar6() [list] (memo): item=(NAME | STRING* ('foo' 'foo' 'bar'))+
+bar7 [list] (memo): NAME SOFT_KEYWORD
+bar8(x()[t1], y(a[t2], b(z[t3], w[tuple])[t4])) [list]:
+    | n=NAME y(1, ptr_cast 2)+ x()? n
+#   | n=NAME y((t2) 1, (t4 (*)(t3, tuple)) 2)+ n
+xx1: lk=&bar1(1,) {lk}                                  # ERROR.  &bar1(1,) has no value for variable.
+xx2: lk=!bar1(1,) {lk}                                  # ERROR.  &bar1(1,) has no value for variable.
+
+# Left-recursive rules...
+rec1 (memo): rec2 STRING
+rec2: rec3 NAME
+rec3: rec1 NUMBER
+rec: rec NAME
+
+start: rec2
+#start: rec2 { EXTRA }
+#
+xxx(a[int], b):
+    | a=(b) a (a)
+    | (aa=a {num_cast aa})?
+    | [aa=a {num_cast aa}]
 
 

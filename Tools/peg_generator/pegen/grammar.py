@@ -182,6 +182,11 @@ class GrammarTree:
             recipe = self.parse_recipe = make_parse_recipe()
             recipe.initialize(self)
 
+    def value_type(self) -> str:
+        """ The generated expression for the type of the parsed result. """
+        try: return self.parse_recipe.value_type()
+        except AttributeError: return self.type
+
     def add_local_name(self, value: GrammarTree, name: str = None) -> None:
         """ Adds entry for the name in the local names map.
         """
@@ -222,6 +227,13 @@ class GrammarTree:
         if self.params: res += f'{self.params}'
         if self.type: res += f' [{self.type}]'
         return res
+
+    def func_params(self) -> str:
+        """ The string for the parameters of a function, if this is callable.
+        Otherwise empty string.
+        """
+        if not self.params: return ""
+        return f"({self.params.in_func()})"
 
     def grammar_error(self, msg: str) -> NoReturn:
         e = GrammarError(
@@ -332,11 +344,6 @@ class ParseExpr(GrammarTree):
         """
         if False: yield
 
-    def value_type(self) -> str:
-        """ The generated expression for the type of the parsed result. """
-        try: return self.parse_recipe.value_type()
-        except AttributeError: return self.type
-
     def decl_var(self, name: str = None) -> str:
         """ The declaration of a name (without the value), as a variable.
         If callable, the variable is a function pointer,including function parameters.
@@ -347,13 +354,6 @@ class ParseExpr(GrammarTree):
         if not params: return f"{type} {name}"
         # It's a function.
         return f"{type} (*{name}) ({params.in_func()})"
-
-    def func_params(self) -> str:
-        """ The string for the parameters of a function, if this is callable.
-        Otherwise empty string.
-        """
-        if not self.params: return ""
-        return f"({self.params.in_func()})"
 
 
 @dataclasses.dataclass()
@@ -517,6 +517,7 @@ class TypedName(GrammarTree):
         if not self.type:
             self.type = self.gen.default_type()
 
+    # TODO: This is only valid for C syntax.
     def typed_name(self, name: str = '') -> str:
         """ What is generated for the type of this TypedName, including optional name.
         This TypedName may have its own parameters, which are generated recursively.
@@ -762,7 +763,7 @@ class Rule(ParseExpr):
             self.grammar_error(
                 f"Rule with parameters may not be memoized or left-recursive leader.")
 
-        return self.gen.rule_recipe(self, parser)
+        return self.gen.rule_recipe(self, parser, memo)
         return ParseRecipeExternal(
             self, self.name, parser, '&_rule_descriptor',
             self.local_env.count and "_local_values" or self.gen.default_value(),
@@ -821,6 +822,8 @@ class Params(TrueHashableList[Param], GrammarTree):
 
     def in_func(self) -> str:
         """ Text of the parameters, as included in a function def or decl. """
+        if not len(self):
+            return 'void'
         return ', '.join(
             [f"{param.typed_name(param.name)}" for param in self])
 
@@ -865,11 +868,11 @@ class Arg(GrammarTree):
             my_type_name = my_type.full_type()
             type_name = str(type.type)
             if my_type_name != type_name:
-                if type_name == 'ParseFunc *' and my_type_name == 'ParseStatus (*) (Parser * _p, ParseResultPtr * _ppRes)':
+                if type_name == 'ParseFunc*' and my_type_name == 'ParseStatus (*) (Parser* _p, ParseResultPtr* _ppRes)':
                     pass
-                elif type_name == 'ParseTest *' and my_type_name == 'ParseStatus (*) (Parser * _p)':
+                elif type_name == 'ParseTest*' and my_type_name == 'ParseStatus (*) (Parser* _p)':
                     pass
-                elif type_name == 'ParseTrue *' and my_type_name == 'void (*) (Parser * _p, ParseResultPtr * _ppRes)':
+                elif type_name == 'ParseTrue*' and my_type_name == 'void (*) (Parser* _p, ParseResultPtr* _ppRes)':
                     pass
                 else:
                     result = type.gen.cast(result, type)
@@ -956,21 +959,19 @@ class AltItem(ParseExpr):
         Otherwise the Alt determines a name, which can be used in a default action for the Alt.
     """
 
-    def as_var_item(self) -> VarItem:
-        return VarItem(None, self)
-
 
 class Alt(TrueHashableList[AltItem], ParseExpr):
 
     def __init__(self, items: List[AltItem], *, action: Optional[Code] = None):
         # The name will be chosen later when it is adopted by the Rhs.
-        super().__init__(map(operator.methodcaller('as_var_item'), items))
+        super().__init__(items)
         self.action = action
         # Check unique item variable names.
         item_names = self.var_names()
         unique_names = set(item_names)
         if len(unique_names) < len(item_names):
             self.grammar_error(f'Variable names {item_names} must be different.')
+        assert (isinstance(item, VarItem) for item in items)
 
     def __iter__(self) -> Iterable[GrammarTree]:
         yield from self.items()
@@ -1036,7 +1037,7 @@ class Alt(TrueHashableList[AltItem], ParseExpr):
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
         return ParseRecipeInline(self,
             None, self.gen.parse_alt,
-            func_type=ParseLocal,
+            func_type=ParseFunc,
             extra=lambda: self.gen.gen_alt(self),
             inlines=[item
                      for item in self.items()
@@ -1099,7 +1100,7 @@ class Rhs(TrueHashableList[Alt], AltItem):
         return ParseRecipeInline(
             self, name or dflt_name, parser_name, descr_name, extra=extra,
             inlines=list(self),
-            func_type=ParseLocal,
+            func_type=ParseFunc,
             value_type=self.type,
             **kwds,
             )
@@ -1137,11 +1138,13 @@ class VarItem(AltItem):
     Item with a name must have a parse result.
     The variable can be used as a nonterminal anywhere in the parent Alt *after* this Item.
     """
-    def __init__(self, name: TypedName or None, item: Item):
+    assigned_name: ObjName
+
+    def __init__(self, name: TypedName | None, item: Item):
         super().__init__()
         assert item is not None
         self.var_name = name
-        self.name = name and name.name or item.name
+        self.name = name and name.name or ObjName('_item')
         self.item = item
 
     def pre_init(self) -> None:
@@ -1171,9 +1174,6 @@ class VarItem(AltItem):
             if not self.item.parse_recipe.inner_call.func_type.has_result:
                 self.item.grammar_error(
                     f"Item {self.name} with variable name must have a parse result.")
-
-    def as_var_item(self) -> VarItem:
-        return self
 
     def vars_used(self) -> Iterator[ObjName]:
         """ All variable names used directly in this expression.
@@ -1221,7 +1221,6 @@ class Forced(Item):
             self.gen.parse_forced,
             (None, self.node),
             f'"{self.gen.str_value(str(self.node))}"',
-            func_type=ParseLocal,
             **kwds
             )
 
@@ -1251,7 +1250,7 @@ class Lookahead(Item):
             self, '_lookahead', self.gen.parse_lookahead,
             self.gen.bool_value(self.positive),
             Arg(inline=self.node),
-            func_type=ParseTestLocal,
+            func_type=ParseTest,
             #value_type=self.node.value_type(),
             **kwds)
 
@@ -1288,7 +1287,7 @@ class Cut(Item):
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
         return ParseRecipeExternal(
             self, "_cut", self.gen.parse_cut,
-            func_type=ParseNone,
+            #func_type=ParseNone,
             **kwds, )
 
     def __repr__(self) -> str:
@@ -1319,7 +1318,7 @@ class Seq(Atom):
         return ParseRecipeInline(
             self, self.name, self.recipe_src()(self.elem),
             *self.gen.sequence_recipe_args(self, *self.parse_args()),
-            func_type=self.always_true and ParseTrueLocal or ParseLocal,
+            func_type=self.always_true and ParseTrue or ParseFunc,
             **kwds)
 
 
@@ -1441,10 +1440,16 @@ class Group(Primary):
 
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
         func_name = self.rhs.parse_recipe.func_name
-        src = ParseSource(func_name.name, self.rhs.parse_recipe.value_type(), Params(), func_type=ParseLocal)
+        src = ParseSource(
+            func_name.name,
+            self.rhs.parse_recipe.value_type(),
+            #self.rhs.parse_recipe.params,
+            Params(),
+            func_type=ParseFunc,
+            )
         return ParseRecipeInline(self, self.name, src,
             inlines=[self.rhs],
-            func_type=ParseLocal,
+            func_type=ParseFunc,
             **kwds)
 
     def __str__(self) -> str:
@@ -1476,7 +1481,7 @@ class OptGroup(Primary):
             self, self.name, self.gen.parse_opt(self.rhs),
             Arg(inline=self.rhs),
             Arg(f"sizeof ({self.rhs.parse_recipe.src.type})"),
-            func_type=ParseTrueLocal,
+            func_type=ParseTrue,
             **kwds)
 
     def __str__(self) -> str:
@@ -1586,7 +1591,6 @@ class NameLeaf(Leaf):
         if func_name:
             return ParseRecipeInline(
                 self, None, getattr(self.gen, f"parse{func_name}"),
-                func_type=ParseLocal,
                 **kwds)
 
         # Try some other token name.
@@ -1595,7 +1599,6 @@ class NameLeaf(Leaf):
             return ParseRecipeInline(
                 self, None, self.gen.parse_token,
                 f"{self.gen.token_types[name.string]}",
-                func_type=ParseLocal,
                 **kwds)
 
         # The name is a rule, parameter, or variable.
@@ -1603,10 +1606,17 @@ class NameLeaf(Leaf):
         args = self.args
         isrule = isinstance(resolved, Rule)
         islocal = self.local_env.lookup(name) is resolved
+        assert bool(isrule) != bool(islocal)
         src = ParseSource(
             isrule and self.gen.rule_func_name(resolved) or self.value,
             resolved.type, resolved.params,
-            func_type=isrule and ParseFunc or ParseNone,
+            func_type=(
+                isrule and ParseFunc
+                or ParseNone
+                #or kwds.get('assigned_name') and ParseNone
+                #or ParseTrue
+                ),
+            **kwds,
             )
         if isrule and args.empty:
             args = Args()
@@ -1622,11 +1632,11 @@ class NameLeaf(Leaf):
         elif len(args) != len(params):
             self.grammar_error(f"Reference to name {resolved.string!r} requires exactly {len(args)} arguments.")
         if islocal:
-            return ParseRecipeLocal(self, name, src, *self.args, func_type=ParseLocal, **kwds)
+            return ParseRecipeLocal(self, name, src, *self.args, func_type=ParseFunc, **kwds)
         elif isrule:
-            return ParseRecipeRule(self, name, src, args, func_type=ParseLocal, **kwds)
+            return ParseRecipeRule(self, name, src, args, func_type=ParseFunc, **kwds)
         else:
-            return ParseRecipeInline(self, name, src, args, func_type=ParseLocal, **kwds)
+            return ParseRecipeInline(self, name, src, args, func_type=ParseFunc, **kwds)
 
     def resolve(self) -> GrammarTree:
         name = self.value
@@ -1700,14 +1710,14 @@ class StringLeaf(Leaf):
         if func_name:
             return ParseRecipeExternal(self, "_keyword", func_name, f"{self.gen.keywords[val]}",
                 comment=f"keyword = '{val}'",
-                func_type=ParseLocal,
+                func_type=ParseFunc,
                 **kwds,
                 )
         func_name = self.soft_keyword_parser_name()
         if func_name:
             return ParseRecipeExternal(self, "_keyword", func_name, f"{self.value}",
                 comment=f"keyword = '{val}'",
-                func_type=ParseLocal,
+                func_type=ParseFunc,
                 **kwds,
                 )
         func_name = self.literal_parser_name()
@@ -1715,7 +1725,7 @@ class StringLeaf(Leaf):
             type = self.gen.exact_tokens.get(val, val)
             return ParseRecipeExternal(self, "_literal", func_name, f"{type!r}",
                 comment=f"token = \"{val}\"",
-                func_type=ParseLocal,
+                func_type=ParseFunc,
                 **kwds,
                 )
 
@@ -1768,9 +1778,6 @@ from pegen.parse_recipe import (
     ParseTest,
     ParseTrue,
     ParseData,
-    ParseLocal,
-    ParseTestLocal,
-    ParseTrueLocal,
     ParseNone,
     )
 

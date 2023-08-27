@@ -248,7 +248,7 @@ class TargetLanguageTraits(ABC):
     def parser_param(self) -> Param: ...
 
     @abstractmethod
-    def parse_result_ptr_param(self, assigned_name: str = None) -> Param: ...
+    def parse_result_ptr_arg(self, assigned_name: ObjName = None) -> Arg: ...
 
     @abstractmethod
     def return_param(self) -> Param: ...
@@ -417,9 +417,12 @@ class ParserGenerator(ABC):
         finally:
             self.level -= levels
 
-    break_lines: List[int] = [224]
+    break_lines: List[int] = [696]
     break_tokens: TokenMatch = TokenMatch('''
-        #52, 25 - 37
+        79, 14 - 16
+        #77, 21 - 22
+        #60, 29 - 30
+        #77, 11 - 14
         ''')
 
     def print(self, *args: object, comment: str = None) -> None:

@@ -418,7 +418,7 @@ class GeneratedParser(Parser):
                 typ, = _item_typ()
 
                 # parse succeeded
-                return TypedName (n .string ,Code (typ .val ),p ),
+                return TypedName (n .string ,Code (typ .val ),p.val ),
 
             _alt_descriptors = [
                 RuleAltDescr(_alt, '_alt', 'n=NAME p=params? typ=annotation?'),
@@ -712,7 +712,7 @@ class GeneratedParser(Parser):
                 _item, = _result__item
 
                 # parse succeeded
-                return _item,
+                return VarItem(None, _item),
 
             _alt_descriptors = [
                 RuleAltDescr(_alt1, '_alt1', "n=typed_name '=' ~ i=item"),

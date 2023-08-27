@@ -638,6 +638,7 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         '_expect_forced', 'Any',
         ('result', 'Any'),
         ('expected', 'str'),
+        func_type=parse_recipe.ParseTrue,
         )
     @functools.cached_property
     def parse_soft_keyword(self) -> TypedName:
@@ -694,7 +695,6 @@ from pegen.parse_recipe import (
     ParseTest,
     ParseTrue,
     ParseData,
-    ParseLocal,
     ParseNone,
     )
 

@@ -31,6 +31,8 @@ class ParseFuncType:
     returns_status: bool = True
     use_parser: bool = True
     use_res_ptr: bool = True
+    local_result: bool = False
+    local: ParseFuncType = None             # An equivalent func type, with local_result = True.
 
     def __repr__(self) -> str:
         return f"<{self._name}>"
@@ -38,9 +40,17 @@ class ParseFuncType:
 def make_func_types(
     **kwds: ParseFuncType
     ) -> None:
+    """ Set given func types as global variables, and set their ._name attributes.
+    Also make Local variants, with .local_result = True.
+    """
     for name, value in kwds.items():
         globals()[name] = value
         value._name = name
+        local = dataclasses.replace(value, local_result=True)
+        value.local = local
+        local_name = f"{name}Local"
+        globals()[local_name] = local
+        local._name = local_name
 
 make_func_types(
     # Function returns both status and result object.
@@ -70,24 +80,25 @@ make_func_types(
         use_res_ptr = False,
         ),
 
-    # Function with neither parser nor status nor result pointer.
-    # For function defined locally in the calling function.
-    ParseLocal = ParseFuncType(
-        use_parser = False,
-        use_res_ptr = False,
-        ),
+    ## Function with neither parser nor status nor result pointer.
+    ## For function or variable defined locally in the calling function.
+    #ParseLocal = ParseFuncType(
+    #    use_parser = False,
+    #    #use_res_ptr = False,
+    #    always_true = True,
+    #    ),
 
-    ParseTestLocal = ParseFuncType(
-        use_parser = False,
-        use_res_ptr = False,
-        has_result = False,
-        ),
+    #ParseTestLocal = ParseFuncType(
+    #    use_parser = False,
+    #    use_res_ptr = False,
+    #    has_result = False,
+    #    ),
 
-    ParseTrueLocal = ParseFuncType(
-        use_parser = False,
-        use_res_ptr = False,
-        always_true = True,
-        ),
+    #ParseTrueLocal = ParseFuncType(
+    #    use_parser = False,
+    #    use_res_ptr = False,
+    #    always_true = True,
+    #    ),
 
     #Function with neither parser nor status nor result pointer.
     #For local names.  Always true.
@@ -149,9 +160,10 @@ class ParseCall(grammar.TypedName):
 
     def value_expr(self) -> str:
         """ The expression which evaluates to the value of this recipe. """
-        args = self.args.show_typed(self.call_params)
-        return self.gen.parse_value_expr(self.name, args, self.func_type)
-        return f"{self.name}{args}"
+        return self.gen.parse_value_expr(
+            self.name, self.args, self.call_params, func_type=self.func_type,
+            assigned_name=self.assigned_name
+            )
 
 
 class ParseCallInner(ParseCall):
@@ -172,10 +184,11 @@ class ParseSource(grammar.TypedName):
         *name_args,
         func_type: FuncBase = None,
         args: Args = None,
+        assigned_name: ObjName = None,
         ):
         super().__init__(*name_args)
         self.func_type = func_type or self.gen.default_func_type()
-
+        self.assigned_name = assigned_name
 
 class ParseRecipe(grammar.GrammarTree):
     """ Recipe for generating code to obtain a parsed result.
@@ -212,7 +225,7 @@ class ParseRecipe(grammar.GrammarTree):
         *args: str | Tuple[str, GrammarTree] | Args,
         params: Params = None,
         value_type: Code = None,            # Replaces src.type when src.type is None.
-        func_type: ParseFuncType,           # Overrides src.func_type in outer_call.
+        func_type: ParseFuncType = None,    # Overrides src.func_type in outer_call.
         inlines: list[GrammarTree] = [],
         inline_locals: bool = True,
         assigned_name: str = None,
@@ -243,7 +256,8 @@ class ParseRecipe(grammar.GrammarTree):
         else:
             args = grammar.Args(args)
 
-        self.inner_call = ParseCallInner(src, args, src.func_type, value_type=value_type)
+        self.inner_call = ParseCallInner(src, args, src.func_type, value_type=value_type,
+            assigned_name=assigned_name)
         self.outer_call = ParseCallOuter(
             grammar.TypedName(node.uniq_name(), value_type, params),
             grammar.NoArgs(),

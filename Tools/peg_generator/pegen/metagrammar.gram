@@ -64,7 +64,7 @@ param[Param]:
     | n=typed_name { Param(n) }
 
 typed_name[TypedName]:
-    | n=NAME p=params? typ=annotation? { TypedName(n.string, Code(typ.val), p) }
+    | n=NAME p=params? typ=annotation? { TypedName(n.string, Code(typ.val), p.val) }
 
 # In the future this may return something more complicated
 memoflag[str]:
