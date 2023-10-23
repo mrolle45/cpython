@@ -11,6 +11,7 @@ from pegen.grammar import (
     Args,
     Cut,
     Forced,
+    FuncType,
     Gather0,
     Gather1,
     Grammar,
@@ -20,8 +21,14 @@ from pegen.grammar import (
     Meta,
     NameLeaf,
     NegativeLookahead,
+    NoArgs,
+    NoName,
+    NoType,
+    NoParams,
     ObjName,
+    ObjType,
     Opt,
+    OptVal,
     OptGroup,
     Param,
     Params,
@@ -32,14 +39,17 @@ from pegen.grammar import (
     Rhs,
     Rule,
     StringLeaf,
+    Type,
     TypedName,
     VarItem,
 )
 
-from pegen.target_code import Code
+from pegen.target_code import Code, NoCode
 """
 
-start[Grammar]: g=grammar ENDMARKER { g }
+start[Grammar]: g=grammar endmarker { g }
+
+endmarker: ENDMARKER | "END" NEWLINE
 
 grammar[Grammar]:
     | metas=meta* rules=rule+ { Grammar(rules, metas) }
@@ -56,38 +66,28 @@ rule[Rule]:
     | n=typed_name m=memoflag? ":" a=maybe_alts? NEWLINE aa=more_alts? {
           Rule(n, Rhs([*chain (*a, *aa)]), memo=m) }
 
-params[Params]:
-    | !memoflag '(' n=','.param+ [','] ')' { Params(n) }
-    | '(' ')' { Params([]) }
-
-param[Param]:
-    | n=typed_name { Param(n) }
-
-typed_name[TypedName]:
-    | n=NAME p=params? typ=annotation? { TypedName(n.string, Code(typ.val), p.val) }
-
 # In the future this may return something more complicated
 memoflag[str]:
     | '(' "memo" ')' { "memo" }
 
-# Alternatives, in various contexts.  Returns an Rhs holding the alternatives.
-#   Within (...) or [...], or after indented '|'.  One or more with '|' separator.
+# Alternatives, in various contexts.  Returns an Rhs holding the alternatives...
+#   ...Within (...) or [...], or after indented '|'.  One or more with '|' separator.
 alts[Rhs]:
     | a="|".alt+  { Rhs(a) }
 
-#   After ':' in a rule on same line.  Zero or more with '|' separator.
+#   ...After ':' in a rule on same line.  Zero or more with '|' separator.
 maybe_alts[Rhs] (memo):
     | !NEWLINE a="|".alt+  { Rhs(a) }
     | { Rhs([]) }
 
-#   Indented block following a rule, each line introduced by '|', or nothing.
+#   ...Indented block following a rule, each line introduced by '|', or nothing.
 more_alts[Rhs] (memo):
-    | INDENT a=( "|" b=alts NEWLINE { b } )+ DEDENT { Rhs (chain (*a)) }
+    | INDENT a=( "|" b=alts NEWLINE { b } )+ DEDENT { Rhs([*chain (*a)]) }
     | { Rhs(()) }
 
 # Single alternative.  May be nothing at all.
 alt[Alt]:
-    | i=alt_items a=action? { Alt(i, action=Code(a.val)) }
+    | i=alt_items a=action? { Alt(i, action=Code(a.opt)) }
 
 alt_items[AltItems]:
     | ii=alt_item* { AltItems(ii) }
@@ -112,24 +112,51 @@ atom[Atom] (memo):
     | primary
 
 primary[Primary] (memo):
-    | '(' ~ a=alts ')' typ=annotation? {Group(Rhs(a, Code(typ.val)))}
-    | '[' ~ a=alts ']' typ=annotation? {OptGroup(Rhs(a, Code(typ.val)))}
-    | n=NAME a=arguments? {NameLeaf(n, a.val) }
+    | '(' ~ a=alts ')' t=type? {Group(Rhs(a.alts), t)}
+    | '[' ~ a=alts ']' t=type? {OptGroup(Rhs(a.alts), t)}
+    | n=NAME a=arguments {NameLeaf(n, a) }
     | s=STRING {StringLeaf(s)}
+
+# Properties of other parsed expressions:
+#   name, type, param, and combinations of these.
+
+name[ObjName]:
+    | n=NAME { ObjName(n.string) }
+
+type[Type]:
+    | '[' a=annotation? pp=params* ']' { Type(a.opt, *pp) }
+
+param[Param]:           # name and/or type required.
+    | n=typed_name { Param(n) }
+    | t=type { Param(TypedName(NoName(), t)) }
+          
+params[Params]:
+    | '<' pp=','.param* ','? '>' { Params(pp) }     # One or more params, trailing comma optional
+    | '<' '>' { Params([]) }                        # No params, no comma.
+
+typed_name[TypedName]:                                      # Name with optional type.
+    | n=name typ=type? { TypedName(n, typ) }
 
 # Mini-grammar for the actions and annotations and call arguments
 
-action[list[Token]]: "{" t=target_atoms "}" { t }
-annotation[list[Token]]: "[" t=target_atoms "]" { t }
+action[Code]: "{" t=target_atoms "}" { Code(t) }
+annotation[Code]:
+    | "[" t=target_atoms "]" { Code(t) }
+
 arguments[Args]:
-    | '(' a=arg "," b=",".arg+ ","? ')'  { Args([a] + b) }  # Multiple args, comma optional
-    | '(' a=arg "," ')' { Args([a]) }                       # One arg, comma required.
-    | '(' ')' { Args() }                                    # No args, no comma.
-arg[Arg]: a=arg_atom+ { Arg(Code([*chain(*a)])) }
-arg_atom[list[Token]]: !"," a=target_atom { a }
+    | '<' aa=",".arg+ ","? '>'  { Args(aa) }  # One or more args, trailing comma optional
+    | '<' '>' { Args([]) }                    # No args, no comma.
+    | { NoArgs() }                            # Absent.
+
+annotation[Code]:                                       # Target code up to an ungrouped "<" or "]".
+    | aa=anno_atom+ { Code ([*chain.from_iterable(aa)]) }
+anno_atom[list[Token]]: !"<" !"]" a=target_atom { a }        # Target code not beginning with "<" or "]".
+
+arg[Arg]: a=arg_atom+ { Arg(Code([*chain(*a)])) }       # Target code up to an ungrouped "," or ">".
+arg_atom[list[Token]]: !"," !">" a=target_atom { a }    # Target code not beginning with "," or ">".
 
 target_atoms[list[Token]]:
-    | a=target_atom+ { [*chain.from_iterable(a)] }
+    | a=target_atom* { [*chain.from_iterable(a)] }
 
 target_atom[list[Token]] (memo):
     | l="(" atoms=target_atoms? r=")" { [l, *chain(*(atoms)), r] }

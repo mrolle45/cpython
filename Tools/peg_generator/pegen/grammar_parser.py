@@ -24,6 +24,7 @@ from pegen.grammar import (
     Args,
     Cut,
     Forced,
+    FuncType,
     Gather0,
     Gather1,
     Grammar,
@@ -33,8 +34,14 @@ from pegen.grammar import (
     Meta,
     NameLeaf,
     NegativeLookahead,
+    NoArgs,
+    NoName,
+    NoType,
+    NoParams,
     ObjName,
+    ObjType,
     Opt,
+    OptVal,
     OptGroup,
     Param,
     Params,
@@ -45,20 +52,21 @@ from pegen.grammar import (
     Rhs,
     Rule,
     StringLeaf,
+    Type,
     TypedName,
     VarItem,
 )
 
-from pegen.target_code import Code
+from pegen.target_code import Code, NoCode
 
 # Keywords and soft keywords are listed at the end of the parser definition.
 class GeneratedParser(Parser):
 
-    # start() [Grammar]: grammar $
+    # start [Grammar] (): grammar endmarker
     def start(self) -> ParseResult[Grammar]:
         def _rhs() -> ParseResult[Grammar]:
 
-            # grammar $
+            # grammar endmarker
             def _alt() -> ParseResult[Grammar]:
 
                 # g=grammar
@@ -69,13 +77,13 @@ class GeneratedParser(Parser):
                 if not _result_g: return None
                 g, = _result_g
 
-                # $
-                def _item__ENDMARKER() -> ParseResult[Token]:
-                    return self._expect_type(0)
-                _ENDMARKER: Token; _result__ENDMARKER: ParseResult[Token]
-                _result__ENDMARKER = _item__ENDMARKER()
-                if not _result__ENDMARKER: return None
-                _ENDMARKER, = _result__ENDMARKER
+                # endmarker
+                def _item__endmarker() -> ParseResult[Any]:
+                    return self.endmarker()
+                _endmarker: Any; _result__endmarker: ParseResult[Any]
+                _result__endmarker = _item__endmarker()
+                if not _result__endmarker: return None
+                _endmarker, = _result__endmarker
 
                 # parse succeeded
                 return g,
@@ -86,7 +94,54 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # grammar() [Grammar]: meta* rule+
+    # endmarker [Any] (): $ | "END" NEWLINE
+    def endmarker(self) -> ParseResult[Any]:
+        def _rhs() -> ParseResult[Any]:
+
+            # $
+            def _alt1() -> ParseResult[Token]:
+
+                # $
+                def _item__ENDMARKER() -> ParseResult[Token]:
+                    return self._expect_type(0)
+                _ENDMARKER: Token; _result__ENDMARKER: ParseResult[Token]
+                _result__ENDMARKER = _item__ENDMARKER()
+                if not _result__ENDMARKER: return None
+                _ENDMARKER, = _result__ENDMARKER
+
+                # parse succeeded
+                return _ENDMARKER,
+
+            # "END" NEWLINE
+            def _alt2() -> ParseResult[list]:
+
+                # "END"
+                def _item__keyword() -> ParseResult[Token]:
+                    return self._expect_name("END")   # keyword = 'END'
+                _keyword: Token; _result__keyword: ParseResult[Token]
+                _result__keyword = _item__keyword()
+                if not _result__keyword: return None
+                _keyword, = _result__keyword
+
+                # NEWLINE
+                def _item__NEWLINE() -> ParseResult[Token]:
+                    return self._expect_type(4)
+                _NEWLINE: Token; _result__NEWLINE: ParseResult[Token]
+                _result__NEWLINE = _item__NEWLINE()
+                if not _result__NEWLINE: return None
+                _NEWLINE, = _result__NEWLINE
+
+                # parse succeeded
+                return [_keyword, _NEWLINE],
+
+            _alts = [
+                _alt1,
+                _alt2,
+            ]
+            return self._alts(_alts)
+        return self._rule(_rhs)
+
+    # grammar [Grammar] (): meta* rule+
     def grammar(self) -> ParseResult[Grammar]:
         def _rhs() -> ParseResult[Grammar]:
 
@@ -94,25 +149,25 @@ class GeneratedParser(Parser):
             def _alt() -> ParseResult[Grammar]:
 
                 # metas=meta*
-                def _item_metas() -> ParseResult[list [ Meta ]]:
+                def _item_metas() -> ParseResult[list[Meta]]:
                     def _meta() -> ParseResult[Meta]:
                         return self.meta()
                     return self._repeat(_meta, False)
-                metas: list [ Meta ]
+                metas: list[Meta]
                 metas, = _item_metas()
 
                 # rules=rule+
-                def _item_rules() -> ParseResult[list [ Rule ]]:
+                def _item_rules() -> ParseResult[list[Rule]]:
                     def _rule() -> ParseResult[Rule]:
                         return self.rule()
                     return self._repeat(_rule, True)
-                rules: list [ Rule ]; _result_rules: ParseResult[list [ Rule ]]
+                rules: list[Rule]; _result_rules: ParseResult[list[Rule]]
                 _result_rules = _item_rules()
                 if not _result_rules: return None
                 rules, = _result_rules
 
                 # parse succeeded
-                return Grammar (rules , metas),
+                return Grammar(rules, metas),
 
             _alts = [
                 _alt,
@@ -120,7 +175,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # meta() [Meta]: "@" NAME metavalue NEWLINE
+    # meta [Meta] (): "@" NAME metavalue NEWLINE
     def meta(self) -> ParseResult[Meta]:
         def _rhs() -> ParseResult[Meta]:
 
@@ -160,7 +215,7 @@ class GeneratedParser(Parser):
                 _NEWLINE, = _result__NEWLINE
 
                 # parse succeeded
-                return Meta (name . string , val),
+                return Meta(name.string, val),
 
             _alts = [
                 _alt,
@@ -168,7 +223,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # metavalue() [str]: NAME | STRING | <always>
+    # metavalue [str] (): NAME | STRING | <always>
     def metavalue(self) -> ParseResult[str]:
         def _rhs() -> ParseResult[str]:
 
@@ -184,7 +239,7 @@ class GeneratedParser(Parser):
                 val, = _result_val
 
                 # parse succeeded
-                return val . string,
+                return val.string,
 
             # STRING
             def _alt2() -> ParseResult[str]:
@@ -198,7 +253,7 @@ class GeneratedParser(Parser):
                 val, = _result_val
 
                 # parse succeeded
-                return literal_eval (val . string),
+                return literal_eval(val.string),
 
             # <always>
             def _alt3() -> ParseResult[str]:
@@ -214,7 +269,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # rule() [Rule]: typed_name memoflag? ":" maybe_alts? NEWLINE more_alts?
+    # rule [Rule] (): typed_name memoflag? ":" maybe_alts? NEWLINE more_alts?
     def rule(self) -> ParseResult[Rule]:
         def _rhs() -> ParseResult[Rule]:
 
@@ -230,11 +285,11 @@ class GeneratedParser(Parser):
                 n, = _result_n
 
                 # m=memoflag?
-                def _item_m() -> ParseResult[list [ str ]]:
+                def _item_m() -> ParseResult[list[str]]:
                     def _memoflag() -> ParseResult[str]:
                         return self.memoflag()
                     return self._opt(_memoflag)
-                m: list [ str ]
+                m: list[str]
                 m, = _item_m()
 
                 # ":"
@@ -270,7 +325,7 @@ class GeneratedParser(Parser):
                 aa, = _item_aa()
 
                 # parse succeeded
-                return Rule ( n , Rhs ( [ * chain ( * a , * aa ) ] ) , memo = m ),
+                return Rule(n, Rhs([*chain(*a, *aa)]), memo=m),
 
             _alts = [
                 _alt,
@@ -278,171 +333,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # params() [Params]: !memoflag '(' ','.param+ [','] ')' | '(' ')'
-    def params(self) -> ParseResult[Params]:
-        def _rhs() -> ParseResult[Params]:
-
-            # !memoflag '(' ','.param+ [','] ')'
-            def _alt1() -> ParseResult[Params]:
-
-                # !memoflag
-                def _item__lookahead() -> ParseStatus:
-                    def _atom() -> ParseResult[str]:
-                        return self.memoflag()
-                    return self._lookahead(False, _atom)
-                if not _item__lookahead(): return None
-
-                # '('
-                def _item__literal() -> ParseResult[Token]:
-                    return self._expect_type(7)   # token = "("
-                _literal: Token; _result__literal: ParseResult[Token]
-                _result__literal = _item__literal()
-                if not _result__literal: return None
-                _literal, = _result__literal
-
-                # n=','.param+
-                def _item_n() -> ParseResult[list [Param ]]:
-                    def _param() -> ParseResult[Param]:
-                        return self.param()
-                    def _sep() -> ParseResult[Token]:
-                        return self._expect_type(12)   # token = ","
-                    return self._gather(_param, _sep, True)
-                n: list [Param ]; _result_n: ParseResult[list [Param ]]
-                _result_n = _item_n()
-                if not _result_n: return None
-                n, = _result_n
-
-                # [',']
-                def _item__opt() -> ParseResult[list [Any ]]:
-                    def _rhs() -> ParseResult[Any]:
-
-                        # ','
-                        def _alt() -> ParseResult[Any]:
-
-                            # ','
-                            def _item__literal() -> ParseResult[Token]:
-                                return self._expect_type(12)   # token = ","
-                            _literal: Token; _result__literal: ParseResult[Token]
-                            _result__literal = _item__literal()
-                            if not _result__literal: return None
-                            _literal, = _result__literal
-
-                            # parse succeeded
-                            return _literal,
-
-                        _alts = [
-                            _alt,
-                        ]
-                        return self._alts(_alts)
-                    return self._opt(_rhs)
-                _opt: list [Any ]
-                _opt, = _item__opt()
-
-                # ')'
-                def _item__literal_1() -> ParseResult[Token]:
-                    return self._expect_type(8)   # token = ")"
-                _literal_1: Token; _result__literal_1: ParseResult[Token]
-                _result__literal_1 = _item__literal_1()
-                if not _result__literal_1: return None
-                _literal_1, = _result__literal_1
-
-                # parse succeeded
-                return Params (n),
-
-            # '(' ')'
-            def _alt2() -> ParseResult[Params]:
-
-                # '('
-                def _item__literal() -> ParseResult[Token]:
-                    return self._expect_type(7)   # token = "("
-                _literal: Token; _result__literal: ParseResult[Token]
-                _result__literal = _item__literal()
-                if not _result__literal: return None
-                _literal, = _result__literal
-
-                # ')'
-                def _item__literal_1() -> ParseResult[Token]:
-                    return self._expect_type(8)   # token = ")"
-                _literal_1: Token; _result__literal_1: ParseResult[Token]
-                _result__literal_1 = _item__literal_1()
-                if not _result__literal_1: return None
-                _literal_1, = _result__literal_1
-
-                # parse succeeded
-                return Params ([]),
-
-            _alts = [
-                _alt1,
-                _alt2,
-            ]
-            return self._alts(_alts)
-        return self._rule(_rhs)
-
-    # param() [Param]: typed_name
-    def param(self) -> ParseResult[Param]:
-        def _rhs() -> ParseResult[Param]:
-
-            # typed_name
-            def _alt() -> ParseResult[Param]:
-
-                # n=typed_name
-                def _item_n() -> ParseResult[TypedName]:
-                    return self.typed_name()
-                n: TypedName; _result_n: ParseResult[TypedName]
-                _result_n = _item_n()
-                if not _result_n: return None
-                n, = _result_n
-
-                # parse succeeded
-                return Param (n),
-
-            _alts = [
-                _alt,
-            ]
-            return self._alts(_alts)
-        return self._rule(_rhs)
-
-    # typed_name() [TypedName]: NAME params? annotation?
-    def typed_name(self) -> ParseResult[TypedName]:
-        def _rhs() -> ParseResult[TypedName]:
-
-            # NAME params? annotation?
-            def _alt() -> ParseResult[TypedName]:
-
-                # n=NAME
-                def _item_n() -> ParseResult[Token]:
-                    return self._name()
-                n: Token; _result_n: ParseResult[Token]
-                _result_n = _item_n()
-                if not _result_n: return None
-                n, = _result_n
-
-                # p=params?
-                def _item_p() -> ParseResult[list [Params ]]:
-                    def _params() -> ParseResult[Params]:
-                        return self.params()
-                    return self._opt(_params)
-                p: list [Params ]
-                p, = _item_p()
-
-                # typ=annotation?
-                def _item_typ() -> ParseResult[list[list[Token]]]:
-                    def _annotation() -> ParseResult[list[Token]]:
-                        return self.annotation()
-                    return self._opt(_annotation)
-                typ: list[list[Token]]
-                typ, = _item_typ()
-
-                # parse succeeded
-                return TypedName (n .string ,Code (typ .val ),p.val ),
-
-            _alts = [
-                _alt,
-            ]
-            return self._alts(_alts)
-        return self._rule(_rhs)
-
-    # memoflag() [str]: '(' "memo" ')'
+    # memoflag [str] (): '(' "memo" ')'
     def memoflag(self) -> ParseResult[str]:
         def _rhs() -> ParseResult[str]:
 
@@ -459,7 +350,7 @@ class GeneratedParser(Parser):
 
                 # "memo"
                 def _item__keyword() -> ParseResult[Token]:
-                    return self._expect_name("memo")   # keyword='memo'
+                    return self._expect_name("memo")   # keyword = 'memo'
                 _keyword: Token; _result__keyword: ParseResult[Token]
                 _result__keyword = _item__keyword()
                 if not _result__keyword: return None
@@ -482,7 +373,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # alts() [Rhs]: "|".alt+
+    # alts [Rhs] (): "|".alt+
     def alts(self) -> ParseResult[Rhs]:
         def _rhs() -> ParseResult[Rhs]:
 
@@ -490,19 +381,19 @@ class GeneratedParser(Parser):
             def _alt() -> ParseResult[Rhs]:
 
                 # a="|".alt+
-                def _item_a() -> ParseResult[list [Alt ]]:
+                def _item_a() -> ParseResult[list[Alt]]:
                     def _alt() -> ParseResult[Alt]:
                         return self.alt()
                     def _sep() -> ParseResult[Token]:
                         return self._expect_type(18)   # token = "|"
                     return self._gather(_alt, _sep, True)
-                a: list [Alt ]; _result_a: ParseResult[list [Alt ]]
+                a: list[Alt]; _result_a: ParseResult[list[Alt]]
                 _result_a = _item_a()
                 if not _result_a: return None
                 a, = _result_a
 
                 # parse succeeded
-                return Rhs (a),
+                return Rhs(a),
 
             _alts = [
                 _alt,
@@ -510,7 +401,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # maybe_alts() [Rhs]: !NEWLINE "|".alt+ | <always>
+    # maybe_alts [Rhs] (): !NEWLINE "|".alt+ | <always>
     @memoize
     def maybe_alts(self) -> ParseResult[Rhs]:
         def _rhs() -> ParseResult[Rhs]:
@@ -519,32 +410,32 @@ class GeneratedParser(Parser):
             def _alt1() -> ParseResult[Rhs]:
 
                 # !NEWLINE
-                def _item__lookahead() -> ParseStatus:
+                def _item__lookahead() -> Token:
                     def _atom() -> ParseResult[Token]:
                         return self._expect_type(4)
                     return self._lookahead(False, _atom)
                 if not _item__lookahead(): return None
 
                 # a="|".alt+
-                def _item_a() -> ParseResult[list [Alt ]]:
+                def _item_a() -> ParseResult[list[Alt]]:
                     def _alt() -> ParseResult[Alt]:
                         return self.alt()
                     def _sep() -> ParseResult[Token]:
                         return self._expect_type(18)   # token = "|"
                     return self._gather(_alt, _sep, True)
-                a: list [Alt ]; _result_a: ParseResult[list [Alt ]]
+                a: list[Alt]; _result_a: ParseResult[list[Alt]]
                 _result_a = _item_a()
                 if not _result_a: return None
                 a, = _result_a
 
                 # parse succeeded
-                return Rhs (a),
+                return Rhs(a),
 
             # <always>
             def _alt2() -> ParseResult[Rhs]:
 
                 # parse succeeded
-                return Rhs ([]),
+                return Rhs([]),
 
             _alts = [
                 _alt1,
@@ -553,7 +444,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # more_alts() [Rhs]: INDENT ("|" alts NEWLINE)+ DEDENT | <always>
+    # more_alts [Rhs] (): INDENT ("|" alts NEWLINE)+ DEDENT | <always>
     @memoize
     def more_alts(self) -> ParseResult[Rhs]:
         def _rhs() -> ParseResult[Rhs]:
@@ -570,47 +461,45 @@ class GeneratedParser(Parser):
                 _INDENT, = _result__INDENT
 
                 # a=("|" alts NEWLINE)+
-                def _item_a() -> ParseResult[list [Any ]]:
-                    def _group() -> ParseResult[Any]:
-                        def _rhs() -> ParseResult[Any]:
+                def _item_a() -> ParseResult[list[Any]]:
+                    def _rhs() -> ParseResult[Any]:
 
-                            # "|" alts NEWLINE
-                            def _alt() -> ParseResult[Any]:
+                        # "|" alts NEWLINE
+                        def _alt() -> ParseResult[Any]:
 
-                                # "|"
-                                def _item__literal() -> ParseResult[Token]:
-                                    return self._expect_type(18)   # token = "|"
-                                _literal: Token; _result__literal: ParseResult[Token]
-                                _result__literal = _item__literal()
-                                if not _result__literal: return None
-                                _literal, = _result__literal
+                            # "|"
+                            def _item__literal() -> ParseResult[Token]:
+                                return self._expect_type(18)   # token = "|"
+                            _literal: Token; _result__literal: ParseResult[Token]
+                            _result__literal = _item__literal()
+                            if not _result__literal: return None
+                            _literal, = _result__literal
 
-                                # b=alts
-                                def _item_b() -> ParseResult[Rhs]:
-                                    return self.alts()
-                                b: Rhs; _result_b: ParseResult[Rhs]
-                                _result_b = _item_b()
-                                if not _result_b: return None
-                                b, = _result_b
+                            # b=alts
+                            def _item_b() -> ParseResult[Rhs]:
+                                return self.alts()
+                            b: Rhs; _result_b: ParseResult[Rhs]
+                            _result_b = _item_b()
+                            if not _result_b: return None
+                            b, = _result_b
 
-                                # NEWLINE
-                                def _item__NEWLINE() -> ParseResult[Token]:
-                                    return self._expect_type(4)
-                                _NEWLINE: Token; _result__NEWLINE: ParseResult[Token]
-                                _result__NEWLINE = _item__NEWLINE()
-                                if not _result__NEWLINE: return None
-                                _NEWLINE, = _result__NEWLINE
+                            # NEWLINE
+                            def _item__NEWLINE() -> ParseResult[Token]:
+                                return self._expect_type(4)
+                            _NEWLINE: Token; _result__NEWLINE: ParseResult[Token]
+                            _result__NEWLINE = _item__NEWLINE()
+                            if not _result__NEWLINE: return None
+                            _NEWLINE, = _result__NEWLINE
 
-                                # parse succeeded
-                                return b,
+                            # parse succeeded
+                            return b,
 
-                            _alts = [
-                                _alt,
-                            ]
-                            return self._alts(_alts)
-                        return _rhs()
-                    return self._repeat(_group, True)
-                a: list [Any ]; _result_a: ParseResult[list [Any ]]
+                        _alts = [
+                            _alt,
+                        ]
+                        return self._alts(_alts)
+                    return self._repeat(_rhs, True)
+                a: list[Any]; _result_a: ParseResult[list[Any]]
                 _result_a = _item_a()
                 if not _result_a: return None
                 a, = _result_a
@@ -624,13 +513,13 @@ class GeneratedParser(Parser):
                 _DEDENT, = _result__DEDENT
 
                 # parse succeeded
-                return Rhs (chain (* a)),
+                return Rhs([*chain(*a)]),
 
             # <always>
             def _alt2() -> ParseResult[Rhs]:
 
                 # parse succeeded
-                return Rhs (()),
+                return Rhs(()),
 
             _alts = [
                 _alt1,
@@ -639,7 +528,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # alt() [Alt]: alt_items action?
+    # alt [Alt] (): alt_items action?
     def alt(self) -> ParseResult[Alt]:
         def _rhs() -> ParseResult[Alt]:
 
@@ -655,15 +544,15 @@ class GeneratedParser(Parser):
                 i, = _result_i
 
                 # a=action?
-                def _item_a() -> ParseResult[list[list[Token]]]:
-                    def _action() -> ParseResult[list[Token]]:
+                def _item_a() -> ParseResult[list[Code]]:
+                    def _action() -> ParseResult[Code]:
                         return self.action()
                     return self._opt(_action)
-                a: list[list[Token]]
+                a: list[Code]
                 a, = _item_a()
 
                 # parse succeeded
-                return Alt (i , action = Code(a.val)),
+                return Alt(i, action=Code(a.opt)),
 
             _alts = [
                 _alt,
@@ -671,7 +560,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # alt_items() [AltItems]: alt_item*
+    # alt_items [AltItems] (): alt_item*
     def alt_items(self) -> ParseResult[AltItems]:
         def _rhs() -> ParseResult[AltItems]:
 
@@ -679,15 +568,15 @@ class GeneratedParser(Parser):
             def _alt() -> ParseResult[AltItems]:
 
                 # ii=alt_item*
-                def _item_ii() -> ParseResult[list [AltItem ]]:
+                def _item_ii() -> ParseResult[list[AltItem]]:
                     def _alt_item() -> ParseResult[AltItem]:
                         return self.alt_item()
                     return self._repeat(_alt_item, False)
-                ii: list [AltItem ]
+                ii: list[AltItem]
                 ii, = _item_ii()
 
                 # parse succeeded
-                return AltItems (ii),
+                return AltItems(ii),
 
             _alts = [
                 _alt,
@@ -695,7 +584,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # alt_item() [AltItem]: typed_name '=' ~ item | item
+    # alt_item [AltItem] (): typed_name '=' ~ item | item
     def alt_item(self) -> ParseResult[AltItem]:
         def _rhs() -> ParseResult[AltItem]:
 
@@ -719,7 +608,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # ~
-                def _item__cut() -> Any:
+                def _item__cut() -> None:
                     return self._cut()
                 _item__cut()
 
@@ -732,7 +621,7 @@ class GeneratedParser(Parser):
                 i, = _result_i
 
                 # parse succeeded
-                return VarItem (n ,i ),
+                return VarItem(n, i),
 
             # item
             def _alt2() -> ParseResult[AltItem]:
@@ -755,7 +644,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # item() [Item]: '&' '&' ~ item | '&' ~ item | '!' ~ item | '~' | atom
+    # item [Item] (): '&' '&' ~ item | '&' ~ item | '!' ~ item | '~' | atom
     @memoize
     def item(self) -> ParseResult[Item]:
         def _rhs() -> ParseResult[Item]:
@@ -780,7 +669,7 @@ class GeneratedParser(Parser):
                 _literal_1, = _result__literal_1
 
                 # ~
-                def _item__cut() -> Any:
+                def _item__cut() -> None:
                     return self._cut()
                 _item__cut()
 
@@ -793,7 +682,7 @@ class GeneratedParser(Parser):
                 i, = _result_i
 
                 # parse succeeded
-                return Forced (i ),
+                return Forced(i),
 
             # '&' ~ item
             def _alt2() -> ParseResult[Item]:
@@ -807,7 +696,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # ~
-                def _item__cut() -> Any:
+                def _item__cut() -> None:
                     return self._cut()
                 _item__cut()
 
@@ -820,7 +709,7 @@ class GeneratedParser(Parser):
                 i, = _result_i
 
                 # parse succeeded
-                return PositiveLookahead (i ),
+                return PositiveLookahead(i),
 
             # '!' ~ item
             def _alt3() -> ParseResult[Item]:
@@ -834,7 +723,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # ~
-                def _item__cut() -> Any:
+                def _item__cut() -> None:
                     return self._cut()
                 _item__cut()
 
@@ -847,7 +736,7 @@ class GeneratedParser(Parser):
                 i, = _result_i
 
                 # parse succeeded
-                return NegativeLookahead (i ),
+                return NegativeLookahead(i),
 
             # '~'
             def _alt4() -> ParseResult[Item]:
@@ -861,7 +750,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # parse succeeded
-                return Cut (),
+                return Cut(),
 
             # atom
             def _alt5() -> ParseResult[Item]:
@@ -887,7 +776,7 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # atom() [Atom]: atom '?' | atom '*' | atom '+' | atom '.' primary '*' |
+    # atom [Atom] (): atom '?' | atom '*' | atom '+' | atom '.' primary '*' |
     #     atom '.' primary '+' | primary
     # Left-recursive leader
     @memoize_left_rec
@@ -914,7 +803,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # parse succeeded
-                return Opt (a),
+                return Opt(a),
 
             # atom '*'
             def _alt2() -> ParseResult[Atom]:
@@ -936,7 +825,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # parse succeeded
-                return Repeat0 (a),
+                return Repeat0(a),
 
             # atom '+'
             def _alt3() -> ParseResult[Atom]:
@@ -958,7 +847,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # parse succeeded
-                return Repeat1 (a),
+                return Repeat1(a),
 
             # atom '.' primary '*'
             def _alt4() -> ParseResult[Atom]:
@@ -996,7 +885,7 @@ class GeneratedParser(Parser):
                 _literal_1, = _result__literal_1
 
                 # parse succeeded
-                return Gather0 (sep , node),
+                return Gather0(sep, node),
 
             # atom '.' primary '+'
             def _alt5() -> ParseResult[Atom]:
@@ -1034,7 +923,7 @@ class GeneratedParser(Parser):
                 _literal_1, = _result__literal_1
 
                 # parse succeeded
-                return Gather1 (sep , node),
+                return Gather1(sep, node),
 
             # primary
             def _alt6() -> ParseResult[Atom]:
@@ -1061,13 +950,13 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # primary() [Primary]: '(' ~ alts ')' annotation? | '[' ~ alts ']'
-    #     annotation? | NAME arguments? | STRING
+    # primary [Primary] (): '(' ~ alts ')' type? | '[' ~ alts ']' type? | NAME
+    #     arguments | STRING
     @memoize
     def primary(self) -> ParseResult[Primary]:
         def _rhs() -> ParseResult[Primary]:
 
-            # '(' ~ alts ')' annotation?
+            # '(' ~ alts ')' type?
             def _alt1() -> ParseResult[Primary]:
 
                 # '('
@@ -1079,7 +968,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # ~
-                def _item__cut() -> Any:
+                def _item__cut() -> None:
                     return self._cut()
                 _item__cut()
 
@@ -1099,18 +988,18 @@ class GeneratedParser(Parser):
                 if not _result__literal_1: return None
                 _literal_1, = _result__literal_1
 
-                # typ=annotation?
-                def _item_typ() -> ParseResult[list[list[Token]]]:
-                    def _annotation() -> ParseResult[list[Token]]:
-                        return self.annotation()
-                    return self._opt(_annotation)
-                typ: list [list[Token]]
-                typ, = _item_typ()
+                # t=type?
+                def _item_t() -> ParseResult[list[Type]]:
+                    def _type() -> ParseResult[Type]:
+                        return self.type()
+                    return self._opt(_type)
+                t: list[Type]
+                t, = _item_t()
 
                 # parse succeeded
-                return Group (Rhs (a, Code(typ.val))),
+                return Group(Rhs(a.alts), t),
 
-            # '[' ~ alts ']' annotation?
+            # '[' ~ alts ']' type?
             def _alt2() -> ParseResult[Primary]:
 
                 # '['
@@ -1122,7 +1011,7 @@ class GeneratedParser(Parser):
                 _literal, = _result__literal
 
                 # ~
-                def _item__cut() -> Any:
+                def _item__cut() -> None:
                     return self._cut()
                 _item__cut()
 
@@ -1142,18 +1031,18 @@ class GeneratedParser(Parser):
                 if not _result__literal_1: return None
                 _literal_1, = _result__literal_1
 
-                # typ=annotation?
-                def _item_typ() -> ParseResult[list[list[Token]]]:
-                    def _annotation() -> ParseResult[list[Token]]:
-                        return self.annotation()
-                    return self._opt(_annotation)
-                typ: list[list[Token]]
-                typ, = _item_typ()
+                # t=type?
+                def _item_t() -> ParseResult[list[Type]]:
+                    def _type() -> ParseResult[Type]:
+                        return self.type()
+                    return self._opt(_type)
+                t: list[Type]
+                t, = _item_t()
 
                 # parse succeeded
-                return OptGroup (Rhs (a, Code(typ.val))),
+                return OptGroup(Rhs(a.alts), t),
 
-            # NAME arguments?
+            # NAME arguments
             def _alt3() -> ParseResult[Primary]:
 
                 # n=NAME
@@ -1164,16 +1053,16 @@ class GeneratedParser(Parser):
                 if not _result_n: return None
                 n, = _result_n
 
-                # a=arguments?
-                def _item_a() -> ParseResult[list [Args ]]:
-                    def _arguments() -> ParseResult[Args]:
-                        return self.arguments()
-                    return self._opt(_arguments)
-                a: list [Args ]
-                a, = _item_a()
+                # a=arguments
+                def _item_a() -> ParseResult[Args]:
+                    return self.arguments()
+                a: Args; _result_a: ParseResult[Args]
+                _result_a = _item_a()
+                if not _result_a: return None
+                a, = _result_a
 
                 # parse succeeded
-                return NameLeaf (n , a.val),
+                return NameLeaf(n, a),
 
             # STRING
             def _alt4() -> ParseResult[Primary]:
@@ -1187,7 +1076,7 @@ class GeneratedParser(Parser):
                 s, = _result_s
 
                 # parse succeeded
-                return StringLeaf (s),
+                return StringLeaf(s),
 
             _alts = [
                 _alt1,
@@ -1198,12 +1087,228 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # action() [list[Token]]: "{" target_atoms "}"
-    def action(self) -> ParseResult[list[Token]]:
-        def _rhs() -> ParseResult[list[Token]]:
+    # name [ObjName] (): NAME
+    def name(self) -> ParseResult[ObjName]:
+        def _rhs() -> ParseResult[ObjName]:
+
+            # NAME
+            def _alt() -> ParseResult[ObjName]:
+
+                # n=NAME
+                def _item_n() -> ParseResult[Token]:
+                    return self._name()
+                n: Token; _result_n: ParseResult[Token]
+                _result_n = _item_n()
+                if not _result_n: return None
+                n, = _result_n
+
+                # parse succeeded
+                return ObjName(n.string),
+
+            _alts = [
+                _alt,
+            ]
+            return self._alts(_alts)
+        return self._rule(_rhs)
+
+    # type [Type] (): '[' annotation? params* ']'
+    def type(self) -> ParseResult[Type]:
+        def _rhs() -> ParseResult[Type]:
+
+            # '[' annotation? params* ']'
+            def _alt() -> ParseResult[Type]:
+
+                # '['
+                def _item__literal() -> ParseResult[Token]:
+                    return self._expect_type(9)   # token = "["
+                _literal: Token; _result__literal: ParseResult[Token]
+                _result__literal = _item__literal()
+                if not _result__literal: return None
+                _literal, = _result__literal
+
+                # a=annotation?
+                def _item_a() -> ParseResult[list[Code]]:
+                    def _annotation() -> ParseResult[Code]:
+                        return self.annotation()
+                    return self._opt(_annotation)
+                a: list[Code]
+                a, = _item_a()
+
+                # pp=params*
+                def _item_pp() -> ParseResult[list[Params]]:
+                    def _params() -> ParseResult[Params]:
+                        return self.params()
+                    return self._repeat(_params, False)
+                pp: list[Params]
+                pp, = _item_pp()
+
+                # ']'
+                def _item__literal_1() -> ParseResult[Token]:
+                    return self._expect_type(10)   # token = "]"
+                _literal_1: Token; _result__literal_1: ParseResult[Token]
+                _result__literal_1 = _item__literal_1()
+                if not _result__literal_1: return None
+                _literal_1, = _result__literal_1
+
+                # parse succeeded
+                return Type(a.opt, *pp),
+
+            _alts = [
+                _alt,
+            ]
+            return self._alts(_alts)
+        return self._rule(_rhs)
+
+    # param [Param] (): typed_name | type
+    def param(self) -> ParseResult[Param]:
+        def _rhs() -> ParseResult[Param]:
+
+            # typed_name
+            def _alt1() -> ParseResult[Param]:
+
+                # n=typed_name
+                def _item_n() -> ParseResult[TypedName]:
+                    return self.typed_name()
+                n: TypedName; _result_n: ParseResult[TypedName]
+                _result_n = _item_n()
+                if not _result_n: return None
+                n, = _result_n
+
+                # parse succeeded
+                return Param(n),
+
+            # type
+            def _alt2() -> ParseResult[Param]:
+
+                # t=type
+                def _item_t() -> ParseResult[Type]:
+                    return self.type()
+                t: Type; _result_t: ParseResult[Type]
+                _result_t = _item_t()
+                if not _result_t: return None
+                t, = _result_t
+
+                # parse succeeded
+                return Param(TypedName(NoName(), t)),
+
+            _alts = [
+                _alt1,
+                _alt2,
+            ]
+            return self._alts(_alts)
+        return self._rule(_rhs)
+
+    # params [Params] (): '<' ','.param* ','? '>' | '<' '>'
+    def params(self) -> ParseResult[Params]:
+        def _rhs() -> ParseResult[Params]:
+
+            # '<' ','.param* ','? '>'
+            def _alt1() -> ParseResult[Params]:
+
+                # '<'
+                def _item__literal() -> ParseResult[Token]:
+                    return self._expect_type(20)   # token = "<"
+                _literal: Token; _result__literal: ParseResult[Token]
+                _result__literal = _item__literal()
+                if not _result__literal: return None
+                _literal, = _result__literal
+
+                # pp=','.param*
+                def _item_pp() -> ParseResult[list[Param]]:
+                    def _param() -> ParseResult[Param]:
+                        return self.param()
+                    def _sep() -> ParseResult[Token]:
+                        return self._expect_type(12)   # token = ","
+                    return self._gather(_param, _sep, False)
+                pp: list[Param]
+                pp, = _item_pp()
+
+                # ','?
+                def _item__opt() -> ParseResult[list[Token]]:
+                    def _literal() -> ParseResult[Token]:
+                        return self._expect_type(12)   # token = ","
+                    return self._opt(_literal)
+                _opt: list[Token]
+                _opt, = _item__opt()
+
+                # '>'
+                def _item__literal_1() -> ParseResult[Token]:
+                    return self._expect_type(21)   # token = ">"
+                _literal_1: Token; _result__literal_1: ParseResult[Token]
+                _result__literal_1 = _item__literal_1()
+                if not _result__literal_1: return None
+                _literal_1, = _result__literal_1
+
+                # parse succeeded
+                return Params(pp),
+
+            # '<' '>'
+            def _alt2() -> ParseResult[Params]:
+
+                # '<'
+                def _item__literal() -> ParseResult[Token]:
+                    return self._expect_type(20)   # token = "<"
+                _literal: Token; _result__literal: ParseResult[Token]
+                _result__literal = _item__literal()
+                if not _result__literal: return None
+                _literal, = _result__literal
+
+                # '>'
+                def _item__literal_1() -> ParseResult[Token]:
+                    return self._expect_type(21)   # token = ">"
+                _literal_1: Token; _result__literal_1: ParseResult[Token]
+                _result__literal_1 = _item__literal_1()
+                if not _result__literal_1: return None
+                _literal_1, = _result__literal_1
+
+                # parse succeeded
+                return Params([]),
+
+            _alts = [
+                _alt1,
+                _alt2,
+            ]
+            return self._alts(_alts)
+        return self._rule(_rhs)
+
+    # typed_name [TypedName] (): name type?
+    def typed_name(self) -> ParseResult[TypedName]:
+        def _rhs() -> ParseResult[TypedName]:
+
+            # name type?
+            def _alt() -> ParseResult[TypedName]:
+
+                # n=name
+                def _item_n() -> ParseResult[ObjName]:
+                    return self.name()
+                n: ObjName; _result_n: ParseResult[ObjName]
+                _result_n = _item_n()
+                if not _result_n: return None
+                n, = _result_n
+
+                # typ=type?
+                def _item_typ() -> ParseResult[list[Type]]:
+                    def _type() -> ParseResult[Type]:
+                        return self.type()
+                    return self._opt(_type)
+                typ: list[Type]
+                typ, = _item_typ()
+
+                # parse succeeded
+                return TypedName(n, typ),
+
+            _alts = [
+                _alt,
+            ]
+            return self._alts(_alts)
+        return self._rule(_rhs)
+
+    # action [Code] (): "{" target_atoms "}"
+    def action(self) -> ParseResult[Code]:
+        def _rhs() -> ParseResult[Code]:
 
             # "{" target_atoms "}"
-            def _alt() -> ParseResult[list[Token]]:
+            def _alt() -> ParseResult[Code]:
 
                 # "{"
                 def _item__literal() -> ParseResult[Token]:
@@ -1230,7 +1335,7 @@ class GeneratedParser(Parser):
                 _literal_1, = _result__literal_1
 
                 # parse succeeded
-                return t,
+                return Code(t),
 
             _alts = [
                 _alt,
@@ -1238,39 +1343,25 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # annotation() [list[Token]]: "[" target_atoms "]"
-    def annotation(self) -> ParseResult[list[Token]]:
-        def _rhs() -> ParseResult[list[Token]]:
+    # annotation [Code] (): anno_atom+
+    def annotation(self) -> ParseResult[Code]:
+        def _rhs() -> ParseResult[Code]:
 
-            # "[" target_atoms "]"
-            def _alt() -> ParseResult[list[Token]]:
+            # anno_atom+
+            def _alt() -> ParseResult[Code]:
 
-                # "["
-                def _item__literal() -> ParseResult[Token]:
-                    return self._expect_type(9)   # token = "["
-                _literal: Token; _result__literal: ParseResult[Token]
-                _result__literal = _item__literal()
-                if not _result__literal: return None
-                _literal, = _result__literal
-
-                # t=target_atoms
-                def _item_t() -> ParseResult[list[Token]]:
-                    return self.target_atoms()
-                t: list[Token]; _result_t: ParseResult[list[Token]]
-                _result_t = _item_t()
-                if not _result_t: return None
-                t, = _result_t
-
-                # "]"
-                def _item__literal_1() -> ParseResult[Token]:
-                    return self._expect_type(10)   # token = "]"
-                _literal_1: Token; _result__literal_1: ParseResult[Token]
-                _result__literal_1 = _item__literal_1()
-                if not _result__literal_1: return None
-                _literal_1, = _result__literal_1
+                # aa=anno_atom+
+                def _item_aa() -> ParseResult[list[list[Token]]]:
+                    def _anno_atom() -> ParseResult[list[Token]]:
+                        return self.anno_atom()
+                    return self._repeat(_anno_atom, True)
+                aa: list[list[Token]]; _result_aa: ParseResult[list[list[Token]]]
+                _result_aa = _item_aa()
+                if not _result_aa: return None
+                aa, = _result_aa
 
                 # parse succeeded
-                return t,
+                return Code([*chain.from_iterable(aa)]),
 
             _alts = [
                 _alt,
@@ -1278,49 +1369,32 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # arguments() [Args]: '(' arg "," ",".arg+ ","? ')' | '(' arg "," ')' | '('
-    #     ')'
+    # arguments [Args] (): '<' ",".arg+ ","? '>' | '<' '>' | <always>
     def arguments(self) -> ParseResult[Args]:
         def _rhs() -> ParseResult[Args]:
 
-            # '(' arg "," ",".arg+ ","? ')'
+            # '<' ",".arg+ ","? '>'
             def _alt1() -> ParseResult[Args]:
 
-                # '('
+                # '<'
                 def _item__literal() -> ParseResult[Token]:
-                    return self._expect_type(7)   # token = "("
+                    return self._expect_type(20)   # token = "<"
                 _literal: Token; _result__literal: ParseResult[Token]
                 _result__literal = _item__literal()
                 if not _result__literal: return None
                 _literal, = _result__literal
 
-                # a=arg
-                def _item_a() -> ParseResult[Arg]:
-                    return self.arg()
-                a: Arg; _result_a: ParseResult[Arg]
-                _result_a = _item_a()
-                if not _result_a: return None
-                a, = _result_a
-
-                # ","
-                def _item__literal_1() -> ParseResult[Token]:
-                    return self._expect_type(12)   # token = ","
-                _literal_1: Token; _result__literal_1: ParseResult[Token]
-                _result__literal_1 = _item__literal_1()
-                if not _result__literal_1: return None
-                _literal_1, = _result__literal_1
-
-                # b=",".arg+
-                def _item_b() -> ParseResult[list[Arg]]:
+                # aa=",".arg+
+                def _item_aa() -> ParseResult[list[Arg]]:
                     def _arg() -> ParseResult[Arg]:
                         return self.arg()
                     def _sep() -> ParseResult[Token]:
                         return self._expect_type(12)   # token = ","
                     return self._gather(_arg, _sep, True)
-                b: list[Arg]; _result_b: ParseResult[list[Arg]]
-                _result_b = _item_b()
-                if not _result_b: return None
-                b, = _result_b
+                aa: list[Arg]; _result_aa: ParseResult[list[Arg]]
+                _result_aa = _item_aa()
+                if not _result_aa: return None
+                aa, = _result_aa
 
                 # ","?
                 def _item__opt() -> ParseResult[list[Token]]:
@@ -1330,76 +1404,44 @@ class GeneratedParser(Parser):
                 _opt: list[Token]
                 _opt, = _item__opt()
 
-                # ')'
-                def _item__literal_2() -> ParseResult[Token]:
-                    return self._expect_type(8)   # token = ")"
-                _literal_2: Token; _result__literal_2: ParseResult[Token]
-                _result__literal_2 = _item__literal_2()
-                if not _result__literal_2: return None
-                _literal_2, = _result__literal_2
+                # '>'
+                def _item__literal_1() -> ParseResult[Token]:
+                    return self._expect_type(21)   # token = ">"
+                _literal_1: Token; _result__literal_1: ParseResult[Token]
+                _result__literal_1 = _item__literal_1()
+                if not _result__literal_1: return None
+                _literal_1, = _result__literal_1
 
                 # parse succeeded
-                return Args ([a] + b),
+                return Args(aa),
 
-            # '(' arg "," ')'
+            # '<' '>'
             def _alt2() -> ParseResult[Args]:
 
-                # '('
+                # '<'
                 def _item__literal() -> ParseResult[Token]:
-                    return self._expect_type(7)   # token = "("
+                    return self._expect_type(20)   # token = "<"
                 _literal: Token; _result__literal: ParseResult[Token]
                 _result__literal = _item__literal()
                 if not _result__literal: return None
                 _literal, = _result__literal
 
-                # a=arg
-                def _item_a() -> ParseResult[Arg]:
-                    return self.arg()
-                a: Arg; _result_a: ParseResult[Arg]
-                _result_a = _item_a()
-                if not _result_a: return None
-                a, = _result_a
-
-                # ","
+                # '>'
                 def _item__literal_1() -> ParseResult[Token]:
-                    return self._expect_type(12)   # token = ","
+                    return self._expect_type(21)   # token = ">"
                 _literal_1: Token; _result__literal_1: ParseResult[Token]
                 _result__literal_1 = _item__literal_1()
                 if not _result__literal_1: return None
                 _literal_1, = _result__literal_1
 
-                # ')'
-                def _item__literal_2() -> ParseResult[Token]:
-                    return self._expect_type(8)   # token = ")"
-                _literal_2: Token; _result__literal_2: ParseResult[Token]
-                _result__literal_2 = _item__literal_2()
-                if not _result__literal_2: return None
-                _literal_2, = _result__literal_2
-
                 # parse succeeded
-                return Args ([a]),
+                return Args([]),
 
-            # '(' ')'
+            # <always>
             def _alt3() -> ParseResult[Args]:
 
-                # '('
-                def _item__literal() -> ParseResult[Token]:
-                    return self._expect_type(7)   # token = "("
-                _literal: Token; _result__literal: ParseResult[Token]
-                _result__literal = _item__literal()
-                if not _result__literal: return None
-                _literal, = _result__literal
-
-                # ')'
-                def _item__literal_1() -> ParseResult[Token]:
-                    return self._expect_type(8)   # token = ")"
-                _literal_1: Token; _result__literal_1: ParseResult[Token]
-                _result__literal_1 = _item__literal_1()
-                if not _result__literal_1: return None
-                _literal_1, = _result__literal_1
-
                 # parse succeeded
-                return Args (),
+                return NoArgs(),
 
             _alts = [
                 _alt1,
@@ -1409,45 +1451,26 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # arg() [Arg]: arg_atom+
-    def arg(self) -> ParseResult[Arg]:
-        def _rhs() -> ParseResult[Arg]:
-
-            # arg_atom+
-            def _alt() -> ParseResult[Arg]:
-
-                # a=arg_atom+
-                def _item_a() -> ParseResult[list[list[Token]]]:
-                    def _arg_atom() -> ParseResult[list[Token]]:
-                        return self.arg_atom()
-                    return self._repeat(_arg_atom, True)
-                a: list[list[Token]]; _result_a: ParseResult[list[list[Token]]]
-                _result_a = _item_a()
-                if not _result_a: return None
-                a, = _result_a
-
-                # parse succeeded
-                return Arg (Code([*chain(*a)])),
-
-            _alts = [
-                _alt,
-            ]
-            return self._alts(_alts)
-        return self._rule(_rhs)
-
-    # arg_atom() [list[Token]]: !"," target_atom
-    def arg_atom(self) -> ParseResult[list[Token]]:
+    # anno_atom [list[Token]] (): !"<" !"]" target_atom
+    def anno_atom(self) -> ParseResult[list[Token]]:
         def _rhs() -> ParseResult[list[Token]]:
 
-            # !"," target_atom
+            # !"<" !"]" target_atom
             def _alt() -> ParseResult[list[Token]]:
 
-                # !","
-                def _item__lookahead() -> ParseStatus:
+                # !"<"
+                def _item__lookahead() -> Token:
                     def _atom() -> ParseResult[Token]:
-                        return self._expect_type(12)   # token = ","
+                        return self._expect_type(20)   # token = "<"
                     return self._lookahead(False, _atom)
                 if not _item__lookahead(): return None
+
+                # !"]"
+                def _item__lookahead_1() -> Token:
+                    def _atom() -> ParseResult[Token]:
+                        return self._expect_type(10)   # token = "]"
+                    return self._lookahead(False, _atom)
+                if not _item__lookahead_1(): return None
 
                 # a=target_atom
                 def _item_a() -> ParseResult[list[Token]]:
@@ -1466,22 +1489,84 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # target_atoms() [list[Token]]: target_atom+
-    def target_atoms(self) -> ParseResult[list[Token]]:
-        def _rhs() -> ParseResult[list[Token]]:
+    # arg [Arg] (): arg_atom+
+    def arg(self) -> ParseResult[Arg]:
+        def _rhs() -> ParseResult[Arg]:
 
-            # target_atom+
-            def _alt() -> ParseResult[list[Token]]:
+            # arg_atom+
+            def _alt() -> ParseResult[Arg]:
 
-                # a=target_atom+
+                # a=arg_atom+
                 def _item_a() -> ParseResult[list[list[Token]]]:
-                    def _target_atom() -> ParseResult[list[Token]]:
-                        return self.target_atom()
-                    return self._repeat(_target_atom, True)
+                    def _arg_atom() -> ParseResult[list[Token]]:
+                        return self.arg_atom()
+                    return self._repeat(_arg_atom, True)
                 a: list[list[Token]]; _result_a: ParseResult[list[list[Token]]]
                 _result_a = _item_a()
                 if not _result_a: return None
                 a, = _result_a
+
+                # parse succeeded
+                return Arg(Code([*chain(*a)])),
+
+            _alts = [
+                _alt,
+            ]
+            return self._alts(_alts)
+        return self._rule(_rhs)
+
+    # arg_atom [list[Token]] (): !"," !">" target_atom
+    def arg_atom(self) -> ParseResult[list[Token]]:
+        def _rhs() -> ParseResult[list[Token]]:
+
+            # !"," !">" target_atom
+            def _alt() -> ParseResult[list[Token]]:
+
+                # !","
+                def _item__lookahead() -> Token:
+                    def _atom() -> ParseResult[Token]:
+                        return self._expect_type(12)   # token = ","
+                    return self._lookahead(False, _atom)
+                if not _item__lookahead(): return None
+
+                # !">"
+                def _item__lookahead_1() -> Token:
+                    def _atom() -> ParseResult[Token]:
+                        return self._expect_type(21)   # token = ">"
+                    return self._lookahead(False, _atom)
+                if not _item__lookahead_1(): return None
+
+                # a=target_atom
+                def _item_a() -> ParseResult[list[Token]]:
+                    return self.target_atom()
+                a: list[Token]; _result_a: ParseResult[list[Token]]
+                _result_a = _item_a()
+                if not _result_a: return None
+                a, = _result_a
+
+                # parse succeeded
+                return a,
+
+            _alts = [
+                _alt,
+            ]
+            return self._alts(_alts)
+        return self._rule(_rhs)
+
+    # target_atoms [list[Token]] (): target_atom*
+    def target_atoms(self) -> ParseResult[list[Token]]:
+        def _rhs() -> ParseResult[list[Token]]:
+
+            # target_atom*
+            def _alt() -> ParseResult[list[Token]]:
+
+                # a=target_atom*
+                def _item_a() -> ParseResult[list[list[Token]]]:
+                    def _target_atom() -> ParseResult[list[Token]]:
+                        return self.target_atom()
+                    return self._repeat(_target_atom, False)
+                a: list[list[Token]]
+                a, = _item_a()
 
                 # parse succeeded
                 return [*chain.from_iterable(a)],
@@ -1492,9 +1577,9 @@ class GeneratedParser(Parser):
             return self._alts(_alts)
         return self._rule(_rhs)
 
-    # target_atom() [list[Token]]: "(" target_atoms? ")" | "{" target_atoms? "}"
-    #     | "[" target_atoms? "]" | NAME "*" | NAME | NUMBER | STRING | "?" |
-    #     ":" | !")" !"}" !"]" OP
+    # target_atom [list[Token]] (): "(" target_atoms? ")" | "{" target_atoms?
+    #     "}" | "[" target_atoms? "]" | NAME "*" | NAME | NUMBER | STRING | "?"
+    #     | ":" | !")" !"}" !"]" OP
     @memoize
     def target_atom(self) -> ParseResult[list[Token]]:
         def _rhs() -> ParseResult[list[Token]]:
@@ -1685,21 +1770,21 @@ class GeneratedParser(Parser):
             def _alt10() -> ParseResult[list[Token]]:
 
                 # !")"
-                def _item__lookahead() -> ParseStatus:
+                def _item__lookahead() -> Token:
                     def _atom() -> ParseResult[Token]:
                         return self._expect_type(8)   # token = ")"
                     return self._lookahead(False, _atom)
                 if not _item__lookahead(): return None
 
                 # !"}"
-                def _item__lookahead_1() -> ParseStatus:
+                def _item__lookahead_1() -> Token:
                     def _atom() -> ParseResult[Token]:
                         return self._expect_type(26)   # token = "}"
                     return self._lookahead(False, _atom)
                 if not _item__lookahead_1(): return None
 
                 # !"]"
-                def _item__lookahead_2() -> ParseStatus:
+                def _item__lookahead_2() -> Token:
                     def _atom() -> ParseResult[Token]:
                         return self._expect_type(10)   # token = "]"
                     return self._lookahead(False, _atom)
@@ -1732,7 +1817,7 @@ class GeneratedParser(Parser):
         return self._rule(_rhs)
 
     KEYWORDS = ()
-    SOFT_KEYWORDS = ('memo',)
+    SOFT_KEYWORDS = ('END', 'memo')
 
 
 if __name__ == '__main__':

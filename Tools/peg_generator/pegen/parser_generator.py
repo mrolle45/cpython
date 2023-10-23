@@ -44,6 +44,7 @@ from pegen.grammar import (
     NameLeaf,
     NoArgs,
     Opt,
+    OptVal,
     ObjName,
     Param,
     Params,
@@ -56,8 +57,9 @@ from pegen.grammar import (
     TypedName,
 )
 
-from pegen.target_code import Code
-from pegen.parse_recipe import ParseSource
+from pegen.target_code import Code, NoCode
+from pegen.parse_recipe import *
+from pegen.expr_type import Type, ObjType, FuncType, ProxyType
 from pegen.tokenizer import TokenMatch, TokenLocations
 
 class KeywordCollectorVisitor(GrammarVisitor):
@@ -65,7 +67,8 @@ class KeywordCollectorVisitor(GrammarVisitor):
     Constructor provides collection objects for the results.
     """
 
-    def __init__(self, keywords: Dict[str, int], soft_keywords: Set[str]):
+    def __init__(self, gen: ParserGenerator, keywords: Dict[str, int], soft_keywords: Set[str]):
+        self.gen = gen
         self.keywords = keywords
         self.soft_keywords = soft_keywords
 
@@ -74,7 +77,7 @@ class KeywordCollectorVisitor(GrammarVisitor):
         if re.match(r"[a-zA-Z_]\w*\Z", val):  # This is a keyword
             if node.value.endswith("'"):
                 if val not in self.keywords:
-                    self.keywords[val] = node.gen.keyword_type()
+                    self.keywords[val] = self.gen.keyword_type()
             else:
                 return self.soft_keywords.add(node.value.replace('"', ""))
 
@@ -126,8 +129,8 @@ class RuleCheckingVisitor(GrammarVisitor):
         self.validate_rule_args(node)
 
     def visit_VarItem(self, node: VarItem) -> None:
-        if node.name and node.name.string.startswith("_"):
-            raise GrammarError(f"Variable names cannot start with underscore: '{node.name}'")
+        if node.var_name and str(node.var_name).startswith("_"):
+            raise GrammarError(f"Variable names cannot start with underscore: '{node.var_name}'")
         self.generic_visit(node)
 
     def validate_rule_args(self, node: NameLeaf) -> None:
@@ -137,7 +140,7 @@ class RuleCheckingVisitor(GrammarVisitor):
         if node.value.string in self.tokens:
             return
         name = node.resolve()
-        params = name.params
+        params = name.type.callable and name.type.params or NoParams()
         # If a rule name, then an empty args is same as not empty.
 
         args = node.args
@@ -181,10 +184,23 @@ class TargetLanguageTraits(ABC):
     def bool_type(self) -> str: ...
 
     @abstractmethod
+    def circular_type(self) -> Code: ...
+
+    @abstractmethod
     def str_value(self, value: bool) -> str: ...
 
     @abstractmethod
-    def default_params(self) -> str: ...
+    def uniq_name(self, node: GrammarTree, assigned_name: str = None) -> str:
+        """ A name which is unique among all objects in scope. """
+        ...
+
+    @abstractmethod
+    def empty_params(self) -> str: ...
+
+    @abstractmethod
+    def typed_name(self, name: TypedName) -> str:
+        """ Text emitted for this name in a function def or decl. """
+        ...
 
     @abstractmethod
     def parser_param(self) -> Param: ...
@@ -228,11 +244,11 @@ class TargetLanguageTraits(ABC):
 
     @dataclass
     class Action:
-        expr: str           # Expression for the value of the action
-        type: str           # Expression for the type of the value.
+        expr: Code              # Expression for the value of the action
+        type: Type              # The type of the action.
 
     @abstractmethod
-    def gen_action(self, node: Alt) -> Action:
+    def alt_action(self, alt: Alt) -> Action:
         """ Generate code to return the action in the Alt. """
 
     @abstractmethod
@@ -245,10 +261,7 @@ class TargetLanguageTraits(ABC):
         ...
 
     @contextlib.contextmanager
-    def enter_scope(self, stmt: str, brackets: str = '', comment: str = '', enable: bool = True) -> Iterator:
-        if not enable:
-            yield
-            return
+    def enter_scope(self, stmt: str, brackets: str = '', comment: str = '') -> Iterator:
         if brackets:
             stmt = (stmt and f"{stmt} " or "") + brackets[0]
         self.print(stmt, comment=comment)
@@ -275,7 +288,7 @@ class ParserGenerator(ABC):
         verbose: bool = False,
         ):
         self.grammar = grammar
-        grammar._thread_vars.gen = self
+        Grammar._thread_vars.gen = self
         self.tokens = set(tokens.values())
         self.keywords: Dict[str, int] = {}
         self.soft_keywords: Set[str] = set()
@@ -359,9 +372,17 @@ class ParserGenerator(ABC):
         finally:
             self.level -= levels
 
-    break_lines: List[int] = [139, 141]
+    break_lines: List[int] = [630]
     break_tokens: TokenMatch = TokenMatch('''
-        60, 34 - 39
+        #126, 21 - 53
+        #127, 14 - 31
+        #71,  5 -  9
+        #71,  6 -  8
+        #70,  5 -  7
+        #70,  1 - 19
+        #70, 10 - 19
+        #120, 32 - 49
+        #83, 18 - 42
         ''')
 
     def print(self, *args: object, comment: str = None) -> None:
@@ -423,7 +444,7 @@ class ParserGenerator(ABC):
 
     def collect_keywords(self, rules: Dict[str, Rule]) -> None:
         self.keyword_counter = 499          # For keyword_type()
-        keyword_collector = KeywordCollectorVisitor(self.keywords, self.soft_keywords)
+        keyword_collector = KeywordCollectorVisitor(self, self.keywords, self.soft_keywords)
         for rule in rules.values():
             keyword_collector.visit(rule)
 
@@ -436,9 +457,15 @@ class ParserGenerator(ABC):
         name: str, typ: str, *params: Tuple[str, str],
         **kwds,
         ) -> ParseSource:
+        params = [Param(
+                TypedName(
+                    ObjName(name),
+                    OptVal([Type(Code(typ2))]))
+                )
+            for name, typ2 in params]
         return ParseSource(
-            name, Code(typ), Params(tuple(Param(TypedName(name, Code(type)))
-                                    for name, type in params)),
+            name,
+            Type(Code(typ), Params(params)),
             **kwds,
             )
 
@@ -513,7 +540,7 @@ class NullableVisitor(GrammarVisitor):
         return False
 
     def visit_Group(self, group: Group) -> bool:
-        return self.visit_Rhs(group)
+        return self.visit_Rhs(group.rhs)
 
     def visit_VarItem(self, item: VarItem) -> bool:
         if self.visit(item.item):
@@ -549,7 +576,7 @@ class InitialNamesVisitor(GrammarVisitor):
 
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Set[Any]:
         names: Set[str] = set()
-        for value in node:
+        for value in node.children():
             if isinstance(value, list):
                 for item in value:
                     names |= self.visit(item, *args, **kwargs)

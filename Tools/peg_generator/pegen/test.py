@@ -32,14 +32,14 @@ from pegen.validator import validate_grammar
 
 ##### GENERATE PYTHON (NO VERIFY) pegen/metagrammar.gram -> pegen/result_meta.py
 
-grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator(
-    'pegen/metagrammar.gram', 'pegen/result_meta.py', verify=False)
+#grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator(
+#    'pegen/metagrammar.gram', 'pegen/result_meta.py', verify=False)
 #validate_grammar(grammar)
 
-# GENERATE PYTHON from the result_meta.py parser.  metagrammar -> result_meta_meta.py.
-import result_meta
-grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator(
-    'pegen/metagrammar.gram', 'pegen/result_meta_meta.py', verify=False, parser_class=result_meta.GeneratedParser)
+## GENERATE PYTHON from the result_meta.py parser.  metagrammar -> result_meta_meta.py.
+#import result_meta
+#grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator(
+#    'pegen/metagrammar.gram', 'pegen/result_meta_meta.py', verify=False, parser_class=result_meta.GeneratedParser)
 
 # GENERATE PYTHON (NO VERIFY) pegen/test.gram -> pegen/pegen/result_python.py
 
@@ -56,17 +56,20 @@ grammar, parser, tokenizer, gen = pegen.build.build_python_parser_and_generator(
 #sys.argv.append('-vv')
 #simple_parser_main(result_rec.GeneratedParser)
 
-#grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator('pegen/test_rec.gram', '../../Grammar/Tokens', 'pegen/result_rec.c')
+#grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator(
+#    'pegen/test_rec.gram', '../../Grammar/Tokens', 'pegen/result_rec.c')
 
 ##### GENERATE C pegen/test.gram, Grammar/Tokens -> pegen/result_c.c
 
-#grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator('pegen/test.gram', '../../Grammar/Tokens', 'pegen/result_c.c')
+grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator(
+    'pegen/test.gram', '../../Grammar/Tokens', 'pegen/result_c.c')
 #grammar.dump()
 #validate_grammar(grammar)
 
 # GENERATE Grammar/Python.gram, Grammar/Tokens -> Parser/parser.c
 
-#grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator('../../Grammar/Python.gram', '../../Grammar/Tokens', '../../Parser/parser.c')
+#grammar, parser, tokenizer, gen = pegen.build.build_c_parser_and_generator(
+#    '../../Grammar/python.gram', '../../Grammar/Tokens', 'pegen/result_parser.c')
 #validate_grammar(grammar)
 
 x = 0

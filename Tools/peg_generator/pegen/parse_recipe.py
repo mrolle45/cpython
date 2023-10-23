@@ -9,17 +9,32 @@ from enum import Enum, auto
 import dataclasses
 import functools
 
-from pegen import grammar
+from pegen.grammar import(
+    Args,
+    GrammarTree,
+    NoArgs,
+    ParseExpr,
+    Rule,
+    TypedName,
+    VarItem,
+    )
+
+from pegen.expr_type import(
+    NoParams,
+    ObjType,
+    Params,
+    Type,
+    )
+
+from pegen.target_code import(
+    Code,
+    )
 
 class RecipeMode(Enum):
     Ext = auto()
     Loc = auto()
     Rule = auto()
     Inl = auto()
-
-class ParseFuncType(Enum):
-    def __init__(self):
-        pass
 
 @dataclasses.dataclass
 class ParseFuncType:
@@ -33,6 +48,7 @@ class ParseFuncType:
     use_res_ptr: bool = True
     nested: bool = False                     # True for an inline.
     inline: ParseFuncType = None             # An equivalent func type, with nested = True.
+    isrule: bool = False
 
     def __repr__(self) -> str:
         return f"<{self._name}>"
@@ -55,6 +71,11 @@ def make_func_types(
 make_func_types(
     # Function returns both status and result object.
     ParseFunc = ParseFuncType(
+        ),
+
+    # Function is for a Rule.
+    ParseRule = ParseFuncType(
+        isrule = True,
         ),
 
     # Function returns result object only, no status.  Always succeeds.
@@ -111,25 +132,24 @@ make_func_types(
 
     )
 
-class ParseCall(grammar.TypedName):
+class ParseCall(TypedName):
     """ How to generate the code to call either the inner or the outer function of a Recipe.
     """
     args: Args
     func_type: ParseFuncType                # Used to augment args and params in fixup.
-    assigned_name: ObjName = None           # Used to augment args in fixup.
-                                            # Is the arg corresponding to use_result_ptr (if any).
 
     def __init__(self,
             name: TypedName,
             args: Args,
             func_type: ParseFuncType,
-            assigned_name: ObjName = None,
             value_type: Code = None,
             ) -> None:
-        super().__init__(name.name, value_type or name.type, name.params)
+        super().__init__(
+            name.name,
+            name.type,
+            )
         self.args = args
         self.func_type = func_type
-        if assigned_name: self.assigned_name = assigned_name
 
     def pre_init(self) -> None:
         """ Add args and params as required by func_type. """
@@ -137,33 +157,26 @@ class ParseCall(grammar.TypedName):
         gen: ParserGenerator = self.gen
         recipe: ParseRecipe = self.parent
 
-
         call_params = []
         #if self.func_type.use_parser:
         #    call_params.append(gen.parser_param())
         #if self.func_type.use_res_ptr:
         #    call_params.append(gen.return_param())
-        if self.params:
-            call_params += self.params[:]
-
-        self.call_params = grammar.Params(call_params)
+        if self.type and self.type.callable:
+            self.call_params = self.type.params
+        else:
+            self.call_params = NoParams()
 
         args = []
-        #if recipe.mode is not recipe.Loc:
-        #    if self.func_type.use_parser:
-        #        # The src is a function which needs a parser argument.
-        #        args.append(gen.parser_param().name.string)
-        #    if recipe.src.func_type.use_res_ptr:
-        #        # The src is a function which needs a return pointer.
-        #        args.append(gen.parse_result_ptr_param(self.assigned_name).name.string)
         if args:
-            self.args = grammar.Args([*args, *(self.args[:])])
+            self.args = Args([*args, *(self.args[:])])
 
-    def value_expr(self) -> str:
+    def value_expr(self, **kwds) -> str:
         """ The expression which evaluates to the value of this recipe. """
         return self.gen.parse_value_expr(
-            self.name, self.args, self.call_params, func_type=self.func_type,
-            assigned_name=self.assigned_name
+            self.name, self.args, self.call_params,
+            func_type=self.func_type,
+            **kwds,
             )
 
 
@@ -175,7 +188,7 @@ class ParseCallOuter(ParseCall):
     """ ParseCall class used for recipe.outer_call. """
 
 
-class ParseSource(grammar.TypedName):
+class ParseSource(TypedName):
     """ Specifies how to generate the code to produce the parsed value.
     Contains information only common to several Recipes.
     The return type may be None, and has to be supplied to each Recipe() constructor.
@@ -183,15 +196,14 @@ class ParseSource(grammar.TypedName):
 
     def __init__(self,
         *name_args,
-        func_type: FuncBase = None,
+        func_type: FuncBase = ParseFunc,
         args: Args = None,
-        assigned_name: ObjName = None,
         ):
         super().__init__(*name_args)
-        self.func_type = func_type or self.gen.default_func_type()
-        self.assigned_name = assigned_name
+        self.func_type = func_type
 
-class ParseRecipe(grammar.GrammarTree):
+
+class ParseRecipe(GrammarTree):
     """ Recipe for generating code to obtain a parsed result.
     The code is generated by calling self(gen: ParserGenerator, **kwds).
     The source of the result may be:
@@ -224,69 +236,96 @@ class ParseRecipe(grammar.GrammarTree):
         src: ParseSource,
         *args: str | Tuple[str, GrammarTree] | Args,
         params: Params = None,
-        value_type: Code = None,            # Replaces src.type when src.type is None.
+        typ: Type = None,                   # Overrides src.type in outer_call.
         func_type: ParseFuncType = None,    # Overrides src.func_type in outer_call.
         inlines: list[GrammarTree] = [],
         use_inline: bool = True,            # This is an inline recipe
-        assigned_name: str = None,
         # Callback to generate more code at the end of the function.
         # If it returns a str, this is the return value.
         extra: Callable[[], str | None] = None,
         comment: str = None,
         **kwds,
         ):
-        assert all(isinstance(inl, grammar.ParseExpr) for inl in inlines)
+        assert all(isinstance(inl, ParseExpr) for inl in inlines)
         assert type(src) is ParseSource
         self.node = node
-        parent = node.parent
-        if isinstance(parent, grammar.VarItem):
-            if parent.name:
-                name = parent.name
-            else:
-                name = parent.dedupe(name)
-        self.name = self.dflt_name = node.name or name
+        self.name = self.dflt_name = node.uniq_name() or name
         self.src = src
-        if not value_type: value_type = src.type
-        self.params = params or grammar.Params()
-        if args and isinstance(args[0], grammar.Args):
+        if not typ:
+            typ = src.type or ObjType(node.gen.default_type())
+        self.type = typ
+        if params is None: params = Params()
+        if args and isinstance(args[0], Args):
             args = args[0]
-        elif src and src.params is None:
-            args = grammar.NoArgs()
+        elif not params:
+            args = NoArgs()
         else:
-            args = grammar.Args(args)
+            args = Args(args)
 
-        self.inner_call = ParseCallInner(src, args, src.func_type, value_type=value_type,
-            assigned_name=assigned_name)
+        self.inner_call = ParseCallInner(
+            src, args, src.func_type,
+            )
         outer_func_type = func_type or src.func_type
         if use_inline:
             outer_func_type = outer_func_type.inline
         self.outer_call = ParseCallOuter(
-            grammar.TypedName(node.uniq_name(), value_type, params),
-            grammar.NoArgs(),
+            TypedName(
+                self.name,
+                typ,
+                ),
+            args,
+            #NoArgs(),
             outer_func_type,
-            assigned_name=assigned_name)
+            )
         self.inlines = [arg.inline for arg in args[:] if arg.inline]
-        if inlines: self.inlines += inlines
+        if inlines: self.inlines += [inline for inline in inlines if not inline.local_src]
+        #self.inlines = [inline for inline in self.inlines if not inline.local_src]
         self.extra = extra
         self.comment = comment
 
-    def __iter__(self) -> Iterator[GrammarTree]:
+    def children(self) -> Iterator[GrammarTree]:
         if self.src: yield self.src
         yield self.inner_call
         yield self.outer_call
 
-    def __call__(self, gen: ParserGenerator, **kwds) -> None:
-        gen.gen_parse(self, **kwds)
+    def gen_parse(self: ParseRecipe,
+        **kwds
+        ) -> None:
+        gen = self.gen
+        err = getattr(self.node, '_error', False)
+        if not err:
+            gen.forward_declare_inlines(self)
 
-    def validate(self, visited: set = set(), level: int = 0) -> None:
-        if self in visited: return
-        visited.add(self)
+        with gen.enter_function(
+            self.func_name,
+            self.func_type,
+            ):
+            if err:
+                gen.print("return false;")
+                return
+            for inline in self.inline_recipes():
+                # Expand the inline items.
+                gen.gen_node(inline.node)
+            gen.gen_copy_local_vars(self.node)
+            #if self.node is not self.alt:
+            #    gen.print(comment=str(self.node))
+            call: str | None = None
+            if self.extra:
+                call = self.extra()
+            if call is None:
+                # Was not supplied by extra()
+                call = self.value_expr()
+                if call:
+                    call = gen.recipe_result(call, self)
 
-        #print('  ' * level, repr(self))
+            if call: gen.print(call)
 
-        #assert isinstance(self.src, TypedName)
-        assert isinstance(self.params, grammar.Params)
-        self.src.validate(visited, level + 1)
+    def __call__(self, **kwds) -> None:
+        try: self.gen_parse(**kwds)
+        except: print(f"Exception in recipe {self!r}"); raise
+
+    def validate(self) -> None:
+        self.src.validate()
         pass
 
     @property
@@ -297,27 +336,15 @@ class ParseRecipe(grammar.GrammarTree):
         """ The expression which evaluates to the value of this recipe. """
         return self.inner_call.value_expr()
 
-    def value_type(self) -> Code:
-        return self.outer_call.type
-
-    @functools.cache
-    def uniq_name(self) -> str:
-        """ A name which is unique among all recipes. """
-        # Find recipe of next node in the parent chain which has one.
-        anc = self.parent.parent
-        if hasattr(anc, 'parse_recipe'):
-            return f"{anc.parse_recipe.uniq_name()}_{self.name}"
-        elif isinstance(self.node, grammar.Rule):
-            return f"_{self.name}"
-        else:
-            return self.name
+    def value_type(self) -> Type:
+        return self.outer_call.type.return_type
 
     def inline_recipes(self) -> Iterable[ParseRecipe]:
         for inline in self.inlines:
             recipe = inline.parse_recipe
             #if recipe.mode in (recipe.Inl,):
-            if recipe.mode is recipe.Loc and recipe.inner_call.assigned_name:
-                continue
+            #if recipe.mode is recipe.Loc:
+            #    continue
             yield recipe
 
     def pre_init(self) -> Self:
@@ -327,6 +354,7 @@ class ParseRecipe(grammar.GrammarTree):
             Modifying the arguments and parameters to include the parser.
             Modifying the default name.
         """
+        super().pre_init()
         self.gen.fix_parse_recipe(self)
         return self
 
@@ -338,7 +366,6 @@ class ParseRecipe(grammar.GrammarTree):
         """ Print this recipe and all inline recipes (recursively). """
         lead = '    ' * level
         print(f"{lead}Recipe {self.mode.name} {self!r}")
-        print(f"{lead}  uniq_name   = {self.uniq_name()!r}")
         print(f"{lead}  node        = {self.node!r}")
         print(f"{lead}  value       = {self.value_expr()!r}")
 
@@ -372,4 +399,3 @@ class ParseRecipeInline(ParseRecipe):
     mode = RecipeMode.Inl
 
 
-#import grammar
