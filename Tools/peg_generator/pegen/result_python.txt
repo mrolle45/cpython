@@ -7,7 +7,7 @@ import tokenize
 
 from typing import Any, Optional
 
-from pegen.parser import memoize, memoize_left_rec, logger, Parser
+from pegen.parser import memoize, memoize_left_rec, logger, Parser, cut_sentinel
 from ast import literal_eval
 
 from pegen.grammar import (
@@ -43,66 +43,530 @@ from pegen.grammar import (
 # Keywords and soft keywords are listed at the end of the parser definition.
 class GeneratedParser(Parser):
 
-    @memoize
-    def foo(self) -> Optional[Any]:
-        # foo: bar() | bar (bar) | bar(1,) | bar(1, 2) | bar(1, 2,) | bar
-        mark = self._mark()
-        if (
-            (bar := self.bar())
-        ):
-            return bar
-        self._reset(mark)
-        if (
-            (bar := self.bar())
-            and
-            (bar_1 := self.bar())
-        ):
-            return [bar, bar_1]
-        self._reset(mark)
-        if (
-            (bar := self.bar(1,))
-        ):
-            return bar
-        self._reset(mark)
-        if (
-            (bar := self.bar(1, 2))
-        ):
-            return bar
-        self._reset(mark)
-        if (
-            (bar := self.bar(1, 2,))
-        ):
-            return bar
-        self._reset(mark)
-        if (
-            (bar := self.bar())
-        ):
-            return bar
-        self._reset(mark)
-        return None
-
-    @memoize
-    def bar2(self, x: int, y: Any) -> Optional[list]:
-        # bar2: NAME
-        mark = self._mark()
-        if (
-            (name := self.name())
-        ):
-            return name
-        self._reset(mark)
-        return None
+    def foo(self, a: int, bar: Any) -> Optional[Any]:
+        # foo: bar() | bar (bar) (NAME) | bar | bar1(1) | bar2(1, 2) | bar2(1, 3) | (bar | bar) | bar? | bar* | bar+ | '.'.bar+ | &',' !',' 'abc' "def" '?' | &bar1(1) | !bar1(1) | (<always>) NAME | <always>
+        def _alt_1():
+            # bar()
+            def _item_bar_1():
+                return self.bar()
+            bar_1: Any; _result_bar_1: Optional[Tuple[Any]]
+            _result_bar_1 = _item_bar_1()
+            if not _result_bar_1: return None
+            bar_1, = _result_bar_1
+            # parse succeeded
+            return (bar_1),
+        def _alt_2():
+            # bar
+            def _item_bar_1():
+                return self.bar()
+            bar_1: Any; _result_bar_1: Optional[Tuple[Any]]
+            _result_bar_1 = _item_bar_1()
+            if not _result_bar_1: return None
+            bar_1, = _result_bar_1
+            # (bar)
+            def _item__rhs():
+                def _alt():
+                    # bar
+                    def _item_bar_1():
+                        return self.bar()
+                    bar_1: Any; _result_bar_1: Optional[Tuple[Any]]
+                    _result_bar_1 = _item_bar_1()
+                    if not _result_bar_1: return None
+                    bar_1, = _result_bar_1
+                    # parse succeeded
+                    return (bar_1),
+                return self._alt(_alt)
+            _rhs: Any; _result__rhs: Optional[Tuple[Any]]
+            _result__rhs = _item__rhs()
+            if not _result__rhs: return None
+            _rhs, = _result__rhs
+            # (NAME)
+            def _item__rhs_1():
+                def _alt():
+                    # NAME
+                    def _item__name():
+                        return self._name()
+                    _name: Any; _result__name: Optional[Tuple[Any]]
+                    _result__name = _item__name()
+                    if not _result__name: return None
+                    _name, = _result__name
+                    # parse succeeded
+                    return (_name),
+                return self._alt(_alt)
+            _rhs_1: Any; _result__rhs_1: Optional[Tuple[Any]]
+            _result__rhs_1 = _item__rhs_1()
+            if not _result__rhs_1: return None
+            _rhs_1, = _result__rhs_1
+            # parse succeeded
+            return ([bar_1, _rhs, _rhs_1]),
+        def _alt_3():
+            # bar
+            def _item_bar_1():
+                return self.bar()
+            bar_1: Any; _result_bar_1: Optional[Tuple[Any]]
+            _result_bar_1 = _item_bar_1()
+            if not _result_bar_1: return None
+            bar_1, = _result_bar_1
+            # parse succeeded
+            return (bar_1),
+        def _alt_4():
+            # bar1(1)
+            def _item_bar1():
+                return self.bar1(1)
+            bar1: Any; _result_bar1: Optional[Tuple[Any]]
+            _result_bar1 = _item_bar1()
+            if not _result_bar1: return None
+            bar1, = _result_bar1
+            # parse succeeded
+            return (bar1),
+        def _alt_5():
+            # bar2(1, 2)
+            def _item_bar2():
+                return self.bar2(1, 2)
+            bar2: Any; _result_bar2: Optional[Tuple[Any]]
+            _result_bar2 = _item_bar2()
+            if not _result_bar2: return None
+            bar2, = _result_bar2
+            # parse succeeded
+            return (bar2),
+        def _alt_6():
+            # bar2(1, 3)
+            def _item_bar2():
+                return self.bar2(1, 3)
+            bar2: Any; _result_bar2: Optional[Tuple[Any]]
+            _result_bar2 = _item_bar2()
+            if not _result_bar2: return None
+            bar2, = _result_bar2
+            # parse succeeded
+            return (bar2),
+        def _alt_7():
+            # (bar | bar)
+            def _item__rhs():
+                def _alt_1():
+                    # bar
+                    def _item_bar_1():
+                        return self.bar()
+                    bar_1: Any; _result_bar_1: Optional[Tuple[Any]]
+                    _result_bar_1 = _item_bar_1()
+                    if not _result_bar_1: return None
+                    bar_1, = _result_bar_1
+                    # parse succeeded
+                    return (bar_1),
+                def _alt_2():
+                    # bar
+                    def _item_bar_1():
+                        return self.bar()
+                    bar_1: Any; _result_bar_1: Optional[Tuple[Any]]
+                    _result_bar_1 = _item_bar_1()
+                    if not _result_bar_1: return None
+                    bar_1, = _result_bar_1
+                    # parse succeeded
+                    return (bar_1),
+                return self._alts(_alt_1, _alt_2)
+            _rhs: Any; _result__rhs: Optional[Tuple[Any]]
+            _result__rhs = _item__rhs()
+            if not _result__rhs: return None
+            _rhs, = _result__rhs
+            # parse succeeded
+            return (_rhs),
+        def _alt_8():
+            # bar?
+            def _item_opt():
+                def _atom():
+                    return self.bar()
+                return self._opt(_atom)
+            opt: Optional[Any]; _result_opt: Optional[Tuple[Any]]
+            _result_opt = _item_opt()
+            if not _result_opt: return None
+            opt, = _result_opt
+            # parse succeeded
+            return (opt),
+        def _alt_9():
+            # bar*
+            def _item_b():
+                def _atom():
+                    return self.bar()
+                return self._repeat0(_atom)
+            b: Any; _result_b: Optional[Tuple[Any]]
+            _result_b = _item_b()
+            if not _result_b: return None
+            b, = _result_b
+            # parse succeeded
+            return (b),
+        def _alt_10():
+            # bar+
+            def _item__loop1():
+                def _atom():
+                    return self.bar()
+                return self._repeat1(_atom)
+            _loop1: Any; _result__loop1: Optional[Tuple[Any]]
+            _result__loop1 = _item__loop1()
+            if not _result__loop1: return None
+            _loop1, = _result__loop1
+            # parse succeeded
+            return (_loop1),
+        def _alt_11():
+            # '.'.bar+
+            def _item__gather():
+                def _elem():
+                    return self.bar()
+                def _sep():
+                    return self._expect('.')
+                return self._gather(_elem, _sep)
+            _gather: Any; _result__gather: Optional[Tuple[Any]]
+            _result__gather = _item__gather()
+            if not _result__gather: return None
+            _gather, = _result__gather
+            # parse succeeded
+            return (_gather),
+        def _alt_12():
+            # &','
+            def _item__lookahead():
+                def _atom():
+                    return self._expect(',')
+                return self._positive_lookahead(_atom)
+            _lookahead: Any; _result__lookahead: Optional[Tuple[Any]]
+            _result__lookahead = _item__lookahead()
+            if not _result__lookahead: return None
+            _lookahead, = _result__lookahead
+            # !','
+            def _item__lookahead_1():
+                def _atom():
+                    return self._expect(',')
+                return self._negative_lookahead(_atom)
+            _lookahead_1: Any; _result__lookahead_1: Optional[Tuple[Any]]
+            _result__lookahead_1 = _item__lookahead_1()
+            if not _result__lookahead_1: return None
+            _lookahead_1, = _result__lookahead_1
+            # 'abc'
+            def _item_n():
+                return self._expect('abc')
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # "def"
+            def _item__literal():
+                return self._expect("def")
+            _literal: Any; _result__literal: Optional[Tuple[Any]]
+            _result__literal = _item__literal()
+            if not _result__literal: return None
+            _literal, = _result__literal
+            # '?'
+            def _item__literal_1():
+                return self._expect('?')
+            _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+            _result__literal_1 = _item__literal_1()
+            if not _result__literal_1: return None
+            _literal_1, = _result__literal_1
+            # parse succeeded
+            return (n),
+        def _alt_13():
+            # &bar1(1)
+            def _item__lookahead():
+                def _atom():
+                    return self.bar1(1)
+                return self._positive_lookahead(_atom)
+            _lookahead: Any; _result__lookahead: Optional[Tuple[Any]]
+            _result__lookahead = _item__lookahead()
+            if not _result__lookahead: return None
+            _lookahead, = _result__lookahead
+            # parse succeeded
+            return (_lookahead),
+        def _alt_14():
+            # !bar1(1)
+            def _item__lookahead():
+                def _atom():
+                    return self.bar1(1)
+                return self._negative_lookahead(_atom)
+            _lookahead: Any; _result__lookahead: Optional[Tuple[Any]]
+            _result__lookahead = _item__lookahead()
+            if not _result__lookahead: return None
+            _lookahead, = _result__lookahead
+            # parse succeeded
+            return (_lookahead),
+        def _alt_15():
+            # (<always>)
+            def _item__rhs():
+                def _alt():
+                    # parse succeeded
+                    return (3),
+                return self._alt(_alt)
+            _rhs: Any; _result__rhs: Optional[Tuple[Any]]
+            _result__rhs = _item__rhs()
+            if not _result__rhs: return None
+            _rhs, = _result__rhs
+            # NAME
+            def _item_n():
+                return self._name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # parse succeeded
+            return (n),
+        def _alt_16():
+            # parse succeeded
+            return (3),
+        return self._alts(_alt_1, _alt_2, _alt_3, _alt_4, _alt_5, _alt_6, _alt_7, _alt_8, _alt_9, _alt_10, _alt_11, _alt_12, _alt_13, _alt_14, _alt_15, _alt_16)
 
     @memoize
     def bar(self) -> Optional[Any]:
         # bar: NAME
-        mark = self._mark()
-        if (
-            (name := self.name())
-        ):
-            return name
-        self._reset(mark)
-        return None
+        def _alt():
+            # NAME
+            def _item__name():
+                return self._name()
+            _name: Any; _result__name: Optional[Tuple[Any]]
+            _result__name = _item__name()
+            if not _result__name: return None
+            _name, = _result__name
+            # parse succeeded
+            return (foo + bar),
+        return self._alt(_alt)
 
-    KEYWORDS = ()
-    SOFT_KEYWORDS = ()
+    @memoize
+    def bar1(self, x: Any) -> Optional[list]:
+        # bar1: NAME x | <always>
+        def _alt_1():
+            # NAME
+            def _item__name():
+                return self._name()
+            _name: Any; _result__name: Optional[Tuple[Any]]
+            _result__name = _item__name()
+            if not _result__name: return None
+            _name, = _result__name
+            # x
+            def _item_x_1():
+                return x()
+            x_1: Any; _result_x_1: Optional[Tuple[Any]]
+            _result_x_1 = _item_x_1()
+            if not _result_x_1: return None
+            x_1, = _result_x_1
+            # parse succeeded
+            return ([_name, x_1]),
+        def _alt_2():
+            # parse succeeded
+            return (True),
+        return self._alts(_alt_1, _alt_2)
+
+    @memoize
+    def bar2(self, x: t1, y: Callable[[t2, Callable[[t3, Any], t4]], Any]) -> Optional[list]:
+        # bar2: NAME (y(1, 2))+ n
+        def _alt():
+            # NAME
+            def _item_n():
+                return self._name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # (y(1, 2))+
+            def _item__loop1():
+                def _atom():
+                    return y(1, 2)
+                return self._repeat1(_atom)
+            _loop1: Any; _result__loop1: Optional[Tuple[Any]]
+            _result__loop1 = _item__loop1()
+            if not _result__loop1: return None
+            _loop1, = _result__loop1
+            # n
+            def _item_n_1():
+                return n()
+            n_1: Any; _result_n_1: Optional[Tuple[Any]]
+            _result_n_1 = _item_n_1()
+            if not _result_n_1: return None
+            n_1, = _result_n_1
+            # parse succeeded
+            return ([n, _loop1, n_1]),
+        return self._alt(_alt)
+
+    @memoize
+    def bar3(self, x: int, y: Any) -> Optional[Any]:
+        # bar3: NAME | ([bar1(x)] | NAME)
+        def _alt_1():
+            # NAME
+            def _item__name():
+                return self._name()
+            _name: Any; _result__name: Optional[Tuple[Any]]
+            _result__name = _item__name()
+            if not _result__name: return None
+            _name, = _result__name
+            # parse succeeded
+            return (_name),
+        def _alt_2():
+            # ([bar1(x)] | NAME)
+            def _item_g():
+                def _alt_1():
+                    # [bar1(x)]
+                    def _item_opt():
+                        def _atom():
+                            def _alt():
+                                # bar1(x)
+                                def _item_bar1():
+                                    return self.bar1(x)
+                                bar1: Any; _result_bar1: Optional[Tuple[Any]]
+                                _result_bar1 = _item_bar1()
+                                if not _result_bar1: return None
+                                bar1, = _result_bar1
+                                # parse succeeded
+                                return (bar1),
+                            return self._alt(_alt)
+                        return self._opt(_atom)
+                    opt: Optional[Any]; _result_opt: Optional[Tuple[Any]]
+                    _result_opt = _item_opt()
+                    if not _result_opt: return None
+                    opt, = _result_opt
+                    # parse succeeded
+                    return (opt),
+                def _alt_2():
+                    # NAME
+                    def _item__name():
+                        return self._name()
+                    _name: Any; _result__name: Optional[Tuple[Any]]
+                    _result__name = _item__name()
+                    if not _result__name: return None
+                    _name, = _result__name
+                    # parse succeeded
+                    return (_name),
+                return self._alts(_alt_1, _alt_2)
+            g: Any; _result_g: Optional[Tuple[Any]]
+            _result_g = _item_g()
+            if not _result_g: return None
+            g, = _result_g
+            # parse succeeded
+            return (g + 1),
+        return self._alts(_alt_1, _alt_2)
+
+    @memoize
+    def bar4(self, bar: int) -> Optional[list]:
+        # bar4: bar1(bar) bar6
+        def _alt():
+            # bar1(bar)
+            def _item_bar_1():
+                return self.bar1(bar)
+            bar: Any; _result_bar: Optional[Tuple[Any]]
+            _result_bar = _item_bar_1()
+            if not _result_bar: return None
+            bar, = _result_bar
+            # bar6
+            def _item_bar_2():
+                return self.bar6()
+            bar: Any; _result_bar: Optional[Tuple[Any]]
+            _result_bar = _item_bar_2()
+            if not _result_bar: return None
+            bar, = _result_bar
+            # parse succeeded
+            return ([bar_1, bar_2]),
+        return self._alt(_alt)
+
+    @memoize
+    def bar5(self, x: int) -> Optional[Any]:
+        # bar5: NAME NAME
+        def _alt():
+            # NAME
+            def _item_n():
+                return self._name()
+            n: int; _result_n: Optional[Tuple[int]]
+            _result_n = _item_n()
+            if not _result_n: return None
+            n, = _result_n
+            # NAME
+            def _item_n_1():
+                return self._name()
+            n: Any; _result_n: Optional[Tuple[Any]]
+            _result_n = _item_n_1()
+            if not _result_n: return None
+            n, = _result_n
+            # parse succeeded
+            return (n + x),
+        return self._alt(_alt)
+
+    @memoize
+    def bar6(self) -> Optional[list]:
+        # bar6: ((NAME | STRING* ('foo' 'bar')))+
+        def _alt():
+            # ((NAME | STRING* ('foo' 'bar')))+
+            def _item_item():
+                def _atom():
+                    def _alt_1():
+                        # NAME
+                        def _item__name():
+                            return self._name()
+                        _name: Any; _result__name: Optional[Tuple[Any]]
+                        _result__name = _item__name()
+                        if not _result__name: return None
+                        _name, = _result__name
+                        # parse succeeded
+                        return (_name),
+                    def _alt_2():
+                        # STRING*
+                        def _item__loop0():
+                            def _atom():
+                                return self._string()
+                            return self._repeat0(_atom)
+                        _loop0: Any; _result__loop0: Optional[Tuple[Any]]
+                        _result__loop0 = _item__loop0()
+                        if not _result__loop0: return None
+                        _loop0, = _result__loop0
+                        # ('foo' 'bar')
+                        def _item__rhs():
+                            def _alt():
+                                # 'foo'
+                                def _item__literal():
+                                    return self._expect('foo')
+                                _literal: Any; _result__literal: Optional[Tuple[Any]]
+                                _result__literal = _item__literal()
+                                if not _result__literal: return None
+                                _literal, = _result__literal
+                                # 'bar'
+                                def _item__literal_1():
+                                    return self._expect('bar')
+                                _literal_1: Any; _result__literal_1: Optional[Tuple[Any]]
+                                _result__literal_1 = _item__literal_1()
+                                if not _result__literal_1: return None
+                                _literal_1, = _result__literal_1
+                                # parse succeeded
+                                return ([_literal, _literal_1]),
+                            return self._alt(_alt)
+                        _rhs: Any; _result__rhs: Optional[Tuple[Any]]
+                        _result__rhs = _item__rhs()
+                        if not _result__rhs: return None
+                        _rhs, = _result__rhs
+                        # parse succeeded
+                        return ([_loop0, _rhs]),
+                    return self._alts(_alt_1, _alt_2)
+                return self._repeat1(_atom)
+            item: Any; _result_item: Optional[Tuple[Any]]
+            _result_item = _item_item()
+            if not _result_item: return None
+            item, = _result_item
+            # parse succeeded
+            return (item),
+        return self._alt(_alt)
+
+    @memoize
+    def bar7(self) -> Optional[list]:
+        # bar7: NAME SOFT_KEYWORD
+        def _alt():
+            # NAME
+            def _item__name():
+                return self._name()
+            _name: Any; _result__name: Optional[Tuple[Any]]
+            _result__name = _item__name()
+            if not _result__name: return None
+            _name, = _result__name
+            # SOFT_KEYWORD
+            def _item__soft_keyword():
+                return self._soft_keyword()
+            _soft_keyword: Any; _result__soft_keyword: Optional[Tuple[Any]]
+            _result__soft_keyword = _item__soft_keyword()
+            if not _result__soft_keyword: return None
+            _soft_keyword, = _result__soft_keyword
+            # parse succeeded
+            return ([_name, _soft_keyword]),
+        return self._alt(_alt)
+
+    KEYWORDS = ('abc', 'foo', 'bar')
+    SOFT_KEYWORDS = ('def',)
 

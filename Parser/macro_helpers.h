@@ -30,6 +30,7 @@ static void macro_helpers_test() {
 // 
 // Token expansion
 // _PyPegen_EXPAND(x) expands x.
+#define _PyPegen_EXPAND(x) _PyPegen_EXPAND2(x)
 #define _PyPegen_EXPAND2(x) x
 #define D_PyPegen_EXPAND2(x) <Expand 2 #x> x
 //#define _PyPegen_EXPAND(x) x
@@ -39,15 +40,14 @@ static void macro_helpers_test() {
 
 // _PyPegen_HAS_PARAMS tests for a parameter sequence in parens.
 // The argument is either the sequence or empty.
-// _PyPegen_HAS_PARAMS ((param, ...)) expands to _P.
-// _PyPegen_HAS_PARAMS () expands to _NP.
+// _PyPegen_HAS_PARAMS ((param, ...)) expands to 1.
+// _PyPegen_HAS_PARAMS () expands to 0.
 // This can be appended to the name of another macro to select alternate macros.
 #define _PyPegen_PARAMS_SUFFIX_P2 1         // Called if HAS_PARAMS is called with params
 #define _PyPegen_CHOOSE_PARAMS_SUFFIX2 0    // Called if HAS_PARAMS is called with no params
 #define _PyPegen_CHOOSE_PARAMS_SUFFIX(...) _PyPegen_PARAMS_SUFFIX_P
 #define _PyPegen_HAS_PARAMS(...)  _PyPegen_CONCAT(_PyPegen_CHOOSE_PARAMS_SUFFIX __VA_ARGS__, 2)
 
-#define _PyPegen_EXPAND(x) x
 
 #if MACRO_HELPERS_TEST
 // Tests for _PyPegen_HAS_PARAMS.
@@ -65,6 +65,24 @@ static void macro_helpers_test() {
 
 #define _PyPegen_NAME_IF_PARAMS(n, ...) /*__LINE__: SUFF #__VA_ARGS__*/ \
     _PyPegen_CONCAT(n ## _, _PyPegen_HAS_PARAMS (__VA_ARGS__)) \
+
+// Generate given text if params are given.
+//  The text is the first argument, in parens.  The parens are removed.
+//  The params are the optional second argument.  '()' means no params.
+#define _PyPegen_IF_PARAMS(text, ...) \
+    Params = <__VA_ARGS__> -- \
+    _PyPegen_NAME_IF_PARAMS (_PyPegen_IF, __VA_ARGS__) (text)
+
+#define _PyPegen_IF_0(text, ...)
+#define _PyPegen_IF_1(text, ...) _PyPegen_EXPAND(text)
+
+// Generate a comma if params are given.
+//  The params are the optional argument.  '()' means no params.
+#define _PyPegen_COMMA_IF_PARAMS(_, ...) \
+    _PyPegen_NAME_IF_PARAMS (_PyPegen_COMMA, __VA_ARGS__) ()
+
+#define _PyPegen_COMMA_0(...) "Comma 0"
+#define _PyPegen_COMMA_1(...) , "Comma 1"
 
 #if MACRO_HELPERS_TEST
 // Tests for _PyPegen_NAME_IF_PARAMS, all OK.
@@ -113,10 +131,10 @@ static void macro_helpers_test() {
 #endif // MACRO_HELPERS_TEST
 
 // Expand using one of two alternative macros, depending on whether there is a parameter list
-//  following the arguments.  Either _1 (no params) or _1 (params) is appended to given macro name.
+//  following the arguments.  Either _0 (no params) or _1 (params) is appended to given macro name.
 // The arguments are in a single argument, wrapped in parentheses, but given individually to the chosen macro.
-// The parameters are in a single argument, wrapped in parentheses and given still wrapped to the chosen macro,
-//  or a blank or missing argument.
+// The parameters are in a single argument, wrapped in parentheses and given still wrapped
+//  to the chosen macro, or else a blank or missing argument.
 // _PyPegen_SEL_IF_PARAMS(name, (arg, ...), (param, ...))   -> name_1(arg, ..., (param, ...))
 // _PyPegen_SEL_IF_PARAMS(name, (arg, ...), ())             -> name_1(arg, ..., ())
 // _PyPegen_SEL_IF_PARAMS(name, (arg, ...))                 -> name_0(arg, ...)

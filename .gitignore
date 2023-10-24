@@ -151,4 +151,18 @@ Python/frozen_modules/MANIFEST
 # Ignore ./python binary on Unix but still look into ./Python/ directory.
 /python
 !/Python/
-/Tools/peg_generator/pegen/grammar_parser.new.py
+*.i
+/Tools/peg_generator/pegen/cparser
+/Tools/peg_generator/pegen/parglare
+/Tools/peg_generator/pegen/err.txt
+/Tools/peg_generator/pegen/foo.c
+*.c
+/Grammar/python new.gram
+/Grammar/python orig.gram
+/Tools/peg_generator/pegen/cci
+/Tools/peg_generator/pegen/cct
+/Tools/peg_generator/pegen/err.txt
+/Tools/peg_generator/pegen/metagrammar - Copy.gram
+/Tools/peg_generator/pegen/out_old.txt
+/Tools/peg_generator/pegen/out_new.txt
+/Tools/peg_generator/pegen/out.txt

@@ -129,8 +129,8 @@ _PyPegen_make_result_ptr(void * data) {
         return ptr;
 }
 
-#define _PyPegen_PARSE_REF(ppRes, type) \
-    *(type *)(ppRes).addr
+#define _PyPegen_PARSE_REF(_ppRes, type) \
+        *(type ) (*(_ppRes)).addr
 
 #define _PyPegen_PARSE_REF_UNTYPED(ppRes) \
     _PyPegen_PARSE_REF(ppRes, void *)
@@ -143,10 +143,19 @@ _PyPegen_make_result_ptr(void * data) {
 
 // Return a successful parse result via a result pointer, and return true as ParseStatus.
 // The result pointer is optional.  If NULL, the type and src are not evaluated.
-#define _PyPegen_RETURN_RESULT(ppRes, type, src) {              \
-    if (ppRes) {                                                \
-        /*assert ((ppRes)->size == sizeof(type)); */                \
-        _PyPegen_PARSE_REF(*(ppRes), type) = src;    \
+
+#define _PyPegen_RETURN_VAR(_ppRes, src, type) {              \
+    if (_ppRes) {                                                \
+        /*assert ((_ppRes)->size == sizeof(type)); */                \
+        _PyPegen_PARSE_REF((_ppRes), _PyPegen_TYPE_VAR (type)) = src;    \
+    }                                                           \
+    return true;                                                \
+}
+
+#define _PyPegen_RETURN_FUN(_ppRes, src, type, params) {              \
+    if (_ppRes) {                                                \
+        /*assert ((_ppRes)->size == sizeof(type)); */                \
+        _PyPegen_PARSE_REF((_ppRes), _PyPegen_TYPE_FUN (type, params)) = src;    \
     }                                                           \
     return true;                                                \
 }
@@ -154,102 +163,115 @@ _PyPegen_make_result_ptr(void * data) {
 #if MACRO_HELPERS_TEST
 static void pegen_test() {
 #endif
-    // Macros to declare a parse result variable and corresponding ParseResultPtr.
+
+// Macros to declare a parse result variable and corresponding ParseResultPtr.
 // Optionally add it to or copy it from the Parser's variables.
 // The variable has a name and a type, and possibly a set of parameters.
 // If it has parameters, it is a callable, and they are in a parenthesized sequence.
 // Otherwise, it is an ordinary object, and the parameters argument is empty.
 
 // ... for anonymous VarItem.
-#define _PyPegen_DECL_LOCAL_PARSE_RESULT(type, name, params) \
-    _PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (type, name), params); \
+#define _PyPegen_DECL_LOC_VAR(name, type, ...) \
+    _PyPegen_DECL_VAR (name, type); \
+    ParseResultPtr _ptr_ ## name = _PyPegen_PARSERESULTPTR(name) \
+
+#define _PyPegen_DECL_LOC_FUN(name, type, params) \
+    _PyPegen_DECL_FUN (name, type, params); \
     ParseResultPtr _ptr_ ## name = _PyPegen_PARSERESULTPTR(name) \
 
 // ... for global variable inherited from calling function.
-#define _PyPegen_GET_GLOBAL_PARSE_RESULT(type, name, params, index) \
-    _PyPegen_DECL_LOCAL_PARSE_RESULT(type, name, params); \
-    name = * (_PyPegen_SEL_IF_PARAMS(_PyPegen_TYPE, (type), params)) _p->local_values[index] \
+#define _PyPegen_GET_GLOB_VAR(index, name, type) \
+    _PyPegen_DECL_LOC_VAR(name, type); \
+    name = * (_PyPegen_TYPE_VAR (type)) _p->local_values[index] \
+
+#define _PyPegen_GET_GLOB_FUN(index, name, type, params) \
+    _PyPegen_DECL_LOC_FUN(name, type, params); \
+    name = * (_PyPegen_TYPE_FUN (type, params)) _p->local_values[index] \
 
 // ... for new global variable.
-#define _PyPegen_ADD_GLOBAL_PARSE_RESULT(type, name, params, index) \
-    _PyPegen_DECL_LOCAL_PARSE_RESULT(type, name, params); \
-    _p->local_values[index] = (_PyPegen_SEL_IF_PARAMS(_PyPegen_TYPE, (type), params) *) &name \
+#define _PyPegen_ADD_GLOB_VAR(index, name, type) \
+    _PyPegen_DECL_LOC_VAR(name, type); \
+    _p->local_values[index] = (_PyPegen_TYPE_VAR (type)) &name \
+
+#define _PyPegen_ADD_GLOB_FUN(index, name, type, params) \
+    _PyPegen_DECL_LOC_FUN(name, type, params); \
+    _p->local_values[index] = (_PyPegen_TYPE_FUN (type, params)) &name \
 
 // ... for a pointer to the variable, to use as a ppRes argument to a parse function.
 #define _PyPegen_PARSE_RESULT_PTR(name) \
     (& _ptr_ ## name)
 
 // ... type expression for pointer to any object type.
-#define _PyPegen_TYPE_0(type, _unused) \
+#define _PyPegen_TYPE_VAR(type) \
     type *
 
 // ... type expression for pointer to any function type.
-#define _PyPegen_TYPE_1(type, params) \
-    type (*) params
+#define _PyPegen_TYPE_FUN(type, params) \
+    type (**) params
 
 // ... declare any object type variable.
-#define _PyPegen_DECL_VAR_0(type, name, _unused) \
+#define _PyPegen_DECL_VAR(name, type, ...) \
     type name
 
 // ... declare any function type variable.
-#define _PyPegen_DECL_VAR_1(type, name, params) \
-    type (*name) params
+#define _PyPegen_DECL_FUN(name, type, params) \
+    type (*name)params
 
 #if MACRO_HELPERS_TEST
 // Test the above macros...
 
 // Skip to here.
-#define XX_1(n, t, p) "XX_1"(n, t, p)
+#define XX_1(n, t, _p) "XX_1"(n, t, _p)
 
 __LINE__;
 // _PyPegen_SEL_IF_PARAMS(XX, (int, name), (int *, const int *));
    _PyPegen_STR((_PyPegen_SEL_IF_PARAMS(XX, (int, name), (int *, const int *)) ));
 
 __LINE__;
-// _PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (int, name), (int *, const int *));
-   _PyPegen_STR((_PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (int, name), (int *, const int *)) ));
+// _PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (name, int), (int *, const int *));
+   _PyPegen_STR((_PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (name, int), (int *, const int *)) ));
 
 __LINE__;
-// _PyPegen_DECL_LOCAL_PARSE_RESULT(int, name, (int *, const int *));
-   _PyPegen_STR((_PyPegen_DECL_LOCAL_PARSE_RESULT(int, name, (int *, const int *)) ));
+// _PyPegen_DECL_LOCAL_PARSE_RESULT(name, int, (int *, const int *));
+   _PyPegen_STR((_PyPegen_DECL_LOCAL_PARSE_RESULT(name, int, (int *, const int *)) ));
 
 __LINE__;
 // _PyPegen_SEL_IF_PARAMS(XX, (int, name), );
    _PyPegen_STR((_PyPegen_SEL_IF_PARAMS(XX, (int, name), ) ));
 
 __LINE__;
-// _PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (int, name), );
-   _PyPegen_STR((_PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (int, name), ) ));
+// _PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (name, int), );
+   _PyPegen_STR((_PyPegen_SEL_IF_PARAMS(_PyPegen_DECL_VAR, (name, int), ) ));
 
 __LINE__;
-// _PyPegen_DECL_LOCAL_PARSE_RESULT(int, name, );
-   _PyPegen_STR((_PyPegen_DECL_LOCAL_PARSE_RESULT(int, name, ) ));
+// _PyPegen_DECL_LOCAL_PARSE_RESULT(name, int, );
+   _PyPegen_STR((_PyPegen_DECL_LOCAL_PARSE_RESULT(name, int, ) ));
 
-// _PyPegen_GET_GLOBAL_PARSE_RESULT(int, name, (int *, const int *), 42);
-   _PyPegen_STR(_PyPegen_GET_GLOBAL_PARSE_RESULT(int, name, (int *, const int *), 42) );
+// _PyPegen_GET_GLOBAL_PARSE_RESULT(name, int, (int *, const int *), 42);
+   _PyPegen_STR(_PyPegen_GET_GLOBAL_PARSE_RESULT(name, int, (int *, const int *), 42) );
 
-// _PyPegen_GET_GLOBAL_PARSE_RESULT(int, name, , 42);
-   _PyPegen_STR(_PyPegen_GET_GLOBAL_PARSE_RESULT(int, name, , 42) );
+// _PyPegen_GET_GLOBAL_PARSE_RESULT(name, int, , 42);
+   _PyPegen_STR(_PyPegen_GET_GLOBAL_PARSE_RESULT(name, int, , 42) );
 
-// _PyPegen_ADD_GLOBAL_PARSE_RESULT(int, name, (int *, const int *), 42);
-   _PyPegen_STR(_PyPegen_ADD_GLOBAL_PARSE_RESULT(int, name, (int *, const int *), 42) );
+// _PyPegen_ADD_GLOBAL_PARSE_RESULT(42, name, int, (int *, const int *));
+   _PyPegen_STR(_PyPegen_ADD_GLOBAL_PARSE_RESULT(42, name, int, (int *, const int *)) );
 
-// _PyPegen_ADD_GLOBAL_PARSE_RESULT(int, name, , 42);
-   _PyPegen_STR(_PyPegen_ADD_GLOBAL_PARSE_RESULT(int, name, , 42) );
+// _PyPegen_ADD_GLOBAL_PARSE_RESULT(42, name, int, );
+   _PyPegen_STR(_PyPegen_ADD_GLOBAL_PARSE_RESULT(42, name, int, ) );
 
 // Test some variable declaration macros...
 
-    _PyPegen_STR((_PyPegen_DECL_LOCAL_PARSE_RESULT(int, name, (int *, const int *)) ));
+    _PyPegen_STR((_PyPegen_DECL_LOCAL_PARSE_RESULT(name, int, (int *, const int *)) ));
 
-    _PyPegen_STR((_PyPegen_DECL_LOCAL_PARSE_RESULT(int, name, ) ));
+    _PyPegen_STR((_PyPegen_DECL_LOCAL_PARSE_RESULT(name, int, ) ));
 
-    _PyPegen_STR((_PyPegen_GET_GLOBAL_PARSE_RESULT(int, name, (int *, const int *), 42) ));
+    _PyPegen_STR((_PyPegen_GET_GLOBAL_PARSE_RESULT(name, int, (int *, const int *), 42) ));
 
-    _PyPegen_STR((_PyPegen_GET_GLOBAL_PARSE_RESULT(int, name, , 42) ));
+    _PyPegen_STR((_PyPegen_GET_GLOBAL_PARSE_RESULT(name, int, , 42) ));
 
-    _PyPegen_STR((_PyPegen_ADD_GLOBAL_PARSE_RESULT(int, name, (int *, const int *), 42) ));
+    _PyPegen_STR((_PyPegen_ADD_GLOBAL_PARSE_RESULT(42, name, int, (int *, const int *)) ));
 
-    _PyPegen_STR((_PyPegen_ADD_GLOBAL_PARSE_RESULT(int, name, , 42) ));
+    _PyPegen_STR((_PyPegen_ADD_GLOBAL_PARSE_RESULT(42, name, int, ) ));
 
     _PyPegen_STR((_PyPegen_SEL_IF_PARAMS (_PyPegen_TYPE, (int), ) ));
 
@@ -262,11 +284,11 @@ __LINE__;
 
 // Typedefs for callback parsing functions...
 //  ... Returns status, and result via pointer.
-typedef ParseStatus (ParseFunc)(Parser * p, ParseResultPtr * _ppRes);
+typedef ParseStatus (ParseFunc)(Parser * _p, ParseResultPtr * _ppRes);
 //  ... Returns just result via pointer.
-typedef void (ParseTrue)(Parser * p, ParseResultPtr * _ppRes);
+typedef void (ParseTrue)(Parser * _p, ParseResultPtr * _ppRes);
 //  ... Returns only status.
-typedef ParseStatus (ParseTest)(Parser * p);
+typedef ParseStatus (ParseTest)(Parser * _p);
 
 typedef struct {
     cmpop_ty cmpop;
@@ -316,11 +338,36 @@ struct RuleDescr {
     size_t result_size;     // Size of the result to store in the Memo.
 };
 
-#define DECL_RULE_DESCR(name, rule, result_type, expr)  \
+#define _PyPegen_DECL_RULE_DESCR(name, rule, result_type, expr)  \
     static RuleDescr name = {                           \
         _ ## rule ## __rhs, # rule, expr,               \
         rule ## _type, sizeof(result_type)              \
     };
+
+// Macros to forward declare and define a Rule.
+// The definition is only the name and parameters, and none of
+// the function body.
+// The rule parameters, if any, are optional and are enclosed in parentheses as ...
+
+#define _PyPegen__RULE(rule, ...)  \
+    _PyPegen_NAME_IF_PARAMS(_PyPegen_RULE, __VA_ARGS__) (rule, __VA_ARGS__) \
+
+#define _PyPegen_RULE_0(rule, ...)  \
+    ParseStatus rule ## _rule(Parser* _p, ParseResultPtr* _ppRes) \
+
+#define _PyPegen_RULE_1(rule, params)  \
+    ParseStatus rule ## _rule(Parser* _p, ParseResultPtr* _ppRes, \
+        _PyPegen_UNGROUP params) \
+
+#define _PyPegen_DECL_RULE(rule, ...)  \
+    static _PyPegen_NAME_IF_PARAMS(_PyPegen_DECL_RULE, __VA_ARGS__) (rule, __VA_ARGS__); \
+
+#define _PyPegen_DECL_RULE_0(rule, ...)  \
+     ParseStatus _ ## rule ## _rule(Parser* _p, ParseResultPtr* _ppRes) \
+
+#define _PyPegen_DECL_RULE_1(rule, params)  \
+    ParseStatus _ ## rule ## _rule(Parser* _p, ParseResultPtr* _ppRes, \
+        _PyPegen_UNGROUP params) \
 
 // Dynamic information about the Rule being parsed.
 // This is kept in the Parser and saved/restored on entering/leaving the rule.
@@ -354,55 +401,55 @@ PyObject *_PyPegen_get_memo_statistics(void);
 
 //  ... Plain Rule, no memo, not recursive.
 //      Or recursive but not the leader (this doesn't need to be memoized).
-ParseStatus _PyPegen_parse_rule(Parser* p, ParseResultPtr * ppRes, RuleDescr* rule, void * local_vars[]);
+ParseStatus _PyPegen_parse_rule(Parser* _p, ParseResultPtr * ppRes, RuleDescr* rule, void * local_vars[]);
 
 //  ... Memoized Rule, not a left-recursive group leader.
-ParseStatus _PyPegen_parse_memo_rule(Parser* p, ParseResultPtr * ppRes, RuleDescr* rule, void* local_vars[]);
+ParseStatus _PyPegen_parse_memo_rule(Parser* _p, ParseResultPtr * ppRes, RuleDescr* rule, void* local_vars[]);
 
 //  ... Left-recursive group leader Rule.
-ParseStatus _PyPegen_parse_recursive_rule(Parser* p, ParseResultPtr * ppRes, RuleDescr* rule, void* local_vars[]);
+ParseStatus _PyPegen_parse_recursive_rule(Parser* _p, ParseResultPtr * ppRes, RuleDescr* rule, void* local_vars[]);
 
 // Helper function to parse a rule alternative, returning the parse result.
 // If the parse fails, false is returned and the mark is left unchanged.
-ParseStatus _PyPegen_parse_alt(Parser *p, ParseResultPtr * ppRes, const RuleAltDescr *alt);
+ParseStatus _PyPegen_parse_alt(Parser *_p, ParseResultPtr * ppRes, const RuleAltDescr *alt);
 
 // Helper function to parse several rule alternatives, returning the first successful parse result.
-// However, if an alternative sets p->cut_indicator, no more alternatives are tried.
+// However, if an alternative sets _p->cut_indicator, no more alternatives are tried.
 // If the parse fails, false is returned and the mark is left unchanged.
 // All the alternatives have to agree on their result type.
-ParseStatus _PyPegen_parse_alts(Parser *p, ParseResultPtr * ppRes, const RuleAltDescr alts[], int count);
+ParseStatus _PyPegen_parse_alts(Parser *_p, ParseResultPtr * ppRes, const RuleAltDescr alts[], int count);
 
 // Macro to parse several rule alternatives, given an array of alternative descriptors.
-#define _PyPegen_PARSE_ALT_ARRAY(p, ppres, alts) \
-    _PyPegen_parse_alts(p, ppres, alts, sizeof alts / sizeof alts[0]);
+#define _PyPegen_PARSE_ALT_ARRAY(_p, ppres, alts) \
+    _PyPegen_parse_alts(_p, ppres, alts, sizeof alts / sizeof alts[0]);
 
 // Parse an item some number of times, returning an asdl_seq * with the parsed results as elements.
 // Given a minimum and maximum number of items.  If the minimum number is not reached, the parse fails.
 // If the maximum number is reached, no more items are attempted.  max = 0 means no limit.
 // Optionally provide a separator item, which must be parsed between consecutive items.
-ParseStatus _PyPegen_parse_seq(Parser *p, ParseResultPtr * ppRes,
+ParseStatus _PyPegen_parse_seq(Parser *_p, ParseResultPtr * ppRes,
     ParseFunc item, size_t item_size, ParseFunc * sep, int min, int max);
 
 // Variations of the above, for different combinations of parameters.
 //
 //  ... Optionally parse an item, always succeeds.  Return value has either 0 or 1 elements.
 Py_LOCAL_INLINE(ParseStatus)
-_PyPegen_parse_opt(Parser * p, ParseResultPtr * ppRes, ParseFunc item, size_t item_size) {
-    _PyPegen_parse_seq(p, ppRes, item, item_size, NULL, 0, 1);
+_PyPegen_parse_opt(Parser * _p, ParseResultPtr * ppRes, ParseFunc item, size_t item_size) {
+    _PyPegen_parse_seq(_p, ppRes, item, item_size, NULL, 0, 1);
 }
 
 //  ... Parse an item as many times as possible.  Optionally require at least one item.
 // Parse an item several times, returning an asdl_seq * with the parsed results as elements.
 Py_LOCAL_INLINE(ParseStatus)
-_PyPegen_parse_repeat(Parser * p, ParseResultPtr * ppRes, ParseFunc item, size_t item_size, int repeat1) {
-    _PyPegen_parse_seq(p, ppRes, item, item_size, NULL, repeat1, 0);
+_PyPegen_parse_repeat(Parser * _p, ParseResultPtr * ppRes, ParseFunc item, size_t item_size, int repeat1) {
+    _PyPegen_parse_seq(_p, ppRes, item, item_size, NULL, repeat1, 0);
 }
 
 //  ... Parse an item as many times as possible, with a given separator item, which must be parsed between consecutive items.
 //      Optionally require at least one item.
 Py_LOCAL_INLINE(ParseStatus)
-_PyPegen_parse_gather(Parser * p, ParseResultPtr * ppRes, ParseFunc item, size_t item_size, ParseFunc sep, int repeat1) {
-    _PyPegen_parse_seq(p, ppRes, item, item_size, sep, repeat1, 0);
+_PyPegen_parse_gather(Parser * _p, ParseResultPtr * ppRes, ParseFunc item, size_t item_size, ParseFunc sep, int repeat1) {
+    _PyPegen_parse_seq(_p, ppRes, item, item_size, sep, repeat1, 0);
 }
 
 // Test parsing an item without consuming any input or computing any value.  Does not return any value.
@@ -411,35 +458,35 @@ ParseStatus _PyPegen_parse_lookahead(Parser *, ParseStatus positive, ParseTest i
 
 // Parse an item, requiring it to succeed.  If the item parse fails, raise a SyntaxError.
 // If the function returns, then the parse succeeded.  No status is returned.
-void _PyPegen_parse_forced(Parser *p, ParseResultPtr * ppRes, ParseFunc item, const char* expected);
+void _PyPegen_parse_forced(Parser *_p, ParseResultPtr * ppRes, ParseFunc item, const char* expected);
 
 // Parse a NAME Token.  Result value is an AST expr_ty object with Name_kind.
-ParseStatus _PyPegen_parse_name(Parser *p, ParseResultPtr * ppRes);
+ParseStatus _PyPegen_parse_name(Parser *_p, ParseResultPtr * ppRes);
 
 // Parse any soft keyword or just a specific soft keyword.
 // Same as _PyPegen_parse_name(), but fails if the name is not an actual soft keyword, or the given keyword. 
-ParseStatus _PyPegen_parse_any_soft_keyword(Parser *p, ParseResultPtr * ppRes);
-ParseStatus _PyPegen_parse_soft_keyword(Parser *p, ParseResultPtr * ppRes, const char * keyword);
+ParseStatus _PyPegen_parse_any_soft_keyword(Parser *_p, ParseResultPtr * ppRes);
+ParseStatus _PyPegen_parse_soft_keyword(Parser *_p, ParseResultPtr * ppRes, const char * keyword);
 
 // Parse a NUMBER Token.  Result value is an AST expr_ty object with Constant_kind.  Its value is
 //  the appropriate numeric Python object.
-ParseStatus _PyPegen_parse_number(Parser *p, ParseResultPtr * ppRes);
+ParseStatus _PyPegen_parse_number(Parser *_p, ParseResultPtr * ppRes);
 
 // Parse a STRING Token.  Result value is a Token *.
-ParseStatus _PyPegen_parse_string(Parser *p, ParseResultPtr * ppRes);
+ParseStatus _PyPegen_parse_string(Parser *_p, ParseResultPtr * ppRes);
 
 // Parse a given type of Token.  Result value is a Token *.
-ParseStatus _PyPegen_parse_token(Parser *p, ParseResultPtr * ppRes, int type);
+ParseStatus _PyPegen_parse_token(Parser *_p, ParseResultPtr * ppRes, int type);
 
 // Parse an OP Token.  Result value is a Token *.
-ParseStatus _PyPegen_parse_op(Parser *p, ParseResultPtr * ppRes);
+ParseStatus _PyPegen_parse_op(Parser *_p, ParseResultPtr * ppRes);
 
 // Parse an OP Token with given character as its string.  Result value is a Token *.
-ParseStatus _PyPegen_parse_char(Parser *p, ParseResultPtr * ppRes, char c);
+ParseStatus _PyPegen_parse_char(Parser *_p, ParseResultPtr * ppRes, char c);
 
 // Parse a Cut expression.  This doesn't parse anything of the input, but just
 //  sets an indication that if the current Alt faile, then no more Alts will be tried.
-void _PyPegen_parse_cut(Parser *p);
+void _PyPegen_parse_cut(Parser *_p);
 
 int _PyPegen_lookahead_with_name(int, expr_ty (func)(Parser *), Parser *);
 int _PyPegen_lookahead_with_int(int, Token *(func)(Parser *, int), Parser *, int);
@@ -447,22 +494,35 @@ int _PyPegen_lookahead_with_string(int , expr_ty (func)(Parser *, const char*), 
 int _PyPegen_lookahead(int, void *(func)(Parser *), Parser *);
 
 
-Token * _PyPegen_expect_token(Parser *p, int type);
-Token *_PyPegen_expect_char(Parser *p, char c);
-void* _PyPegen_expect_forced_result(Parser *p, void* result, const char* expected);
-Token *_PyPegen_expect_forced_token(Parser *p, int type, const char* expected);
-expr_ty _PyPegen_expect_soft_keyword(Parser *p, const char *keyword);
-ParseStatus _PyPegen_group(Parser *p, ParseResultPtr * ppRes, ParseFunc rhs);
-expr_ty _PyPegen_soft_keyword_token(Parser *p);
-Token *_PyPegen_get_last_nonnwhitespace_token(Parser *p);
-int _PyPegen_fill_token(Parser *p);
-expr_ty _PyPegen_name_token(Parser *p);
-expr_ty _PyPegen_number_token(Parser *p);
-Token *_PyPegen_string_token(Parser *p);
-Token * _PyPegen_type_comment_token(Parser *p);
+Token * _PyPegen_expect_token(Parser *_p, int type);
+Token *_PyPegen_expect_char(Parser *_p, char c);
+void* _PyPegen_expect_forced_result(Parser *_p, void* result, const char* expected);
+Token *_PyPegen_expect_forced_token(Parser *_p, int type, const char* expected);
+expr_ty _PyPegen_expect_soft_keyword(Parser *_p, const char *keyword);
+ParseStatus _PyPegen_group(Parser *_p, ParseResultPtr * ppRes, ParseFunc rhs);
+expr_ty _PyPegen_soft_keyword_token(Parser *_p);
+Token *_PyPegen_get_last_nonnwhitespace_token(Parser *_p);
+int _PyPegen_fill_token(Parser *_p);
+expr_ty _PyPegen_name_token(Parser *_p);
+expr_ty _PyPegen_number_token(Parser *_p);
+Token *_PyPegen_string_token(Parser *_p);
+Token * _PyPegen_type_comment_token(Parser *_p);
 Py_ssize_t _PyPegen_byte_offset_to_character_offset(PyObject *line, Py_ssize_t col_offset);
-int _PyPegen_location_start(Parser* p, int * lineno, int * col_offset);   // Current location in input.
-int _PyPegen_location_end(Parser* p, int * lineno, int * col_offset);     // Current location in input, but backs up over whitespace.
+
+// Getting input file locations, as part of having EXTRA appear in action...
+// At start of the Alt, declare local variables and set the starting location.
+#define _PyPegen_EXTRA_START(_p) \
+    int _start_lineno, _start_col_offset, _end_lineno, _end_col_offset; \
+    _PyPegen_location_start(_p, &_start_lineno, &_start_col_offset); \
+
+// At end of the Alt, if(_p) \
+ successful, set th ending location.
+#define _PyPegen_EXTRA_END(_p) \
+    _PyPegen_location_end(_p, &_end_lineno, &_end_col_offset); \
+
+// Helper functions used by themacros.
+int _PyPegen_location_start(Parser* _p, int * lineno, int * col_offset);   // Current location in input.
+int _PyPegen_location_end(Parser* _p, int * lineno, int * col_offset);     // Current location in input, but backs up over whitespace.
 
 // Error handling functions and APIs
 typedef enum {
@@ -471,17 +531,17 @@ typedef enum {
     FOR_TARGETS
 } TARGETS_TYPE;
 
-int _Pypegen_raise_decode_error(Parser *p);
+int _Pypegen_raise_decode_error(Parser *_p);
 void _PyPegen_raise_tokenizer_init_error(PyObject *filename);
-int _Pypegen_tokenizer_error(Parser *p);
-void *_PyPegen_raise_error(Parser *p, PyObject *errtype, const char *errmsg, ...);
-void *_PyPegen_raise_error_known_location(Parser *p, PyObject *errtype,
+int _Pypegen_tokenizer_error(Parser *_p);
+void *_PyPegen_raise_error(Parser *_p, PyObject *errtype, const char *errmsg, ...);
+void *_PyPegen_raise_error_known_location(Parser *_p, PyObject *errtype,
                                           Py_ssize_t lineno, Py_ssize_t col_offset,
                                           Py_ssize_t end_lineno, Py_ssize_t end_col_offset,
                                           const char *errmsg, va_list va);
-void _Pypegen_set_syntax_error(Parser* p, Token* last_token);
+void _Pypegen_set_syntax_error(Parser* _p, Token* last_token);
 Py_LOCAL_INLINE(void *)
-RAISE_ERROR_KNOWN_LOCATION(Parser *p, PyObject *errtype,
+RAISE_ERROR_KNOWN_LOCATION(Parser *_p, PyObject *errtype,
                            Py_ssize_t lineno, Py_ssize_t col_offset,
                            Py_ssize_t end_lineno, Py_ssize_t end_col_offset,
                            const char *errmsg, ...)
@@ -490,26 +550,26 @@ RAISE_ERROR_KNOWN_LOCATION(Parser *p, PyObject *errtype,
     va_start(va, errmsg);
     Py_ssize_t _col_offset = (col_offset == CURRENT_POS ? CURRENT_POS : col_offset + 1);
     Py_ssize_t _end_col_offset = (end_col_offset == CURRENT_POS ? CURRENT_POS : end_col_offset + 1);
-    _PyPegen_raise_error_known_location(p, errtype, lineno, _col_offset, end_lineno, _end_col_offset, errmsg, va);
+    _PyPegen_raise_error_known_location(_p, errtype, lineno, _col_offset, end_lineno, _end_col_offset, errmsg, va);
     va_end(va);
     return NULL;
 }
-#define RAISE_SYNTAX_ERROR(msg, ...) _PyPegen_raise_error(p, PyExc_SyntaxError, msg, ##__VA_ARGS__)
-#define RAISE_INDENTATION_ERROR(msg, ...) _PyPegen_raise_error(p, PyExc_IndentationError, msg, ##__VA_ARGS__)
+#define RAISE_SYNTAX_ERROR(msg, ...) _PyPegen_raise_error(_p, PyExc_SyntaxError, msg, ##__VA_ARGS__)
+#define RAISE_INDENTATION_ERROR(msg, ...) _PyPegen_raise_error(_p, PyExc_IndentationError, msg, ##__VA_ARGS__)
 #define RAISE_SYNTAX_ERROR_KNOWN_RANGE(a, b, msg, ...) \
-    RAISE_ERROR_KNOWN_LOCATION(p, PyExc_SyntaxError, (a)->lineno, (a)->col_offset, (b)->end_lineno, (b)->end_col_offset, msg, ##__VA_ARGS__)
+    RAISE_ERROR_KNOWN_LOCATION(_p, PyExc_SyntaxError, (a)->lineno, (a)->col_offset, (b)->end_lineno, (b)->end_col_offset, msg, ##__VA_ARGS__)
 #define RAISE_SYNTAX_ERROR_KNOWN_LOCATION(a, msg, ...) \
-    RAISE_ERROR_KNOWN_LOCATION(p, PyExc_SyntaxError, (a)->lineno, (a)->col_offset, (a)->end_lineno, (a)->end_col_offset, msg, ##__VA_ARGS__)
+    RAISE_ERROR_KNOWN_LOCATION(_p, PyExc_SyntaxError, (a)->lineno, (a)->col_offset, (a)->end_lineno, (a)->end_col_offset, msg, ##__VA_ARGS__)
 #define RAISE_SYNTAX_ERROR_STARTING_FROM(a, msg, ...) \
-    RAISE_ERROR_KNOWN_LOCATION(p, PyExc_SyntaxError, (a)->lineno, (a)->col_offset, CURRENT_POS, CURRENT_POS, msg, ##__VA_ARGS__)
-#define RAISE_SYNTAX_ERROR_INVALID_TARGET(type, e) _RAISE_SYNTAX_ERROR_INVALID_TARGET(p, type, e)
+    RAISE_ERROR_KNOWN_LOCATION(_p, PyExc_SyntaxError, (a)->lineno, (a)->col_offset, CURRENT_POS, CURRENT_POS, msg, ##__VA_ARGS__)
+#define RAISE_SYNTAX_ERROR_INVALID_TARGET(type, e) _RAISE_SYNTAX_ERROR_INVALID_TARGET(_p, type, e)
 
 Py_LOCAL_INLINE(void *)
-CHECK_CALL(Parser *p, void *result)
+CHECK_CALL(Parser *_p, void *result)
 {
     if (result == NULL) {
         assert(PyErr_Occurred());
-        p->error_indicator = 1;
+        _p->error_indicator = 1;
     }
     return result;
 }
@@ -517,21 +577,21 @@ CHECK_CALL(Parser *p, void *result)
 /* This is needed for helper functions that are allowed to
    return NULL without an error. Example: _PyPegen_seq_extract_starred_exprs */
 Py_LOCAL_INLINE(void *)
-CHECK_CALL_NULL_ALLOWED(Parser *p, void *result)
+CHECK_CALL_NULL_ALLOWED(Parser *_p, void *result)
 {
     if (result == NULL && PyErr_Occurred()) {
-        p->error_indicator = 1;
+        _p->error_indicator = 1;
     }
     return result;
 }
 
-#define CHECK(type, result) ((type) CHECK_CALL(p, result))
-#define CHECK_NULL_ALLOWED(type, result) ((type) CHECK_CALL_NULL_ALLOWED(p, result))
+#define CHECK(type, result) ((type) CHECK_CALL(_p, result))
+#define CHECK_NULL_ALLOWED(type, result) ((type) CHECK_CALL_NULL_ALLOWED(_p, result))
 
 expr_ty _PyPegen_get_invalid_target(expr_ty e, TARGETS_TYPE targets_type);
 const char *_PyPegen_get_expr_name(expr_ty);
 Py_LOCAL_INLINE(void *)
-_RAISE_SYNTAX_ERROR_INVALID_TARGET(Parser *p, TARGETS_TYPE type, void *e)
+_RAISE_SYNTAX_ERROR_INVALID_TARGET(Parser *_p, TARGETS_TYPE type, void *e)
 {
     expr_ty invalid_target = CHECK_NULL_ALLOWED(expr_ty, _PyPegen_get_invalid_target(e, type));
     if (invalid_target != NULL) {
@@ -554,10 +614,12 @@ _RAISE_SYNTAX_ERROR_INVALID_TARGET(Parser *p, TARGETS_TYPE type, void *e)
 
 // Action utility functions
 
-expr_ty _PyPegen_dummy_name(Parser *p, ...);
-void * _PyPegen_seq_last_item(asdl_seq *seq);
+typedef expr_ty dummy_ty;
+typedef void * circ_ty;
+dummy_ty _PyPegen_dummy_name(Parser *_p, ...);
+void *  _PyPegen_seq_last_item(asdl_seq *seq);
 #define PyPegen_last_item(seq, type) ((type)_PyPegen_seq_last_item((asdl_seq*)seq))
-void * _PyPegen_seq_first_item(asdl_seq *seq);
+void *  _PyPegen_seq_first_item(asdl_seq *seq);
 #define PyPegen_first_item(seq, type) ((type)_PyPegen_seq_first_item((asdl_seq*)seq))
 #define UNUSED(expr) do { (void)(expr); } while (0)
 #define EXTRA_EXPR(head, tail) head->lineno, (head)->col_offset, (tail)->end_lineno, (tail)->end_col_offset, _p->arena
@@ -565,7 +627,7 @@ void * _PyPegen_seq_first_item(asdl_seq *seq);
 PyObject *_PyPegen_new_type_comment(Parser *, const char *);
 
 Py_LOCAL_INLINE(PyObject *)
-NEW_TYPE_COMMENT(Parser *p, Token *tc)
+NEW_TYPE_COMMENT(Parser *_p, Token *tc)
 {
     if (tc == NULL) {
         return NULL;
@@ -574,25 +636,25 @@ NEW_TYPE_COMMENT(Parser *p, Token *tc)
     if (bytes == NULL) {
         goto error;
     }
-    PyObject *tco = _PyPegen_new_type_comment(p, bytes);
+    PyObject *tco = _PyPegen_new_type_comment(_p, bytes);
     if (tco == NULL) {
         goto error;
     }
     return tco;
  error:
-    p->error_indicator = 1;  // Inline CHECK_CALL
+    _p->error_indicator = 1;  // Inline CHECK_CALL
     return NULL;
 }
 
 Py_LOCAL_INLINE(void *)
-INVALID_VERSION_CHECK(Parser *p, int version, char *msg, void *node)
+INVALID_VERSION_CHECK(Parser *_p, int version, char *msg, void *node)
 {
     if (node == NULL) {
-        p->error_indicator = 1;  // Inline CHECK_CALL
+        _p->error_indicator = 1;  // Inline CHECK_CALL
         return NULL;
     }
-    if (p->feature_version < version) {
-        p->error_indicator = 1;
+    if (_p->feature_version < version) {
+        _p->error_indicator = 1;
         return RAISE_SYNTAX_ERROR("%s only supported in Python 3.%i and greater",
                                   msg, version);
     }
@@ -612,7 +674,7 @@ int _PyPegen_seq_count_dots(asdl_seq *);
 alias_ty _PyPegen_alias_for_star(Parser *, int, int, int, int, PyArena *);
 asdl_identifier_seq *_PyPegen_map_names_to_ids(Parser *, asdl_expr_seq *);
 CmpopExprPair *_PyPegen_cmpop_expr_pair(Parser *, cmpop_ty, expr_ty);
-asdl_int_seq *_PyPegen_get_cmpops(Parser *p, asdl_seq *);
+asdl_int_seq *_PyPegen_get_cmpops(Parser *_p, asdl_seq *);
 asdl_expr_seq *_PyPegen_get_exprs(Parser *, asdl_seq *);
 expr_ty _PyPegen_set_expr_context(Parser *, expr_ty, expr_context_ty);
 KeyValuePair *_PyPegen_key_value_pair(Parser *, expr_ty, expr_ty);
@@ -636,16 +698,16 @@ asdl_keyword_seq *_PyPegen_seq_delete_starred_exprs(Parser *, asdl_seq *);
 expr_ty _PyPegen_collect_call_seqs(Parser *, asdl_expr_seq *, asdl_seq *,
                      int lineno, int col_offset, int end_lineno,
                      int end_col_offset, PyArena *arena);
-expr_ty _PyPegen_concatenate_strings(Parser *p, asdl_seq *);
-expr_ty _PyPegen_ensure_imaginary(Parser *p, expr_ty);
-expr_ty _PyPegen_ensure_real(Parser *p, expr_ty);
+expr_ty _PyPegen_concatenate_strings(Parser *_p, asdl_seq *);
+expr_ty _PyPegen_ensure_imaginary(Parser *_p, expr_ty);
+expr_ty _PyPegen_ensure_real(Parser *_p, expr_ty);
 asdl_seq *_PyPegen_join_sequences(Parser *, asdl_seq *, asdl_seq *);
 int _PyPegen_check_barry_as_flufl(Parser *, Token *);
-int _PyPegen_check_legacy_stmt(Parser *p, expr_ty t);
+int _PyPegen_check_legacy_stmt(Parser *_p, expr_ty t);
 mod_ty _PyPegen_make_module(Parser *, asdl_stmt_seq *);
 void *_PyPegen_arguments_parsing_error(Parser *, expr_ty);
 expr_ty _PyPegen_get_last_comprehension_item(comprehension_ty comprehension);
-void *_PyPegen_nonparen_genexp_in_call(Parser *p, expr_ty args, asdl_comprehension_seq *comprehensions);
+void *_PyPegen_nonparen_genexp_in_call(Parser *_p, expr_ty args, asdl_comprehension_seq *comprehensions);
 
 // Parser API
 

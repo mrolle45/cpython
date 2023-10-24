@@ -37,7 +37,7 @@ typedef const char * _foo_type;
 typedef int foo_a_type;
 typedef void * _x_type;
 #define list asdl_seq *
-#define tuple asdl_seq *x
+#define tuple asdl_seq *
 #define t1 void *
 #define t2 int
 #define t3 void *
@@ -51,6 +51,7 @@ typedef void * _x_type;
 [python]
     #foo_type = str
     char_ptr = str
+    char = str
     ptr_cast =
     num_cast =
 [c]
@@ -60,62 +61,76 @@ typedef void * _x_type;
     num_cast = (size_t)
     #phony
 '''
-bar9(a): a=NAME b=NAME aa=a b?
-#bar91(a): a a=NAME b=NAME                   # ERROR: 'a' used before parse.
-#bar92(a): b a=NAME b=NAME                   # ERROR: 'b' used before parse.
-#bar93(a): (a=STRING b) a=NAME b=NAME        # ERROR: 'b' used before parse.
-#bar94(a): (b=STRING a) a=NAME b=NAME        # ERROR: 'a' used before parse.
-bar95(a): a=NAME b=NAME (a=STRING b)
-bar96(a): a=NAME b=NAME (b=STRING a)
-bar97(a): (a=STRING {a}) a=NAME b=NAME
+bar22[<x[int], y[int]>]:
 
-xx: (NAME
+testfun[long <fun [int <p1[char]><p2[char *<[int], [char]>]>], obj[char]>]:
+    | n[int *]=NAME n2[char <[int], [char]>]=NAME
 
-    NAME) nnn=NAME nnn
+xxxx[int<[int], [char]>]: {1}
+r: ('y' | 'z' ) rr
+rr[char]: ('x' | 'y' | 'z' ) [long]
+# Recursion involving groups...
+r1: r2 | (r3 | r4)
+r2: [r3] (r3) NAME
+r3: r4 # r1
+r4: r1
+
+#bar9<a>: a=NAME b=NAME aa=a b? XYZ          # ERROR: 'XYZ' not a known token.
+#bar91<a>: a a=NAME b=NAME                   # ERROR: 'a' used before parse.
+#bar92<a>: b a=NAME b=NAME                   # ERROR: 'b' used before parse.
+#bar93<a>: (a=STRING b) a=NAME b=NAME        # ERROR: 'b' used before parse.
+#bar94<a>: (b=STRING a) a=NAME b=NAME        # ERROR: 'a' used before parse.
+####bar95<a>: a=NAME b=NAME (a=STRING b) b
+####bar96<a>: a=NAME b=NAME (b=STRING a)
+####bar97<a>: (a=STRING {a}) a=NAME b=NAME
+
+bar22[<x[int], y[int]>] (memo): n n=NAME y		        # ERROR.  'n' not parsed before use
+xx: [NAME
+
+    NAME] nnn=NAME nnn
     
 x [_x_type]: (DEDENT NAME | TYPE_COMMENT) NEWLINE NUMBER STRING
 
-foo(a[foo_a_type], bar) [_foo_type]:
+foo[_foo_type<a[foo_a_type], bar>]:
 
     | a bar? a* a bar? bar* x x? x* n=NAME n+
-    | bar0() bar0()		            # No args
-#   | bar()                         # Note, bar() is an error.
-    | bar a=NUMBER (bar) a (NAME)	# (bar) is NOT an arg list, but a Group.
+    | bar bar0<>                    # No args.  bar and bar0 have empty parameter list.
+    | bar (bar) a=NUMBER a (NAME)
     | bar		                    # Later, so it doesn't hide the above.
-    | bar1(a,) bar1(a,)	            # One arg, comma is required.
-    | bar2(1, 2)?	                # Two args, comma is optional.
-    | bar2(1, 3,)	                # Two args, comma is optional.
+    | bar1<a> bar1<a,>	            # One arg, comma is optional.
+    | bar2<a, a>? bar2<1, 3,>	    # Two args, comma is optional.
     | ( bar | bar | a {num_cast a}) [char_ptr]
     | bar?
-    | '.'.bar1(a,)+
+    | '.'.bar1<a,>+
     | '.'.'.'+
     | b=bar*
     | bar+
     | &',' !',' n='abc' "def" '?' {n}
     | ({ptr_cast 3}) n=NAME {n}
-    | &&bar1(2,)
+    | f=&&bar1<2> {num_cast f}
     | {ptr_cast 3}                  # Last alt (<always>)
 
-bar (memo): && NAME { "foo + bar" }			            # (memo) is NOT a parameter list
-bar0(): NAME { "foo + bar" }
-bar1(x[int],) [int] (memo): NAME x |                    # parameters and memo.
-bar1(x[int],) [int]: NAME x { 'S' } | { num_cast 43 }
-#bar22(x[int], y[int]) (memo): n n=NAME y		        # ERROR.  'n' not parsed before use
-#bar23(x[int], y[int]) (memo): n=n? y			        # ERROR.  'n' not parsed before use
-#bar24(x[int], y[int]): bar1((size_t) n,) n=NAME n y    # ERROR.  Arg 'n' not parsed before use.
-bar2(x[int], y[int]): n=NAME bar1(num_cast n,) n y
-bar3(x[int], y,):
-    | ~ NAME | g = ([b=bar1(x,) {ptr_cast num_cast b}] | NAME) {g + 1}
-#bar4(bar[int]) [list]: bar bar=bar1(bar,) bar2=bar6    # ERROR.  'n' not parsed before use
-bar5(x[int], yfun(n[int])):
-    | n[expr_ty]=NAME n2=NAME yfun(x,)+ yfun(x,) { n + x }
-bar6() [list] (memo): item=(NAME | STRING* ('foo' 'foo' 'bar'))+
-bar7 [list] (memo): NAME SOFT_KEYWORD
-bar8(x()[t1], y(a[t2], b(z[t3], w[tuple])[t4])) [list]:
-    | n=NAME y(1, ptr_cast 2)+ x()? n
-#   | n=NAME y((t2) 1, (t4 (*)(t3, tuple)) 2)+ n
-xx1: lk=&bar1(1,) {lk}                                  # ERROR.  &bar1(1,) has no value for variable.
-xx2: lk=!bar1(1,) {lk}                                  # ERROR.  &bar1(1,) has no value for variable.
+bar (memo): && NAME { "foo + bar" }
+bar0[<>]: NAME { "foo + bar" }
+bar1[int<x[int],>] (memo): NAME x |
+bar1a[int<x[int],>]: NAME x { 'S' } | { num_cast 43 }
+bar22[<x[int], y[int]>] (memo): n n=NAME y		        # ERROR.  'n' not parsed before use
+#bar23[<x[int, y[int]>] (memo)]: n=n? y			        # ERROR.  'n' not parsed before use
+#bar24<x[int, y[int]>]: bar1<(size_t) n,> n=NAME n y    # ERROR.  Arg 'n' not parsed before use.
+bar2[<x[int], y[int]>]: n=NAME bar1<num_cast n,> (n) y
+#bar25<x[int], x[int]>:                                 # ERROR.  Duplicate parameter name 'x'
+####bar3<x[int], y,>:
+####    | ~ NAME | g = ([b=bar1<x,> {ptr_cast num_cast b}] | NAME) {g + 1}
+#bar4[list<bar[int]>]: bar bar=bar1<bar,> bar2=bar6    # ERROR.  'n' not parsed before use
+####bar5<x[int], yfun<n[int]>>:
+####    | n[expr_ty]=NAME n2=NAME yfun<x,>+ yfun<x,> { n + x }
+bar6[list<>] (memo): item=(NAME | STRING* ('foo' 'foo' 'bar'))+
+bar7[list] (memo): NAME SOFT_KEYWORD
+####bar8[list<x[t1<>], y[<a[t2], b[t4<z[t3], w[tuple]>]>]>]:
+####    | n=NAME y<1, ptr_cast 2>+ x<>? n
+#   | n=NAME y<(t2) 1, (t4 (*)(t3, tuple)) 2>+ n
+xx1: lk=&bar1<1,> {lk}                                  # ERROR.  &bar1<1,> has no value for variable.
+xx2: lk=!bar1<1,> {lk}                                  # ERROR.  &bar1<1,> has no value for variable.
 
 # Left-recursive rules...
 rec1 (memo): rec2 STRING
@@ -123,12 +138,16 @@ rec2: rec3 NAME
 rec3: rec1 NUMBER
 rec: rec NAME
 
-start: rec2
-#start: rec2 { EXTRA }
+#start: rec2
+start: rec2 { EXTRA }
 #
-xxx(a[int], b):
-    | a=(b) a (a)
-    | (aa=a {num_cast aa})?
-    | [aa=a {num_cast aa}]
+####xxx[<a[int], b>[:
+####    | a=(b) a (a)
+####    | (aa=a {num_cast aa})?
+####    | [aa=a {num_cast aa}]
 
-
+# Rule type derived from alt items, and recursively...
+tt1 [long]: tt2
+tt2: tt1
+tt3: tt1
+tt4: 'x' | "y"

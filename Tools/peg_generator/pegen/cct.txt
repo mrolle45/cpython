@@ -1,0 +1,4 @@
+#!/usr/bin/bash
+ll err.txt
+cc -I/cpy/Include -I/cpy/Parser -I/cpy/PC -I/cpy/Tools/peg_g -I/cpy/Modules/_decimal/libmpdec -DCONFIG_64 -I/cpy/Include/internal -DPy_BUILD_CORE -c $1.c 2>err.txt
+ll err.txt

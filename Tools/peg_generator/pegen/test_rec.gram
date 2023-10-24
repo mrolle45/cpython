@@ -1,0 +1,19 @@
+# This grammar is to test left-recursive rules, with a Python parser.
+
+@subheader_c 'typedef void *list;'
+
+#start[list]: r=rec2 '*' {r}
+#
+## Left-recursive rules...
+#rec1[list] (memo):  
+#    | rec2 prim | prim
+#rec2[list]:	    
+#    | rec3 prim | prim
+#rec3[list]:	    
+#    | rec1 prim | prim
+
+start: target '='
+target: maybe '+' | NAME
+maybe: maybe '-' | target
+
+prim: (STRING {"string"}) | (NAME   {"name"}) | (NUMBER )

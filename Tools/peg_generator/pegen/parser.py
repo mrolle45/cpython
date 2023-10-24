@@ -350,12 +350,12 @@ class Parser:
         self._reset(mark)
         return result
 
-    def _opt(self, item_func: Callable[..., ParseResult]) -> ParseResult[OptVal]:
-        """ A list of (the item if parsed) or (empty if not parsed).
+    def _opt(self, item_func: Callable[..., ParseResult[ValueType]]) -> ParseResult[OptVal[ValueType]]:
+        """ A tuple of (the item if parsed) or (empty if not parsed).
         This is wrapped in an OptVal object.
         """
         obj = item_func()
-        return OptVal(obj and [obj[0]] or []),
+        return OptVal(obj and (obj[0],) or ()),
 
     def _loop(self,
             item_func: Callable[[], ParseResult],
@@ -429,6 +429,9 @@ class Parser:
             )
         for line in lines:
             print(line)
+
+    def _dump(self, ctx: int = 0) -> None:
+        self._tokenizer.dump(ctx)
 
     def __repr__(self) -> str:
         return f"<Parser [{self._mark()}] at {self._tokenizer.peek().start}>"

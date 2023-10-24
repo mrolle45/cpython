@@ -1,0 +1,6 @@
+# Testing the parse of left-recursive rules in test_rec.gram.
+
+# NUMBER NAME STRING NUMBER NAME STRING NUMBER NAME STRING
+
+x - + =
+#1 foo foo 'bar' foo 2 'bar' 3 foo 'bar' 4 foo 'bar' *

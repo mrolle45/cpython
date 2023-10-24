@@ -397,11 +397,18 @@
     <ClCompile Include="..\PC\winreg.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="..\Modules\getpath.py">
-      <Filter>Python Files</Filter>
-    </None>
+    <ClCompile Include="..\Parser\pegen_errors.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Parser\action_helpers.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tools\peg_generator\pegen\result_c.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tools\peg_generator\pegen\foo.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <!-- BEGIN frozen modules -->
@@ -475,5 +482,9 @@
       <Filter>Python Files</Filter>
     </None>
     <!-- END frozen modules -->
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Parser\pegen.h" />
+    <ClInclude Include="..\Parser\macro_helpers.h" />
   </ItemGroup>
 </Project>

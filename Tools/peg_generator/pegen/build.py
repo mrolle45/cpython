@@ -8,7 +8,7 @@ import tokenize
 from typing import IO, Dict, List, Optional, Set, Tuple
 
 from pegen.c_generator import CParserGenerator
-from pegen.grammar import Grammar
+from pegen.grammar import Grammar, GrammarError, GrammarTree
 from pegen.grammar_parser import GeneratedParser as GrammarParser
 from pegen.parser import Parser
 from pegen.parser_generator import ParserGenerator
@@ -19,6 +19,7 @@ MOD_DIR = pathlib.Path(__file__).resolve().parent
 
 TokenDefinitions = Tuple[Dict[int, str], Dict[str, int], Set[str]]
 
+VERBOSE_PARSER = 0x0                # Set this to 0x01 to emulate verbose_parser argument.
 
 def get_extra_flags(compiler_flags: str, compiler_py_flags_nodist: str) -> List[str]:
     flags = sysconfig.get_config_var(compiler_flags)
@@ -167,15 +168,23 @@ def compile_c_extension(
 
 
 def build_parser(
-    grammar_file: str, verbose_tokenizer: bool = False, verbose_parser: bool = False
+    grammar_file: str, verbose_tokenizer: bool = False, verbose_parser: bool = VERBOSE_PARSER
 ) -> Tuple[Grammar, Parser, Tokenizer]:
     with open(grammar_file) as file:
         tokenizer = Tokenizer(tokenize.generate_tokens(file.readline), verbose=verbose_tokenizer)
         parser = GrammarParser(tokenizer, verbose=verbose_parser)
-        grammar = parser._get_val(parser.start())
-
-        if not grammar:
-            raise parser._make_syntax_error(grammar_file)
+        # Let the nodes in the grammar know the state of the input file
+        #   in their constructors.
+        GrammarTree.set_parser(parser)
+        try: grammar = parser._get_val(parser.start())
+        except GrammarError as e:
+            e = parser._make_syntax_error(str(e), grammar_file)
+            raise e from None
+        from pegen import grammar as gr
+        c = gr.Code('void  *')
+        if not grammar: parser._tokenizer.dump(10)
+        #if not grammar:
+        #    raise parser._make_syntax_error(grammar_file)
 
     return grammar, parser, tokenizer
 
@@ -195,12 +204,12 @@ def generate_token_definitions(tokens: IO[str]) -> TokenDefinitions:
         pieces = line.split()
         index = next(numbers)
 
-        if len(pieces) == 1:
-            (token,) = pieces
+        if len(pieces) == 1 or not pieces[1].strip("'"):
+            token = pieces[0]
             non_exact_tokens.add(token)
             all_tokens[index] = token
-        elif len(pieces) == 2:
-            token, op = pieces
+        elif len(pieces) == 2 or pieces[2].startswith('#'):
+            token, op = pieces[:2]
             exact_tokens[op.strip("'")] = index
             all_tokens[index] = token
         else:
@@ -221,11 +230,14 @@ def build_c_generator(
 ) -> ParserGenerator:
     with open(tokens_file, "r") as tok_file:
         all_tokens, exact_tok, non_exact_tok = generate_token_definitions(tok_file)
+    result = io.StringIO()
+    gen: ParserGenerator = CParserGenerator(
+        grammar, all_tokens, exact_tok, non_exact_tok, result, skip_actions=skip_actions
+    )
+    gen.generate(grammar_file)
     with open(output_file, "w") as file:
-        gen: ParserGenerator = CParserGenerator(
-            grammar, all_tokens, exact_tok, non_exact_tok, file, skip_actions=skip_actions
-        )
-        gen.generate(grammar_file)
+        print(f'Writing {output_file}.')
+        file.write(result.getvalue())
 
     if compile_extension:
         with tempfile.TemporaryDirectory() as build_dir:
@@ -238,16 +250,6 @@ def build_c_generator(
     return gen
 
 
-def build_python_generator(
-    grammar: Grammar,
-    grammar_file: str,
-    output_file: io.StringIO,
-    skip_actions: bool = False,
-) -> ParserGenerator:
-    gen: ParserGenerator = PythonParserGenerator(grammar, output_file)  # TODO: skip_actions
-    gen.generate(grammar_file)
-    return gen
-
 
 def build_c_parser_and_generator(
     grammar_file: str,
@@ -255,7 +257,7 @@ def build_c_parser_and_generator(
     output_file: str,
     compile_extension: bool = False,
     verbose_tokenizer: bool = False,
-    verbose_parser: bool = False,
+    verbose_parser: bool = VERBOSE_PARSER,
     verbose_c_extension: bool = False,
     keep_asserts_in_extension: bool = True,
     skip_actions: bool = False,
@@ -279,16 +281,19 @@ def build_c_parser_and_generator(
         skip_actions (bool, optional): Whether to pretend no rule has any actions.
     """
     grammar, parser, tokenizer = build_parser(grammar_file, verbose_tokenizer, verbose_parser)
-    gen = build_c_generator(
-        grammar,
-        grammar_file,
-        tokens_file,
-        output_file,
-        compile_extension,
-        verbose_c_extension,
-        keep_asserts_in_extension,
-        skip_actions=skip_actions,
-    )
+    if grammar:
+        grammar.tokenizer = tokenizer
+        gen = build_c_generator(
+            grammar,
+            grammar_file,
+            tokens_file,
+            output_file,
+            compile_extension,
+            verbose_c_extension,
+            keep_asserts_in_extension,
+            skip_actions=skip_actions,
+        )
+    else: gen = None
 
     return grammar, parser, tokenizer, gen
 
@@ -300,6 +305,7 @@ def build_python_parser_and_generator(
     verbose_parser: bool = False,
     skip_actions: bool = False,
     verify: bool = True,
+    parser_class: type = None,                 # Use this instead of pegen.grammar_parser.GeneratedParser.
 ) -> Tuple[Grammar, Parser, Tokenizer, ParserGenerator]:
     """Generate rules, python parser, tokenizer, parser generator for a given grammar
 
@@ -315,18 +321,27 @@ def build_python_parser_and_generator(
     # Create the result as a str, twice:
     # First, using the existing grammar_parser module.
     # Second, using the parser class defined in the first result.
+    #   This is done when verify is true, to be sure that the parser script works correctly.
+    #   If it raises an exception or produces a different script, then the parser is not written out.
     def genparser(parser_class: type) -> Tuple[str, Grammar, Parser, Tokenizer, ParserGenerator]:
         result = io.StringIO()
         with open(grammar_file) as file:
             tokenizer = Tokenizer(tokenize.generate_tokens(file.readline))
             if verbose_tokenizer: tokenizer.dump()
             parser = parser_class(tokenizer, verbose=verbose_parser)
+            # Let the nodes in the grammar know the state of the input file
+            #   in their constructors.
+            GrammarTree.set_parser(parser)
             grammar = parser._get_val(parser.start())
+            if not grammar:
+                tokenizer.dump(10)
+
             gen: ParserGenerator = PythonParserGenerator(grammar, result, verbose=verbose_parser)
-            gen.generate(grammar_file)
+            if grammar:
+                gen.generate(grammar_file)
         return result.getvalue(), grammar, parser, tokenizer, gen
 
-    result1, grammar, parser, tokenizer, gen = genparser(GrammarParser)
+    result1, grammar, parser, tokenizer, gen = genparser(parser_class or GrammarParser)
 
     if verify:
         with open('temp.py', 'w') as f:
