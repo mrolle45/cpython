@@ -5,7 +5,6 @@ from __future__ import annotations
 from itertools import chain
 from pegen.grammar import GrammarTree, GrammarVisitor, GrammarError, ObjName
 from pegen.tokenizer import Tokenizer
-import functools
 import token
 import tokenize
 
@@ -14,49 +13,31 @@ Token = Tokenizer.Token
 class Code(GrammarTree):
     """ Target-specific code which is for emitting into the generated parser.
     It is constructed from an optional sequence of Tokens or a string.
-    For convenience, constructing from None uses an empty token sequence.
+    For convenience, constructing from None returns None, and not a Code object.
     Constructing from a string tokenizes the string.
-    Constructing from the same sequence of tokens gives the identical Code.
     The str() representation concatenates the tokens with appropriate spacing.
     If constructed with expand = True (the default), then macro replacement happens.
     """
-    @classmethod
-    @functools.cache
-    def make_new(cls, *tokens: Token, expand: bool = True) -> Self:
-        self = super().__new__(cls)
-        self.expand = expand
-        self.expanded = False
-        self.tokens = tokens
-        assert all(type(token) is Token for token in tokens)
-        return self
-
-    def __new__(cls, tokens: list[Token] | str | Code | None, **kwds):
-        if isinstance(tokens, Code):
-            return tokens
+    def __new__(cls, tokens: list[Token] | str | None, expand: bool = True):
         if tokens is None:
-            tokens = []
+            return None
+        return super().__new__(cls)
+
+    def __init__(self, tokens: list[Token] | str, expand: bool = True):
+        super().__init__()
         if isinstance(tokens, str):
             # Tokenize the string
             tokens = _tokenize(tokens)
-        return cls.make_new(*tokens)
-
-    def __init__(self, *tokens: Token, expand: bool = True):
-        super().__init__()
-
-    def __contains__(self, s: str) -> bool:
-        return any(token.string == s for token in self.tokens)
-
-    def __bool__(self) -> bool:
-        return bool(self.tokens)
+        self.expand = expand
+        self.tokens = tokens
+        assert all(type(token) is Token for token in tokens)
 
     def pre_init(self):
-        super().pre_init()
         # Expand tokens with macros (if desired).
-        if self.expand and not self.expanded:
-            self.tokens = tuple(self.do_expand(*self.tokens))
+        if self.expand:
+            self.tokens = list(self.do_expand(*self.tokens))
 
     def do_expand(self, *tokens) -> Iterator[Token]:
-        self.expanded = True
         macros = self.gen.macros
         if not macros:
             yield from tokens
@@ -94,13 +75,10 @@ class Code(GrammarTree):
         return ''
 
     def __str__(self) ->str:
-        return self.untokenize() or "<none>"
+        return self.untokenize()
 
     def __repr__(self) -> str:
-        if self:
-            return f"<Code {self}>"
-        else:
-            return "<No Code>"
+        return f"<Code {self}>"
 
     def iter_names(self, filt: set(str) = None) -> Iterator[str]:
         """ All names which are found in any Name token, possibly restricted to given set. """
@@ -129,11 +107,6 @@ class Code(GrammarTree):
                         my_val = my_env.info(ObjName(tok))
                         if not my_val or val is my_val:
                             yield ObjName(name)
-
-def NoCode() -> Code:
-    return Code([])
-
-NoCode()
 
 class TargetCodeVisitor(GrammarVisitor):
     """ Visitor that collects all the target code items in a GrammarTree.
@@ -168,10 +141,7 @@ class TargetCodeVisitor(GrammarVisitor):
         x = 0
 
     def type_names(self, filt: Iterable[str] = None) -> set[Token]:
-        return set(chain(*(
-            typ.name.iter_names()
-            for typ in self.types
-            if typ.name)))
+        return set(chain(*(code.iter_names() for code in self.types)))
 
     def vars(self, env: LocEnv, filt: set(ObjName) = None) -> set(ObjName):
         """ Names found in any Name token in any obj Code,
@@ -181,7 +151,7 @@ class TargetCodeVisitor(GrammarVisitor):
         return set(chain(*(code.iter_vars(env) for code in self.objs)))
 
     def visit_Alt(self, tree: Alt) -> None:
-        self.add_type(tree.val_type)
+        self.add_type(tree.type)
         self.add_obj(tree.action)
         self.generic_visit(tree)
 
@@ -190,16 +160,14 @@ class TargetCodeVisitor(GrammarVisitor):
         self.generic_visit(tree)
 
     def visit_TypedName(self, tree: TypedName) -> None:
-        self.add_type(tree.val_type)
+        self.add_type(tree.type)
         self.generic_visit(tree)
 
     def add_obj(self, code: Code) -> None:
         if code: self.objs.add(code)
-        assert isinstance(code, Code), f"Expected Code, not {code!r}"
 
     def add_type(self, code: Code) -> None:
         if code: self.types.add(code)
-        assert isinstance(code, Code), f"Expected Code, not {code!r}"
 
 def _tokenize(text: str) -> list[Token]:
     """ Separate given string into Tokens and return list of them. """

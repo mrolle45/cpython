@@ -24,7 +24,6 @@ from pegen.grammar import (
     VarItem,
     NameLeaf,
     NegativeLookahead,
-    NoType,
     Opt,
     PositiveLookahead,
     Repeat0,
@@ -126,47 +125,13 @@ class _Traits(TargetLanguageTraits):
         return '# '
 
     def default_type(self, type: str = None) -> Code:
-         return type or Code('Any')
-
-    def null_type(self) -> Code:
-        return Code('None')
+        return type or Code('Any')
 
     def default_value(self) -> str:
         return 'None'
 
-    def empty_params(self, params: str = None) -> str:
+    def default_params(self, params: str = None) -> str:
         return ''
-
-    def typed_name(self, name: TypedName) -> str:
-        #p: str = str(name)
-        #base_type = str(name.type.base) or self.default_type()
-        #if name.callable:
-        #    # This node is a callable type.
-        #    subtypes = [param.typed_name() for param in name.type.params]
-        #    p += f": Callable[[{', '.join(subtypes)}], {base_type}]"
-        #else:
-        #    p += f"{name}: {self.gen_type(name.type)}"
-        #else:
-        #    if name: parts.append(str(name))
-        #p = ' '.join(parts)
-        type = name.type and self.gen_type(name.type)
-        if type:
-            return f"{name.name}: {type}"
-        else:
-            return f"{name.name}"
-
-    def gen_type(self, typ: Type) -> str:
-        # A base type of NoCode suppresses the type name.
-        if typ.val_type == NoCode():
-            base_type = ''
-        else:
-            base_type = str(typ.val_type) or self.default_type()
-        if typ.callable:
-            # This node is a callable type.
-            subtypes = [self.gen_type(param.type) for param in typ.params]
-            return f"Callable[[{', '.join(subtypes)}], {base_type}]"
-        else:
-            return f"{base_type}"
 
     def parser_param(self) -> TypedName:
         return TypedName('_p', Code('Parser'))
@@ -192,16 +157,8 @@ class _Traits(TargetLanguageTraits):
 
     def bool_type(self) -> str: return Code('bool')
 
-    def circular_type(self) -> Code: return Code('Circ')
-
     def str_value(self, value: bool) -> str:
         return value.replace('"', r'\"')
-
-    def uniq_name(self, node: GrammarTree, assigned_name: str = None) -> str:
-        """ A name which is unique among all objects in scope.
-        The scope for a python file is the immediate parent, thus is all sibs.
-        """
-        return assigned_name or node.name
 
     def parse_result_ptr_param(self, assigned_name: str = None) -> Param:
         name = assigned_name and f"&_ptr_{assigned_name}" or "_ppRes"
@@ -209,27 +166,17 @@ class _Traits(TargetLanguageTraits):
 
     def parse_func_params(self, name: TypedName = None) -> Params: ...
 
-    def recipe_result(self, stmt: str, recipe: ParseRecipe) -> str:
-        """ The last line of the recipe generated code. """
-        if recipe.func_type.returns_status:
-            stmt = f"return {stmt}"
-        if recipe.comment:
-            stmt = f"{stmt}   {self.comment(recipe.comment)}"
-        return stmt
-
-    def rule_func_name(self, rule: Rule) -> ObjName:
-        return rule.name
+    def rule_func_name(self, rule: Rule) -> ObjName: ...
 
     def rule_recipe(self, rule: Rule, src: ParseRecipeSource) -> ParseRecipe:
         """ Create a recipe for a Rule. """
         return ParseRecipeExternal(
             rule, rule.name, src,
             '_rhs',
-            params=rule.type.params,
-            func_type=ParseRule,
+            func_type=ParseFunc,
             extra=lambda: self.gen_rule(rule),
             inlines = [rule.rhs],
-            typ=rule.type,
+            value_type=rule.type,
             use_inline=False,           # Call as parser method.
             )
 
@@ -243,6 +190,9 @@ class _Traits(TargetLanguageTraits):
             Arg(inline=seq.elem),
             *seq_args,
             ])
+
+    def default_func_type(self) -> ParseFunc:
+        return ParseFunc
 
     def parse_value_expr(
             self, name: ObjName, args: Args, params: Params, *,
@@ -261,31 +211,7 @@ class _Traits(TargetLanguageTraits):
         self.print("tok: Token = self._tokenizer.peek()")
         self.print("start_lineno, start_col_offset = tok.start")
 
-    def action(self, alt: Alt) -> str:
-        return self.Action(alt.action, Type(self.default_type(), Params()))
-
-    def default_action(self, alt: Alt) -> Self.Action:
-        expr: str
-        type: str
-        vars = alt.all_vars()
-        if len(vars) > 1:
-            expr = f"_PyPegen_dummy_name(_p, {', '.join(var.name.string for var in vars)})"
-            type = Type("list", Params())
-        else:
-            if len(vars):
-                cast = ""
-                expr = f"{cast}{vars[0].name}"
-                type = ProxyType(vars)
-                #type = vars[0].return_type
-            else:
-                expr = f"{self.default_value()}"
-                type = ObjType(self.default_type)
-        return self.Action(expr, type)
-
-    def dummy_action(self) -> _Traits.Action:
-        return self.Action("dummy name", "str")
-
-    def alt_action(self, node: Alt) -> Self.Action:
+    def gen_action(self, node: Alt) -> str:
         """ String to be generated in a return statement in the Alt. """
         action = node.action
         if not action:
@@ -318,43 +244,40 @@ class _Traits(TargetLanguageTraits):
         return
 
     def enter_function(
-        self, name: TypedName,
-        func_type: ParseFuncType = ParseFunc,
-        comment: str = '',
+            self, name: TypedName,
+            func_type: ParseFunc,
+            comment: str = ''
         ) -> Iterator:
         return self.enter_scope(
-            self.decl_func(name, func_type=func_type),
+            self.decl_func(name, func_type),
             comment=comment
             )
 
-    def decl_func(
-        self, func: TypedName,
-        func_type: ParseFuncType = ParseFunc, **kwds
-        ) -> str:
+    def decl_func(self, func: TypedName, func_type: ParseFunc) -> str:
         """ The declaration of a callable name (without the value), as a function.
         The variable is a function (not a function pointer), including function parameters.
         """
-        assert func.callable, f"{func} must be callable."
-        #assert func.type and func.type.params and func.name
-        type = str(func.val_type)
+        assert func.params and func.name
+        type = str(func.type)
         if func_type.has_result:
             type = f"ParseResult[{type}]"
         name = func.name
-        params = func.type.params
+        params = func.params
         if func_type.use_parser and not func_type.nested:
-            params = Params([Param(TypedName(ObjName('self'), None)), *params])
+            params = Params([Param(TypedName('self', Code(''))), *params])
         return f"def {name}({ObjName(params.in_func())}) -> {type}:"
 
     def fix_parse_recipe(self, recipe: ParseRecipe) -> None:
         recipe.expr_name = recipe.src.name or recipe.name
-        if recipe.node.assigned_name:
-            func_name = f"_item_{recipe.node.assigned_name}"
+        if recipe.outer_call.assigned_name:
+            func_name = f"_item_{recipe.outer_call.assigned_name}"
         else:
             func_name = str(recipe.node.name)
         recipe.func_name = TypedName(
             func_name,
             recipe.outer_call.type,
-            )
+            recipe.params)
+        recipe.outer_call.name = ObjName(func_name)
 
     def parse_recipe(self, recipe: ParseRecipe, **kwds) -> None:
         """ Generate inline code now. """
@@ -363,7 +286,7 @@ class _Traits(TargetLanguageTraits):
             self.print(comment=str(recipe.node))
         if type(recipe.node.parent) is VarItem:
             return
-        recipe(**kwds)
+        recipe(self, **kwds)
 
 
 class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
@@ -377,10 +300,7 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         location_formatting: Optional[str] = None,
         unreachable_formatting: Optional[str] = None,
         verbose: bool = False,
-        skip_actions: bool = False,
     ):
-        if not grammar: return
-        self.skip_actions = skip_actions
         super().__init__(grammar, tokens, exact_tokens, set(), file)
         # The Python generator doesn't have a choice of Tokens file, like the C generator has.
         # It always uses Parser/Tokens, and this is incorporated into the tokens module when the library is built.
@@ -425,7 +345,7 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
 
                 self.print()
                 self.print(f"KEYWORDS = {tuple(self.keywords)}")
-                self.print(f"SOFT_KEYWORDS = {tuple(sorted(self.soft_keywords))}")
+                self.print(f"SOFT_KEYWORDS = {tuple(self.soft_keywords)}")
 
     def gen_rule(self, rule: Rule) -> None:
         """ Generate extra code inside a Rule parse function. """
@@ -444,7 +364,7 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         self.print()
         self.print(comment="parse succeeded")
 
-        action = f"return {self.alt_action(alt)},"
+        action = f"return {self.gen_action(alt)},"
         return action
 
 
@@ -460,12 +380,12 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         name = item.assigned_name
 
         item_type = item.parse_recipe.outer_call.type
-        var_type = item_type.val_type
+        var_type = item_type
         rawname = f"_result_{name}"
-        rawtype = f"ParseResult[{var_type}]"
+        rawtype = f"ParseResult[{item_type}]"
         fail_value = fail_value or self.default_value()
-        item.parse_recipe.gen_parse()
-        parse_name = item.parse_recipe.func_name.name
+        self.gen_parse(item.parse_recipe)
+        parse_name = item.parse_recipe.outer_call.name
         if item.parse_recipe.outer_call.func_type.always_true:
             if item.parse_recipe.outer_call.func_type.has_result:
                 self.print(f"{name}: {var_type}")
@@ -522,83 +442,111 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         descr_name = '_alts'
         return descr_name, gen
 
+    # Newer version, copied from c_generator.
+    def gen_parse(self, recipe: ParseRecipe,
+        **kwds
+        ) -> None:
+        self.forward_declare_inlines(recipe)
+
+        return_type = recipe.src.type
+        if isinstance(recipe.node, Rule):
+            return_type = recipe.node.type
+        with self.enter_function(
+            recipe.func_name,
+            recipe.func_type,
+            ):
+            for inline in recipe.inline_recipes():
+                # Expand the inline items.
+                self.gen_node(inline.node)
+            call: str | None = None
+            if recipe.extra:
+                call = recipe.extra()
+            if call is None:
+                # Was not supplied by extra()
+                call = recipe.value_expr()
+                if recipe.func_type.returns_status:
+                    call = f"return {call}"
+                if recipe.comment:
+                    call = f"{call}   {self.comment(recipe.comment)}"
+            if call: self.print(call)
+
     # Descriptions of helper parsing functions...
 
     @functools.cached_property
-    def parse_rule(self) -> ParseSource:
+    def parse_rule(self) -> TypedName:
         return self.make_parser_name(
         '_rule', 'Any',
         ('rule', 'RuleDescr'),
         func_type=ParseFunc,
         )
     @functools.cached_property
-    def parse_rule_memo(self) -> ParseSource:
+    def parse_rule_memo(self) -> TypedName:
         return self.make_parser_name(
         '_rule', 'Any',
         ('rule', 'RuleDescr'),
         func_type=ParseFunc,
         )
     @functools.cached_property
-    def parse_rule_recursive(self) -> ParseSource:
+    def parse_rule_recursive(self) -> TypedName:
         return self.make_parser_name(
         '_rule', 'Any',
         ('rule', 'RuleDescr'),
         func_type=ParseFunc,
         )
     @functools.cached_property
-    def parse_alt(self) -> ParseSource:
+    def parse_alt(self) -> TypedName:
         return self.make_parser_name(
         '_alts', 'Any',
         ('alts', 'List[RuleAltDescr]'),
         )
     @functools.cached_property
-    def parse_alts(self) -> ParseSource:
+    def parse_alts(self) -> TypedName:
         return self.make_parser_name(
         '_alts', 'Any',
         ('alts', 'List[RuleAltDescr]'),
         )
     @functools.cached_property
-    def parse_NAME(self) -> ParseSource:
+    def parse_NAME(self) -> TypedName:
         return self.make_parser_name(
         '_name', 'Token'
         )
     @functools.cached_property
-    def parse_NUMBER(self) -> ParseSource:
+    def parse_NUMBER(self) -> TypedName:
         return self.make_parser_name(
         '_number', 'Token'
         )
     @functools.cached_property
-    def parse_STRING(self) -> ParseSource:
+    def parse_STRING(self) -> TypedName:
         return self.make_parser_name(
         '_string', 'Token'
         )
     @functools.cached_property
-    def parse_OP(self) -> ParseSource:
+    def parse_OP(self) -> TypedName:
         return self.make_parser_name(
         '_op', 'Token'
         )
     @functools.cached_property
-    def parse_TYPE_COMMENT(self) -> ParseSource:
+    def parse_TYPE_COMMENT(self) -> TypedName:
         return self.make_parser_name(
         '_type_comment', 'Token'
         )
     @functools.cached_property
-    def parse_SOFT_KEYWORD(self) -> ParseSource:
+    def parse_SOFT_KEYWORD(self) -> TypedName:
         return self.make_parser_name(
         '_soft_keyword', 'Token'
         )
     @functools.cached_property
-    def parse_token(self) -> ParseSource:
+    def parse_token(self) -> TypedName:
         return self.make_parser_name(
         '_expect_type', 'Token', ('type', 'int')
         )
     @functools.cached_property
-    def parse_char(self) -> ParseSource:
+    def parse_char(self) -> TypedName:
         return self.make_parser_name(
         '_expect_char', 'Token', ('c', 'str')
         )
     @functools.cached_property
-    def parse_forced(self) -> ParseSource:
+    def parse_forced(self) -> TypedName:
         return self.make_parser_name(
         '_expect_forced', 'Any',
         ('result', 'Any'),
@@ -606,45 +554,45 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         func_type=parse_recipe.ParseTrue,
         )
     @functools.cached_property
-    def parse_soft_keyword(self) -> ParseSource:
+    def parse_soft_keyword(self) -> TypedName:
         return self.make_parser_name(
         '_expect_name', 'Token', ('name', 'str')
         )
-    def parse_repeat(self, elem: ParseExpr) -> ParseSource:
+    def parse_repeat(self, elem: ParseExpr) -> TypedName:
         return self.make_parser_name(
-            '_repeat', f'list[{elem.return_type}]',
+            '_repeat', f'list[{elem.parse_recipe.outer_call.type}]',
             ('item', 'Callable[[], ParseResult]'),
             ('repeat1', 'int'),
         )
-    def parse_gather(self, elem: ParseExpr) -> ParseSource:
+    def parse_gather(self, elem: ParseExpr) -> TypedName:
         return self.make_parser_name(
-            '_gather', f'list[{elem.return_type}]',
+            '_gather', f'list[{elem.parse_recipe.outer_call.type}]',
             ('item', 'Callable[[], ParseResult]'),
             ('sep', 'Callable[[], ParseResult]'),
             ('repeat1', 'int'),
         )
-    def parse_opt(self, elem: ParseExpr) -> ParseSource:
+    def parse_opt(self, elem: ParseExpr) -> TypedName:
         return self.make_parser_name(
-            '_opt', f'list[{elem.return_type}]',
+            '_opt', f'list[{elem.parse_recipe.outer_call.type}]',
             ('item', 'Callable[[], ParseResult]'),
         )
     @functools.cached_property
-    def parse_group(self) -> ParseSource:
+    def parse_group(self) -> TypedName:
         return self.make_parser_name(
             '_rhs', 'Any',
             ('rhs', 'Callable[[], ParseResult]'),
         )
     @functools.cached_property
-    def parse_lookahead(self) -> ParseSource:
+    def parse_lookahead(self) -> TypedName:
         return self.make_parser_name(
             '_lookahead', 'ParseStatus',
             ('positive', 'bool'),
             ('atom', 'Callable[[], ParseResult]'),
         )
     @functools.cached_property
-    def parse_cut(self) -> ParseSource:
+    def parse_cut(self) -> TypedName:
         return self.make_parser_name(
-            '_cut', 'None',
+            '_cut', None,
             func_type=parse_recipe.ParseVoid,
         )
 

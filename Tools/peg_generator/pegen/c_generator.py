@@ -71,7 +71,7 @@ _PyPegen_parse(Parser *_p)
     _p->n_keyword_lists = n_keyword_lists;
     _p->soft_keywords = soft_keywords;
 
-    _PyPegen_DECL_LOC_VAR(res, void *);
+    _PyPegen_DECL_LOCAL_PARSE_RESULT(void *, res, );
 
     if (_start_rule(_p, &_ptr_res))
         return res;
@@ -80,6 +80,23 @@ _PyPegen_parse(Parser *_p)
 }
 """
 
+
+class NodeTypes(Enum):
+    NAME_TOKEN = 0
+    NUMBER_TOKEN = 1
+    STRING_TOKEN = 2
+    GENERIC_TOKEN = 3
+    KEYWORD = 4
+    SOFT_KEYWORD = 5
+    CUT_OPERATOR = 6
+
+
+BASE_NODETYPES = {
+    "NAME": NodeTypes.NAME_TOKEN,
+    "NUMBER": NodeTypes.NUMBER_TOKEN,
+    "STRING": NodeTypes.STRING_TOKEN,
+    "SOFT_KEYWORD": NodeTypes.SOFT_KEYWORD,
+}
 
 
 class _Traits(TargetLanguageTraits):
@@ -90,72 +107,35 @@ class _Traits(TargetLanguageTraits):
 
     c_parser: CParser = None
 
-    language: ClassVar[str] = 'c'
-
-    def default_header(self) -> str:
-        return ''
-
-    def default_trailer(self) -> str:
-        return ''
-
     def comment_leader(self) -> str:
         return '// '
 
     def default_type(self, type: Code = None) -> Code:
         return type or Code('void *')
 
-    def null_type(self) -> Code:
-        return Code('void')
-
     def default_value(self, value: str = None) -> str:
         return value or 'NULL'
 
-    def empty_params(self) -> str:
+    def default_params(self) -> str:
         return 'void'
-
-    def typed_name(self, name: TypedName) -> str:
-        parts: list[str] = []
-        base_type = str(name.val_type or '') or str(self.default_type())
-        if base_type: parts.append(base_type)
-        if name.callable:
-            # This node is a callable type.
-            subtypes = [param.typed_name() for param in name.type.params]
-            parts.append(f'(*{name.name}) ({", ".join(subtypes)})')
-        else:
-            if name.name: parts.append(str(name.name))
-        p = ' '.join(parts)
-        return p
 
     def parser_param(self) -> Param:
         return Param(TypedName('_p', Code('Parser *')))
 
-    def parse_result_ptr_arg(self, assigned_name: ObjName = None) -> Arg:
+    def parse_result_ptr_param(self, assigned_name: str = None) -> Param:
         name = assigned_name and f"&_ptr_{assigned_name}" or "_ppRes"
-        return Arg(name)
+        return Param(TypedName(name, Code('ParseResultPtr *')))
 
     def return_param(self, type: str = None) -> Param:
         return Param(TypedName('_ppRes', Code(f'{self.default_type(type)} *')))
 
-    def parse_func_params(self, params: Params, func_type: ParseFuncType = None) -> Params:
-        if not func_type and name:
-            func_type = name.func_type
-        new_params = []
-        if not func_type or func_type.use_parser:
-            new_params.append(TypedName('_p', ObjType(Code('Parser *'))))
-        if not func_type or func_type.use_res_ptr:
-        #if not func_type or func_type.use_res_ptr and not name.assigned_name:
-            new_params.append(TypedName('_ppRes', ObjType(Code('ParseResultPtr *'))))
-        new_params += params
-        return Params(new_params)
-
-    def recipe_result(self, stmt: str, recipe: ParseRecipe) -> str:
-        """ The last line of the recipe generated code. """
-        if recipe.outer_call.func_type.always_true:
-            pass
-        else:
-            stmt = f"return {stmt}"
-        stmt += ';'
-        return stmt
+    def parse_func_params(self, name: TypedName = None) -> Params:
+        params = []
+        if not name or name.func_type.use_parser:
+            params.append(TypedName('_p', Code('Parser *')))
+        if not name or name.func_type.use_res_ptr:
+            params.append(TypedName('_ppRes', Code('ParseResultPtr *')))
+        return Params(params)
 
     def rule_func_name(self, rule: Rule) -> ObjName:
         return ObjName(f"_{rule.name}_rule")
@@ -171,129 +151,67 @@ class _Traits(TargetLanguageTraits):
 
     def bool_type(self) -> str: return Code('ParseStatus')
 
-    def circular_type(self) -> Code: return Code('circ_ty')
-
     def str_value(self, value: bool) -> str:
         return value.replace('"', r'\"')
 
-    def uniq_name(self, node: GrammarTree, assigned_name: str = None) -> str:
-        """ A name which is unique among all objects in scope.
-        The scope for a C file is file scope, thus is all functions.
+    def target_names(self, code: str) -> set[str]:
+        """ All the identifiers found in given target language code.
+        This might be a call argument, an object type, or an alt action.
         """
-        anc = node.parent
-        return f"{anc.uniq_name()}_{assigned_name or node.name}"
+        class IDVisitor(self.ASTVisitor):
+            """Visitor that collects all identifiers in the code."""
 
-    def rule_recipe(self, rule: Rule, src: ParseRecipeSource) -> ParseRecipe:
-        """ Create a recipe for a Rule. """
-        return ParseRecipeExternal(
-            rule, rule.name, src,
-            # Add an argument for the rule descriptor.
-            '&_rule_descriptor',
-            rule.local_env.count and "_local_values" or self.default_value(),
-            params=rule.type.params,
-            func_type=ParseRule,
-            extra=lambda: self.gen_rule(rule),
-            inlines = [rule.rhs],
-            typ=rule.type,
-            )
+            def __init__(self, ast):
+                self.names = set()
+                self.depth = 0
+                self.visit(ast)
 
-    def sequence_recipe_args(self, seq: Seq, *seq_args: Args) -> Args:
-        """ Actual arguments for a Seq parse function.
-        seq_args varies with the type of sequence.  It's an initial subset of:
-            * repeat1
-            * sep
-        """
-        return Args([
-            Arg(inline=seq.elem),
-            Arg(f"sizeof ({seq.elem.return_type})"),
-            *seq_args,
-            ])
+            def visit_id(self, node, debug=False):
+                self.names.add(node.value)
+                print(f"{'   ' * self.depth}name = {node.value}")
 
-    def parse_value_expr(
-            self, name: ObjName, args: Args, params: Params, *,
-            func_type: Type[FuncBase] = None,
-            assigned_name: ObjName = None,
-        ) -> str:
-        """ An expression which produces the desired parse result. """
-        if not args: return f"{name}"
-        new_args = []
-        new_params = []
-        if func_type and func_type.use_parser:
-            new_args.append('_p')
-            new_params.append(TypedName('parser', ObjType(Code('Parser *'))))
-        if func_type and func_type.use_res_ptr:
-            new_args.append(self.parse_result_ptr_arg(assigned_name))
-            new_params.append(TypedName('ppres', ObjType(Code('ParseResultPtr *'))))
-        if new_args:
-            args = Args([*new_args, *args])
-            params = Params([*new_params, *params])
-        return f"{name}{args.show_typed(params)}"
+            def visit(self, ast, debug=False):
+                print(f"{'   ' * self.depth}{ast.symbol.name}")
+                self.depth += 1
+                super().visit(ast)
+                self.depth -= 1
+
+        if not self.c_parser:
+            self.c_parser = self.CParser()
+            #self.c_parser = self.CParser(start_symbol='assignment_exp')
+        parser = self.c_parser
+        ast = parser.parse(code, debug=True)
+        visitor = IDVisitor(ast)
+        return visitor.names
 
     def forward_declare_inlines(self, recipe: ParseRecipe) -> None:
         x = 0
         for node_recipe in recipe.inline_recipes():
-            if node_recipe.func_name.callable:
-                self.print(
-                    f"static {self.decl_func(node_recipe.func_name, func_type=node_recipe.func_type, fwd=True)};")
-
-    def gen_copy_local_vars(self, node: GrammarTree) -> None:
-        """ Code to define inherited names and set their values stored in the parser. """
-        items = list(node.local_env.items())
-        vars_used = set(node.vars_used())
-        for name, var in items:
-            # Check if the name is actually used.
-            if name in vars_used:
-                self.print(self.setup_parent_name(name, var, node))
+            self.print(f"static {node_recipe.func_name.decl_func(fwd=True)};")
 
     def enter_function(
-        self, name: TypedName,
-        func_type: ParseFuncType = ParseFunc,
-        comment: str = '',
+        self, name: TypedName, comment: str = ''
         ) -> Iterator:
         return self.enter_scope(
-            self.decl_func(name, func_type=func_type),
+            name.decl_func(),
             '{}',
             comment=comment
             )
-
-    def decl_func(
-        self, func: TypedName,
-        func_type: ParseFuncType = ParseFunc,
-        fwd: bool = False
-        ) -> str:
-        """ The declaration of a callable name (without the value), as a function.
-        The variable is a function (not a function pointer), including function parameters.
-        """
-        assert func.callable, f"{func} must be callable."
-        name = func.name
-        params = func.type.params
-        if func_type.isrule:
-            # Special code for a rule function, using PyPegen macro.
-            params_str = len(params) and f", ({params.in_func()})" or ""
-
-            return f"_PyPegen__RULE({name}{params_str})"
-        params = self.parse_func_params(params, func_type)
-        #assert params and func.name
-        type = func_type.returns_status and self.bool_type() or str(func.type.val_type)
-        if fwd:
-            nparams = len(params)
-            if str(type) == 'ParseStatus' and nparams == 2:
-                return f"ParseFunc {name}"
-            if str(type) == 'ParseStatus' and nparams == 1:
-                return f"ParseTest {name}"
-            if str(type) == 'void' and nparams == 2:
-                return f"ParseTrue {name}"
-        return f"{type} {name}({params.in_func()})"
 
     def gen_start(self, alt: Alt) -> None:
         """ Generate code to set starting line and col variables if required by action.
         Call before starting to parse alt if EXTRA is, or might be, contained in the action.
         """
         self.print()
-        self.print("_PyPegen_EXTRA_START(_p);")
+        if alt.action and "EXTRA" in alt.action:
+        #if alt.action and "EXTRA" in self.target_names(alt.action):
+            self.print("int _start_lineno, _start_col_offset, _end_lineno, _end_col_offset;")
+            self.print("_PyPegen_location_start(_p, &_start_lineno, &_start_col_offset);")
 
-    def alt_action(self, alt: Alt) -> _Traits.Action:
+    def gen_action(self, alt: Alt) -> _Traits.Action:
         """ Generate code for the action in the Alt. """
+        if alt.action and "EXTRA" in alt.action:
+            self.print("_PyPegen_location_end(_p, &_end_lineno, &_end_col_offset);")
         if self.skip_actions:
             return self.dummy_action()
         elif alt.action:
@@ -301,78 +219,45 @@ class _Traits(TargetLanguageTraits):
         else:
             return self.default_action(alt)
 
-    def action(self, alt: Alt) -> _Traits.Action:
-        if self.debug:
-            self.print(
-                f'D(fprintf(stderr, "Hit with action [%d-%d]: %s\\n", _mark, _p->mark, "{alt}"));'
-            )
-        # TODO: try to deduce the type of the expression in simple cases.
-        return self.Action(alt.action, Type(self.default_type(), Params()))
-
-    def default_action(self, alt: Alt) -> Self.Action:
-        expr: str
-        type: str
-        vars = alt.all_vars()
-        if len(vars) > 1:
-            if self.debug:
-                self.print(
-                    f'D(fprintf(stderr, "Hit without action [%d:%d]: %s\\n", _mark, _p->mark, "{alt}"));'
-                )
-            expr = f"_PyPegen_dummy_name(_p, {', '.join(var.name.string for var in vars)})"
-            type = Type("dummy_ty", Params())
-        else:
-            if self.debug:
-                self.print(
-                    f'D(fprintf(stderr, "Hit with default action [%d:%d]: %s\\n", _mark, _p->mark, "{node}"));'
-                )
-            if vars:
-                cast = ""
-                expr = f"{cast}{vars[0].name}"
-                #type = vars[0].return_type
-                type = ProxyType(vars)
-            else:
-                expr = f"{self.default_value()}"
-                type = ObjType(self.default_type())
-        return self.Action(Code(expr), type)
-
-    def dummy_action(self) -> _Traits.Action:
-        return self.Action("_PyPegen_dummy_name(_p)", ObjType(Code("expr_ty")))
-
     def fix_parse_recipe(self, recipe: ParseRecipe) -> None:
 
         recipe.expr_name = recipe.src.name or recipe.name
         #if isinstance(recipe.src, Rule):
         #    recipe.expr_name = f'_{recipe.expr_name}_rule'
 
-        #if recipe.mode is recipe.Rule:
-        #    recipe.params = Params([*self.parse_func_params(recipe.src), *recipe.params])
-        #elif isinstance(recipe.node, Rule):
-        #    recipe.params = Params([*self.parse_func_params(recipe.src), *recipe.params])
-        #else:
-        #    recipe.params = Params([*self.parse_func_params(recipe.src, recipe.func_type), *recipe.params])
+        if recipe.mode is recipe.Rule:
+            recipe.params = Params([*self.parse_func_params(recipe.src), *recipe.params])
+        elif isinstance(recipe.node, Rule):
+            recipe.params = Params([*self.parse_func_params(recipe.src), *recipe.params])
+        #elif recipe.mode is recipe.Loc:
+        #    pass
+        else:
+            recipe.params = Params([*self.parse_func_params(recipe.src), *recipe.params])
+            #recipe.params = self.inline_params(recipe.src)
 
         func_name = recipe.name
-        #if isinstance(recipe.node, Rule):
-        #    func_name = self.rule_func_name(recipe.node)
-        #else:
-        #    func_name = recipe.node.uniq_name(recipe.outer_call.assigned_name)
-        #base = (
-        #    Code('void') if recipe.node.func_type.always_true
-        #        else self.bool_type() if recipe.src.func_type.returns_status
-        #        else recipe.type.val_type)
-        
+        if isinstance(recipe.node, Rule):
+            func_name = f'_{func_name}_rule'
+        #elif recipe.mode is recipe.Loc:
+        #    pass
+        else:
+            func_name = recipe.node.uniq_name()
         recipe.func_name = TypedName(
             func_name,
-            recipe.outer_call.type,
-            )
+            Code('void') if recipe.node.func_type.always_true
+                else self.bool_type() if recipe.src.func_type.returns_status
+                else recipe.src.type,
+            recipe.params)
 
-    def parse_recipe(self, recipe: ParseRecipe) -> None:
-        # Save the recipe, to generate the code at file scope later.
+    def parse_recipe(self, recipe: ParseRecipe, **kwds) -> None:
+        # Save the recipe, to generate the code at file scope later,
+        # but only if it's a not a local variable.
         
-        self.pending_recipes.append(
-            recipe
-        )
-
+        if True:
+        #if recipe.mode in (recipe.Inl, recipe.Ext, recipe.Rule):
+            self.pending_recipes.append(
+                lambda: recipe(self, **kwds)
+            )
 
 class CParserGenerator(ParserGenerator, _Traits):
     def __init__(
@@ -385,17 +270,24 @@ class CParserGenerator(ParserGenerator, _Traits):
         debug: bool = False,
         skip_actions: bool = False,
         ):
-        self.skip_actions = skip_actions
-        self.debug = debug
         super().__init__(grammar, tokens, exact_tokens, non_exact_tokens, file)
         self.token_types = {name: type for type, name in tokens.items()}
         self._varname_counter = 0
+        self.debug = debug
+        self.skip_actions = skip_actions
         self.cleanup_statements: List[str] = []
         self.pending_recipes: List[Callable[[], None]] = []
 
-    def generate(self, filename: str) -> None:
+    def add_return(self, ret_val: str) -> None:
+        for stmt in self.cleanup_statements:
+            self.print(stmt)
+        self.print(f"return {ret_val};")
 
-        super().generate(filename)
+    def fwd_decl_func(self, name: str, type: str, params: Params | None) -> None:
+        params_str = params and params.in_func() or self.default_params()
+        self.print(f"static {type} {name}({params_str});")
+
+    def generate(self, filename: str) -> None:
 
         basename = os.path.basename(filename)
         self.print(self.comment(f"@generated by pegen from {basename}"))
@@ -423,14 +315,8 @@ class CParserGenerator(ParserGenerator, _Traits):
             if rule.type:
                 type = rule.type
             else:
-                type = None
-                #type = self.default_type()
-            params = rule.type.params
-            params_str = len(params) and f", ({params.in_func()})" or ""
-            self.print(
-                f"_PyPegen_DECL_RULE({rulename}{params_str})")
-            #self.fwd_decl_func(f"_{rulename}_rule", "ParseStatus",
-            #                   self.parse_func_params(rule.type.params, ParseFunc))
+                type = self.default_type()
+            self.fwd_decl_func(f"_{rulename}_rule", "ParseStatus", rule.parse_recipe.params)
         self.print()
         for rulename, rule in list(self.rules.items()):
             self.print()
@@ -440,12 +326,6 @@ class CParserGenerator(ParserGenerator, _Traits):
                 else:
                     self.print(comment="Left-recursive")
             self.print(comment=str(rule))
-            if rule._error:
-                self.print(comment="ERROR OCCURRED")
-                #with self.enter_scope(f"_PyPegen__RULE(_{rule.name})", "{}"):
-                #    self.print("return false;")
-
-                #continue
             self.gen_node(rule)
             self.gen_pending_recipes()
         if self.skip_actions:
@@ -457,15 +337,6 @@ class CParserGenerator(ParserGenerator, _Traits):
         modulename = self.grammar.metas.get("modulename", "parse")
         if trailer:
             self.print(trailer.rstrip("\n") % dict(mode=mode, modulename=modulename))
-
-    def add_return(self, ret_val: str) -> None:
-        for stmt in self.cleanup_statements:
-            self.print(stmt)
-        self.print(f"return {ret_val};")
-
-    def fwd_decl_func(self, name: str, type: str, params: Params | None) -> None:
-        params_str = params and params.in_func() or self.empty_params()
-        self.print(f"static {type} {name}({params_str});")
 
     def _group_keywords_by_length(self) -> Dict[int, List[Tuple[str, int]]]:
         groups: Dict[int, List[Tuple[str, int]]] = {}
@@ -515,7 +386,7 @@ class CParserGenerator(ParserGenerator, _Traits):
 
         rhs = rule.flatten()
 
-        #result_type = self.default_type(rule.type)
+        result_type = self.default_type(rule.type)
 
         if rule.name.string.endswith("without_invalid"):
             with self.indent():
@@ -528,19 +399,23 @@ class CParserGenerator(ParserGenerator, _Traits):
 
         # Capture pointers to the rule return and rule parameters (if any) in local array.
         if rule.max_local_vars:
-            dim = str(rule.max_local_vars) if rule.max_local_vars > len(rule.type.params) else ""
+            dim = str(rule.max_local_vars) if rule.max_local_vars > len(rule.params) else ""
             with self.enter_scope(f"void * _local_values [{dim}] =", '{};'):
                 #self.print("& _res,")
-                for param in rule.type.params:
+                for param in rule.params:
                     self.print(f"& {param.name},")
 
         # Create the rule descriptor.
         child_name = rule.rhs.parse_recipe.func_name
         rhs_str = self.str_value(str(rule.rhs))
-        type = rule.type
-        if not type.return_type:
-            type.return_type = ObjType(self.default_type())
-        self.print(f"_PyPegen_DECL_RULE_DESCR(_rule_descriptor, {rule.name}, {type.return_type}, \"{rhs_str}\");")
+
+        self.print(f"DECL_RULE_DESCR(_rule_descriptor, {rule.name}, {rule.type}, \"{rhs_str}\");")
+        #with self.enter_scope(f"RuleDescr _rule_descriptor ="):
+            
+        #    rhs_str = self.str_value(str(rule.rhs))
+        #    self.print(f'{{{child_name}, "{rule.name}", "{rhs_str}"'
+        #               f'}};'
+        #               )
 
         if rule.name.string.endswith("without_invalid"):
             self.cleanup_statements.pop()
@@ -567,18 +442,18 @@ class CParserGenerator(ParserGenerator, _Traits):
                 alt_str = self.str_value(str(alt))
                 self.print(f'{{{func_name}, "{alt_name}", "{alt_str}"}}{term}')
 
-            if len(rhs.alts) == 1:
+            if len(rhs) == 1:
                 name = alt_names[0]
                 with self.enter_scope(f"RuleAltDescr _alt_descriptor ="):
-                    do_alt(rhs.alts[0], ';')
+                    do_alt(rhs[0], ';')
             else:
                 names = []
                 # Make descriptor table.
                 with self.enter_scope(f"RuleAltDescr _alt_descriptors[] =", '{};'):
-                    for alt in rhs.alts:
+                    for alt in rhs:
                         do_alt(alt, ',')
 
-        if len(rhs.alts) == 1:
+        if len(rhs) == 1:
             name = '&_alt_descriptor'
         else:
             name = '_alt_descriptors'
@@ -591,8 +466,10 @@ class CParserGenerator(ParserGenerator, _Traits):
 
         if node.parent.local_env.lookup(name) is var:
             ptr_type = var.decl_var('*')
-            index = node.parent.local_env.index(name)
-            return self.setup_var('_PyPegen_GET_GLOB', name, var, index)
+            return (f"_PyPegen_GET_GLOBAL_PARSE_RESULT("
+                    f"{var.type}, {name}, {var.func_params()}, {node.local_env.index(name)});"
+                    )
+            #return f"{var.decl_var()} = * {self.gen_cast(ptr_type)}&{self.gen_var_ptr(var)};"
         # Node has own local variable.
         return None
 
@@ -600,29 +477,19 @@ class CParserGenerator(ParserGenerator, _Traits):
         """ Returns declaration and initialization of local variable.
         with value of a parameter of given rule.
         If the var is new to the given Node, its address is stored in the Parser.
-        A ParseResultPtr is also defined.
+        A ParseResultPtr is also defined;
         """
 
-        if not item.item.has_result:
+        if not item.func_type.has_result:
             return None
-        var: TypedName = TypedName(
-            item.assigned_name,
-            item.type,
-            )
+        var: TypedName = TypedName(item.assigned_name.string, item.value_type(), item.params)
         if not item.var_name:
             # An anonymous VarItem.
             #   Just declare the variable.
-            return self.setup_var('_PyPegen_DECL_LOC', var.name, var)
+            return f"_PyPegen_DECL_LOCAL_PARSE_RESULT({var.type}, {var.name}, {var.func_params()});"
         else:
             index = item.parent.local_env.index(var.name)
-            return self.setup_var('_PyPegen_ADD_GLOB', var.name, var, index)
-
-    def setup_var(self, func: str, name: str, var: TypedName, index: int = None) -> str | None:
-        return_type = var.return_type or ObjType(self.default_type())
-        index_str = index is not None and f"{index}, " or ''
-        params_str = return_type.callable and f", {var.func_params()}" or ''
-        func = return_type.callable and f"{func}_FUN" or f"{func}_VAR"
-        return f"{func}({index_str}{name}, {return_type}{params_str});"
+            return f"_PyPegen_ADD_GLOBAL_PARSE_RESULT({var.type}, {var.name}, {var.func_params()}, {index});"
 
     @staticmethod
     def gen_cast(dst_type: str, src_type: str = 'void * *', *, sep: str = ' ') -> str:
@@ -660,27 +527,22 @@ class CParserGenerator(ParserGenerator, _Traits):
 
             for item in alt.items():
                 self.print(self.setup_local_name(item))
-            extra = alt.action and "EXTRA" in str(alt.action)
-            if extra:
+            if alt.action and "EXTRA" in alt.action:
                 self.gen_start(alt)
 
             # Generate a function for each item, using the corresponding variable name
             for item in alt.items():
                 self.print(comment=f"{item}")
+                # Create local variables for the item values.
 
                 self.gen_alt_item(item)
 
             self.print(comment="parse succeeded.")
 
-            return_type = alt.return_type or ObjType(self.default_type())
-            # Prepare to emit the alt action and do so
-            if extra:
-                self.print("_PyPegen_EXTRA_END(_p);")
+            # Prepare to emit the rule action and do so
+            ret_action: self.Action = self.gen_action(alt)
             # If the alt returns a different type from the action, use a cast.
-            if return_type.callable:
-                self.print(f"_PyPegen_RETURN_FUN(_ppRes, {self.gen_cast(return_type.val_type, alt.return_type)}({alt.action_expr}), {return_type.val_type}, {return_type.params});")
-            else:
-                self.print(f"_PyPegen_RETURN_VAR(_ppRes, {self.gen_cast(return_type.val_type, alt.return_type)}({alt.action_expr}), {return_type.val_type});")
+            self.print(f"_PyPegen_RETURN_RESULT(_ppRes, {alt.type}, {self.gen_cast(alt.type, ret_action.type)}{ret_action.expr});")
 
         invalid = len(alt) == 1 and str(alt[0]).startswith("invalid_")
         if invalid:
@@ -701,117 +563,208 @@ class CParserGenerator(ParserGenerator, _Traits):
         # The item node has a recipe to get its value.
         
         recipe = item.parse_recipe
-        name: ObjName = item.assigned_name
+        name = item.assigned_name
 
         item_type = recipe.value_type()
+        #var_type = self.default_type(info.vartype or item_type)
         rawname = f"_result_{name}"
-        src_type = recipe.src.func_type
+        #rawtype = f"{var_type}"
+        #if recipe.mode is recipe.Local:
+        #    expr = recipe.func_name
+        #else:
+        #    expr = recipe.func_name
+            #expr = f"{recipe.func_name}(_p)"
+        cast = ''
+        #cast = f"({var_type}) "
+        #self.print(f"{item_type} {name};")
+        #if var_type != rawtype:
+        #    expr = f"({var_type}) {expr}"
         if recipe.mode is recipe.Inl:
-            expr = recipe.outer_call.value_expr(assigned_name=item.assigned_name)
+            expr = recipe.outer_call.value_expr()
             if not recipe.outer_call.func_type.returns_status:
                 expr = f"{item.name} = {expr}"
         elif recipe.mode is recipe.Loc:
-            expr = f"{item.name} = {recipe.inner_call.value_expr(assigned_name=item.assigned_name)}"
-        elif recipe.node.local_src:
-            expr = f"{recipe.inner_call.value_expr(assigned_name=item.assigned_name)}"
+            expr = f"{item.name} = {recipe.inner_call.value_expr()}"
         else:
-            expr = recipe.outer_call.value_expr(assigned_name=item.assigned_name)
-            if not src_type.returns_status:
+            expr = recipe.outer_call.value_expr()
+            if not recipe.src.func_type.returns_status:
                 expr = f"{item.name} = {expr}"
         fail_value = self.bool_value(False)
-        if src_type.always_true:
-            if src_type.use_parser:
-                self.print(f"if (({expr}), _p->error_indicator) return {fail_value};")
-            else:
-                self.print(f"{expr};")
+        if recipe.src.func_type.always_true:
+            self.print(f"if (({cast}{expr}), _p->error_indicator) return {fail_value};")
         elif name in item.local_env:
-            self.print(f"if (!({expr})) return {fail_value};")
-        elif recipe.node.func_type.always_true:
-            self.print(f"{expr};")
+            self.print(f"if (!{cast}{expr}) return {fail_value};")
+
         else:
             self.print(f"if (!({expr})) return {fail_value};")
+
+    #def generic_visit(self, node, **kwds) -> None:
+    #    """ This is for a visit function not yet directly implemented. """
+    #    assert 0, f"PythonParserGenerator has no visitor for {node!r}"
+
+    def decl_inline(self, node: GrammarNode) -> None:
+        """ Generate forward declaration of parser for the node, at file scope. """
+        info = node.parse_recipe.func_info(self)
+        self.print(f"static {info.type}{info.name}(NodeDescr *);")
+
+    def gen_parse(self, recipe: ParseRecipe,
+        **kwds
+        ) -> None:
+        self.print()
+        self.forward_declare_inlines(recipe)
+        #lead = recipe.node.depth() * '    '
+        #print(f"{lead}{recipe.node!r}")
+        #print(f"{lead}{recipe.mode.name} {recipe.func_name}")
+
+        return_type = recipe.src.type
+        if isinstance(recipe.node, Rule):
+            return_type = recipe.node.type
+        if recipe.mode is not recipe.Loc or 0x00001:
+            with self.enter_function(
+                recipe.func_name,
+                ):
+                for inline in recipe.inline_recipes():
+                    # Expand the inline items.
+                    self.gen_node(inline.node)
+                self.gen_copy_local_vars(recipe.node)
+                if recipe.node is not recipe.alt:
+                    self.print(comment=str(recipe.node))
+                #if recipe.mode is recipe.Rule:
+                #    self.gen_return_var(TypedName('_result'))
+                call: str | None = None
+                if recipe.extra:
+                    call = recipe.extra()
+                if call is None:
+                    # Was not supplied by extra()
+                    call = recipe.value_expr()
+
+                    if not recipe.inner_call.func_type.always_true:
+                        if recipe.mode is recipe.Loc or 0x0000:
+                            call = f"_PyPegen_RETURN_RESULT(_ppRes, {recipe.node.type}, {call})"
+                        else:
+                            call = f"return {call}"
+                            #call = f"return {self.gen_cast(recipe.node.type, return_type)}{call}"
+                    call += ';'
+                #if recipe.comment:
+                #    call = f"{call}   {self.comment(recipe.comment)}"
+                if call: self.print(call)
+
+    def action(self, alt: Alt) -> str:
+        if self.debug:
+            self.print(
+                f'D(fprintf(stderr, "Hit with action [%d-%d]: %s\\n", _mark, _p->mark, "{alt}"));'
+            )
+        return self.Action(alt.action, "void *")
+
+    def default_action(self, alt: Alt) -> _Traits.Action:
+        expr: str
+        type: str
+        vars = alt.all_vars()
+        if len(vars) > 1:
+            if self.debug:
+                self.print(
+                    f'D(fprintf(stderr, "Hit without action [%d:%d]: %s\\n", _mark, _p->mark, "{alt}"));'
+                )
+            expr = f"_PyPegen_dummy_name(_p, {', '.join(var.name.string for var in vars)})"
+            type = "expr_ty"
+        else:
+            if self.debug:
+                self.print(
+                    f'D(fprintf(stderr, "Hit with default action [%d:%d]: %s\\n", _mark, _p->mark, "{node}"));'
+                )
+            if len(vars):
+                cast = ""
+                expr = f"{cast}{vars[0].name}"
+                type = vars[0].type
+            else:
+                expr = f"{self.default_value()}"
+                type = f"{self.default_type()}"
+        return self.Action(expr, type)
+
+    def dummy_action(self) -> _Traits.Action:
+        return Action("_PyPegen_dummy_name(_p)", "expr_ty")
 
     # Descriptions of helper parsing functions...
 
     @functools.cached_property
-    def parse_rule(self) -> ParseSource:
+    def parse_rule(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_rule', None,
             ('rule', 'RuleDescr *'),
             ('vars', 'void **'),
         )
     @functools.cached_property
-    def parse_rule_memo(self) -> ParseSource:
+    def parse_rule_memo(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_memo_rule', None,
             ('rule', 'RuleDescr *'),
             ('vars', 'void **'),
         )
     @functools.cached_property
-    def parse_rule_recursive(self) -> ParseSource:
+    def parse_rule_recursive(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_recursive_rule', None,
             ('rule', 'RuleDescr *'),
             ('vars', 'void **'),
         )
     @functools.cached_property
-    def parse_alt(self) -> ParseSource:
+    def parse_alt(self) -> TypedName:
         return self.make_parser_name(
         '_PyPegen_parse_alt', None,
         ('alt', 'const RuleAltDescr *'),
         )
     @functools.cached_property
-    def parse_alts(self) -> ParseSource:
+    def parse_alts(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_PARSE_ALT_ARRAY', None,
             ('alts', 'const RuleAltDescr []'),
         )
     @functools.cached_property
-    def parse_NAME(self) -> ParseSource:
+    def parse_NAME(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_name', 'expr_ty',
         )
     @functools.cached_property
-    def parse_NUMBER(self) -> ParseSource:
+    def parse_NUMBER(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_number_token', 'expr_ty',
             func_type=parse_recipe.ParseData,
         )
     @functools.cached_property
-    def parse_STRING(self) -> ParseSource:
+    def parse_STRING(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_string', 'Token *',
         )
     @functools.cached_property
-    def parse_OP(self) -> ParseSource:
+    def parse_OP(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_op', 'Token *',
         )
     @functools.cached_property
-    def parse_TYPE_COMMENT(self) -> ParseSource:
+    def parse_TYPE_COMMENT(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_type_comment_token', 'Token *',
             func_type=parse_recipe.ParseData,
         )
     @functools.cached_property
-    def parse_SOFT_KEYWORD(self) -> ParseSource:
+    def parse_SOFT_KEYWORD(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_any_soft_keyword', 'Token *',
         )
     @functools.cached_property
-    def parse_token(self) -> ParseSource:
+    def parse_token(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_token', 'Token *',
             ('type', 'int'),
             )
     @functools.cached_property
-    def parse_char(self) -> ParseSource:
+    def parse_char(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_char', 'Token *',
             ('c', 'char'),
         )
     @functools.cached_property
-    def parse_forced(self) -> ParseSource:
+    def parse_forced(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_forced', None,
             ('item', 'ParseFunc *'),
@@ -819,19 +772,21 @@ class CParserGenerator(ParserGenerator, _Traits):
             func_type=parse_recipe.ParseTrue,
         )
     @functools.cached_property
-    def parse_soft_keyword(self) -> ParseSource:
+    def parse_soft_keyword(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_soft_keyword', 'Token *',
             ('keyword', 'const char *'),
         )
-    def parse_repeat(self, elem: ParseExpr) -> ParseSource:
+    @functools.cached_property
+    def parse_repeat(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_repeat', 'asdl_seq *',
             ('item', 'ParseFunc *'),
             ('item_size', 'size_t'),
             ('repeat1', 'int'),
         )
-    def parse_gather(self, elem: ParseExpr) -> ParseSource:
+    @functools.cached_property
+    def parse_gather(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_gather', 'asdl_seq *',
             ('item', 'ParseFunc *'),
@@ -839,14 +794,15 @@ class CParserGenerator(ParserGenerator, _Traits):
             ('sep', 'ParseFunc *'),
             ('repeat1', 'int'),
         )
-    def parse_opt(self, elem: ParseExpr) -> ParseSource:
+    @functools.cached_property
+    def parse_opt(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_opt', 'asdl_seq *',
             ('item', 'ParseFunc *'),
             ('item_size', 'size_t'),
         )
     @functools.cached_property
-    def parse_lookahead(self) -> ParseSource:
+    def parse_lookahead(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_lookahead', None,
             ('positive', 'ParseStatus'),
@@ -854,23 +810,8 @@ class CParserGenerator(ParserGenerator, _Traits):
             func_type=parse_recipe.ParseTest,
         )
     @functools.cached_property
-    def parse_cut(self) -> ParseSource:
+    def parse_cut(self) -> TypedName:
         return self.make_parser_name(
             '_PyPegen_parse_cut', None,
             func_type=parse_recipe.ParseVoid,
         )
-
-from pegen.parse_recipe import (
-    ParseRecipe,
-    ParseRecipeExternal,
-    ParseRecipeLocal,
-    ParseRecipeRule,
-    ParseRecipeInline,
-    ParseSource,
-    ParseFuncType,
-    ParseFunc,
-    ParseTest,
-    ParseTrue,
-    ParseData,
-    ParseNone,
-    )

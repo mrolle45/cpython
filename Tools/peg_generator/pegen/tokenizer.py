@@ -159,19 +159,22 @@ class Tokenizer:
 
     def dump(self, ctx: int = 0) -> None:
         """ Prints all the tokens, without consuming any input or altering the index.
-        Optionally, prints only several items before and after the current index.
+        Optionally, prints only several items before and after the current size.
         """
+        list(map(print, (self.showtokens())))
         index = self._index
         size = len(self._tokens)
         # Fill the array.
         self.fill()
         for i, tok in enumerate(self._tokens):
             if ctx:
-                if i < index - ctx: continue
-                if i == index: print('---')
-                if i > index + ctx: break
+                if i < size - ctx: continue
+                if i == size: print('---')
+                if i > size + ctx: break
             print(f'{i!s:>3} {shorttok(tok)}')
         self._index = index
+        # Restore the array to original size.
+        del self._tokens[size:]
 
 @dataclasses.dataclass
 class TokenLocations:
@@ -204,7 +207,7 @@ class TokenLocations:
         return f"{self.srow},{self.scol + 1:3d} -{f' {self.erow}, ' if self.erow != self.srow else ''}{self.ecol + 1:3d}"
 
     def __repr__(self) -> str:
-        return f"<Locations {self}>"
+        return f"TokenLocations({self})"
 
 class TokenLocationsMatchExact(TokenLocations):
     """ Test whether given locations are exactly equal to this range. """
