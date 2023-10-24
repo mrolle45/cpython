@@ -357,7 +357,7 @@ class ParseExpr(GrammarTree):
 
 
 @dataclasses.dataclass()
-aclass LocEnv:
+class LocEnv:
     """ Information about visible names, other than rules, in some owner tree.
     LocEnv is inherited from the owner's parent, unless that owner
     defines additional local names.  In this case, the owner gets a new LocEnv
