@@ -12,7 +12,7 @@ exact_token_types = token.EXACT_TOKEN_TYPES
 
 
 def shorttok(tok: tokenize.TokenInfo) -> str:
-    return "%-25.25s" % f"{tok.start[0]:2d}.{tok.start[1]:2d}: {token.tok_name[tok.type]}:{tok.string!r}"
+    return "%-25.25s" % f"{tok.start[0]:2d}.{tok.start[1] + 1:2d}: {token.tok_name[tok.type]}:{tok.string!r}"
 
 
 class Tokenizer:
@@ -161,20 +161,19 @@ class Tokenizer:
         """ Prints all the tokens, without consuming any input or altering the index.
         Optionally, prints only several items before and after the current size.
         """
-        list(map(print, (self.showtokens())))
         index = self._index
         size = len(self._tokens)
         # Fill the array.
         self.fill()
         for i, tok in enumerate(self._tokens):
             if ctx:
-                if i < size - ctx: continue
-                if i == size: print('---')
-                if i > size + ctx: break
+                if i < index - ctx: continue
+                if i == index: print('---')
+                if i > index + ctx: break
             print(f'{i!s:>3} {shorttok(tok)}')
         self._index = index
-        # Restore the array to original size.
-        del self._tokens[size:]
+        ## Restore the array to original size.
+        #del self._tokens[size:]
 
 @dataclasses.dataclass
 class TokenLocations:
@@ -224,7 +223,7 @@ class TokenLocationsMatchContains(TokenLocations):
         if other.srow < self.srow: return False
         if other.erow > self.erow: return False
         if other.srow == self.srow and other.scol < self.scol: return False
-        if other.erow == self.erow and self.ecol and other.ecol > self.ecol: return False
+        if other.erow == self.erow and self.ecol >= 0 and other.ecol > self.ecol: return False
         return True
 
 class TokenLocationsMatchOverlap(TokenLocations):
@@ -257,10 +256,10 @@ class TokenMatch(list[TokenLocations]):
                 cls = TokenLocationsMatchExact
                 init = split[1]
             elif match_mode == '<':
-                cls = TokenLocationsMatchExact
+                cls = TokenLocationsMatchContains
                 init = split[1]
             elif match_mode == '&':
-                cls = TokenLocationsMatchExact
+                cls = TokenLocationsMatchOverlap
                 init = split[1]
             else:
                 cls = TokenLocationsMatchExact

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+import collections
 import itertools
+from enum import Enum, auto
 import functools
 import operator
 import re
@@ -27,6 +29,7 @@ from typing import (
     Union,
     TypeVar,
 )
+
 
 from pegen.tokenizer import Tokenizer
 Token = Tokenizer.Token
@@ -54,7 +57,7 @@ class GrammarVisitor:
 
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Any:
         """Called if no explicit visitor function exists for a node."""
-        for value in node:
+        for value in node.children():
             if type(value) is list:
                 for item in value:
                     self.visit(item, *args, **kwargs)
@@ -84,7 +87,7 @@ class GrammarTree:
     tree objects, from the bottom up, each constructor taking whatever child trees are needed.
     The constructors are actions in the Python or C parser script.
     The constructor copies the parser's current start and end locations into the tree.
-    Now, each subtree knows its children but does not know its parent.
+    Now, each subtree knows its childrengrgrrrrr but does not know its parent.
     3. Create a ParserGenerator (C or Python), and store it in the GrammarTree's thread-local object.
     4. The Grammar object's initialize() method is called.  This completes initialization of all
     subtrees in the Grammar tree, by calling initialize() on them, going top-down.
@@ -94,16 +97,27 @@ class GrammarTree:
     """
     name: str = None
     parent: GrammarTree = None      # The Node this Node is a part of.
+    assigned_name: str = None       # Set by parent if an Alt or VarItem.
     gen: ParserGenerator
     showme: ClassVar[bool] = True
     _thread_vars: ClassVar[ThreadVars]
+    _init_stage: InitStage
 
-    def __init__(self, name: str = None, **kwds):
+    def __init__(self, name: str = None, parent: GrammarTree = None, **kwds):
         super().__init__(**kwds)
+        self._init_stage = self.InitStage.Constructor
         if name: self.name = name
-        self.locations = self._thread_vars.parser._locations
+        self.parser = self._thread_vars.parser
+        self.locations = self.parser._locations
+        if parent:
+            # Do pre_ and post_init now, as the parent won't initialize.
+            self.initialize(parent)
 
-    def __iter__(self) -> Iterable[GrammarTree]:
+    def children(self) -> Iterator[GrammarTree]:
+        try: yield from self
+        except TypeError:
+            # self has no __iter__ method
+            pass
         if hasattr(self, 'parse_recipe'): yield self.parse_recipe
 
     @classmethod
@@ -116,10 +130,6 @@ class GrammarTree:
         """
         cls._thread_vars = ThreadVars(parser)
         pass
-
-    @property
-    def gen(self) -> ParserGenerator:
-        return self._thread_vars.gen
 
     @property
     def grammar(self) -> Grammar:
@@ -151,36 +161,41 @@ class GrammarTree:
         #if self.local_env.owner is not self:
         #    self.local_env.dump(self)
         self.pre_init()
-        for child in self:
+        for child in self.children():
             try: child.initialize(self)
             except GrammarError as e:
                 if child.rule is not child: raise
-                del self.rules[child.name]
+                child.delete()
 
         self.post_init()
 
     def pre_init(self) -> None:
         """ Class-specific initialization, after all ancestors have been pre_initialized. """
-        pass
+        self.gen = self._thread_vars.gen
+        self._init_stage = self.InitStage.PreInit
 
     def post_init(self) -> None:
         """ Class-specific initialization, after all descendants have been initialized. """
+        self._init_stage = self.InitStage.PostInit
         pass
 
     def make_parse_recipes(self) -> None:
         """ Create a parse recipe, where supported by its class, for self and all descendants.
         Proceeds bottom_up.
         """
-        for child in self:
+        for child in self.children():
+            if child.rule and child.rule._deleted:
+                continue
             try: child.make_parse_recipes()
             except GrammarError as e:
                 if child.rule is not child: raise
-                del self.rules[child.name]
+                child.delete()
 
         make_parse_recipe = getattr(self, 'make_parse_recipe', None)
         if make_parse_recipe:
             recipe = self.parse_recipe = make_parse_recipe()
-            recipe.initialize(self)
+            if recipe:
+                recipe.initialize(self)
 
     def value_type(self) -> str:
         """ The generated expression for the type of the parsed result. """
@@ -200,14 +215,27 @@ class GrammarTree:
     def uniq_name(self) -> str:
         """ A name which is unique among all tree objects. """
         anc = self.parent
-        return f"{anc.uniq_name()}_{self.name}"
+        if isinstance(anc, VarItem):
+            return anc.uniq_name()
+        return f"{anc.uniq_name()}_{self.assigned_name or self.name}"
 
-    def walk(self, parent: GrammarTree = None) -> Iterable[Tuple[GrammarTree, GrammarTree]]:
+    def walk(self, parent: GrammarTree = None) -> Iterator[Tuple[GrammarTree, GrammarTree]]:
         """ Iterates top-down yielding (parent, child), starting with (given parent, self). """
         yield parent, self
         for child in self:
             if child:
                 yield from child.walk(self)
+
+    @staticmethod
+    def chk_type(obj, *typ: type, opt: bool = False) -> None:
+        """ Assert that object is instance of given type(s), or optionally None. """
+        if opt and obj is None: return
+        assert isinstance(obj, typ), (
+            f"Expected {' or '.join(t.__name__ for t in typ)}, not {obj!r}.")
+
+    def chk_types(self, objs: Iterator[object], *typ: Type) -> None:
+        for obj in objs:
+            self.chk_type(obj, *typ)
 
     def validate(self, visited: set = set(), level: int = 0) -> None:
         """ Raise an exception if anything is incorrect.  Recursively.
@@ -219,13 +247,13 @@ class GrammarTree:
         #print('  ' * level, repr(self))
         if hasattr(self, 'parse_recipe'):
             self.parse_recipe.validate(visited, level + 1)
-        for sub in self:
+        for sub in self.children():
             sub.validate(visited, level + 1)
 
     def full_name(self) -> str:
         res = self.name.string
-        if self.params: res += f'{self.params}'
-        if self.type: res += f' [{self.type}]'
+        if self.type: res += f' [{self.return_type}]'
+        if self.params: res += f'{self.params.in_func(use_default=False)}'
         return res
 
     def func_params(self) -> str:
@@ -247,7 +275,7 @@ class GrammarTree:
         """
         return str(self)
 
-    def itershow(self) -> Iterable[GrammarTree]:
+    def itershow(self) -> Iterator[GrammarTree]:
         return iter(self)
 
     def attrs(self) -> Iterator[Attr]:
@@ -275,35 +303,40 @@ class GrammarTree:
 
     def brk(self, delta: int = 0) -> bool:
         """ For setting a breakpoint in a debugger. """
-        if self.gen:
-            if self.gen.brk(delta):
+        if self.parser:
+            if self.parser.brk(delta):
                 return True
-            if self.gen.brk_token(self):
+            if self.parser.brk_token(self):
                 return True
         return False
+
+    class InitStage(Enum):
+        Constructor = auto()
+        PreInit = auto()
+        PostInit = auto()
 
 
 class OptVal(GrammarTree, Generic[ValueType]):
     """ Wrapper around a parse result for an Opt expression.
-    The parse results in either [] or [result].  OptVal behaves the same way.
-    OptVal.val attribute is either None or result.
+    The parse results in either [] or [result].  OptVal.val behaves the same way.
+    OptVal.opt attribute is either None or result.
     """
-    def __init__(self, opt: Sequence[ValueType]):
-        assert len(opt) <= 1
-        self.opt = opt
+    def __init__(self, val: Sequence[ValueType]):
+        assert len(val) <= 1
+        self.val = val
 
     def __bool__(self) -> bool:
-        return bool(self.opt)
+        return bool(self.val)
 
-    def __iter__(self) -> Iterable[ValueType]:
-        if self.opt: yield self.val
+    def __iter__(self) -> Iterator[ValueType]:
+        if self.val: yield self.opt
 
     @property
-    def val(self) -> ValueType:
-        return self.opt and self.opt[0] or None
+    def opt(self) -> ValueType | None:
+        return self.val and self.val[0] or None
 
     def __repr__(self) -> str:
-        return f"<OptVal {self.val}>"
+        return f"<OptVal {self.opt}>"
 
 
 class ParseExpr(GrammarTree):
@@ -314,29 +347,47 @@ class ParseExpr(GrammarTree):
     corresponding to a parent ParseExpr.
     self.parse_recipe tells how to generate the code for this function.
     """
-    always_true: bool = False
+
+    src: ParseSource = None
 
     def __init__(self,
         name: Optional[str] = None,
-        type: Optional[str] = None,         # target language default type if not given to constructor.
+        typ: Optional[str] = None,         # target language default type if not given to constructor.
         params: Optional[Params] = None,
+        func_type: ParseFuncType = None,
         **kwds,
         ):
 
-        super().__init__(**kwds)
         if name: self.name = name
         elif self.name: self.name = ObjName(self.name)
-        self.type = type
+        self.type = typ or NoType()
+        super().__init__(**kwds)
+        self.func_type = func_type or ParseFunc
         self.params = params
 
     def pre_init(self) -> None:
         super().pre_init()
         if not self.type:
-            self.type = self.gen.default_type()
+            self.type = NoType()
+
+    def children(self) -> Iterator[GrammarTree]:
+        yield from super().children()
+        if self.src: yield self.src
+
+    def has_value(self) -> bool:
+        return self.func_type.has_result and self.val_type.has_value
 
     @property
-    def func_type(self) -> ParseFuncType:
-        return self.parse_recipe.func_type
+    def return_type(self) -> Type:
+        return self.type.return_type
+
+    @return_type.setter
+    def return_type(self, typ: Type) -> Type:
+        self.type.return_type = typ
+
+    @property
+    def val_type(self) -> Code:
+        return self.type.val_type
 
     def vars_used(self) -> Iterator[ObjName]:
         """ All variable names used directly in this expression.
@@ -350,11 +401,13 @@ class ParseExpr(GrammarTree):
         """
         if name is None: name = self.name
         params = self.params
-        type = self.type
+        typ = self.type
         if not params: return f"{type} {name}"
         # It's a function.
-        return f"{type} (*{name}) ({params.in_func()})"
+        return f"{typ} (*{name}) ({params.in_func()})"
 
+    def  make_proxy_type(self, *targets: ParseExpr, params: Params = None) -> ProxyType:
+        return ProxyType(targets, params, node=self)
 
 @dataclasses.dataclass()
 class LocEnv:
@@ -452,7 +505,7 @@ class ObjName(GrammarTree):
     """ Wrapper around a string which represents the name of some object value.
     It comes from a NAME Token, or possibly just a plain str.
     """
-    def __new__(cls, tok: Token | str | None):
+    def __new__(cls, tok: Token | str = None):
         if tok is None:
             return None
         return super().__new__(cls)
@@ -477,21 +530,30 @@ class ObjName(GrammarTree):
         return f"<ObjName {self}>"
 
 
-class TypedName(GrammarTree):
+class NoName(ObjName):
+    def __init__(self):
+        super().__init__()
+
+    def __bool__ (self) -> bool: return False
+
+
+class TypedName(ParseExpr):
 
     def __init__(self,
-        name: Optional[str | Token | ObjName],
-        type: Optional[Code] = None,         # target language default type if not given to constructor.
-        params: Optional[Params] = None,
+        name: str | Token | ObjName = None,
+        typ: str | Type = None,         # target language default type if not given to constructor.
+        **kwds,
         ):
-        super().__init__()
+        if isinstance(typ, (str, ValueCode)):
+            typ = ObjType(typ)
+        super().__init__(typ=typ, **kwds)
         if isinstance(name, (str, Token)):
             name = ObjName(name)
-        assert not name or isinstance(name, ObjName)
         self.name = name
-        self.params = params
-        self.type = type
-        assert type is None or isinstance(type, Code), f"Expected Code, not {type!r}"
+        if self.type.callable:
+            self.params = self.type.params
+        self.chk_type(name, ObjName, opt=True)
+        self.chk_type(typ, Type, opt=True)
 
     def set_name(self, name: TypedName) -> None:
         """ Initialize from another name.  An alternative to supplying arguments to constructor. """
@@ -502,11 +564,10 @@ class TypedName(GrammarTree):
     def __iter__(self) -> Iterator[GrammarTree]:
         if self.name: yield self.name
         if self.type: yield self.type
-        if self.params: yield self.params
 
     @property
     def callable(self) -> bool:
-        return self.params is not None
+        return self.type.callable
 
     def validate(self, visited: set = set(), level: int = 0) -> None:
         super().validate(visited, level)
@@ -515,20 +576,20 @@ class TypedName(GrammarTree):
     def pre_init(self) -> None:
         super().pre_init()
         if not self.type:
-            self.type = self.gen.default_type()
+            self.type = Type(self.gen.default_type())
 
-    # TODO: This is only valid for C syntax.
     def typed_name(self, name: str = '') -> str:
         """ What is generated for the type of this TypedName, including optional name.
         This TypedName may have its own parameters, which are generated recursively.
         """
         parts: list[str] = []
-        base_type = str(self.type)
+        base_type = str(self.val_type)
         if base_type: parts.append(base_type)
         if self.callable:
             # This node is a callable type.
-            subtypes = [subparam.typed_name() for subparam in self.params]
-            parts.append(f'(*{name}) ({", ".join(subtypes)})')
+            for params in self.type.param_lists():
+                subtypes = [subparam.typed_name() for subparam in params]
+                parts.append(f'(*) ({", ".join(subtypes)})')
         else:
             if name: parts.append(str(name))
         p = ' '.join(parts)
@@ -553,14 +614,16 @@ class TypedName(GrammarTree):
         # It's a function.
         return f"{type} (*{name}) ({params.in_func()})"
 
-    # TODO: Separate version for Python syntax.
-    def decl_func(self, fwd: bool = False) -> str:
+    def decl_func(self, fwd: bool = False, node: ParseExpr = None) -> str:
         """ The declaration of a callable name (without the value), as a function.
         The variable is a function (not a function pointer), including function parameters.
         """
-        assert self.params and self.name
-        type = str(self.type)
+        assert self.type.params and self.name
+        type = str(self.val_type)
         name = self.name
+        if isinstance(node, Rule):
+            return self.gen.format_rule(node)
+
         if fwd:
             nparams = len(self.params)
             if type == 'ParseStatus' and nparams == 2:
@@ -569,12 +632,20 @@ class TypedName(GrammarTree):
                 return f"ParseTest {name}"
             if fwd and type == 'void' and nparams == 2:
                 return f"ParseTrue {name}"
-        return f"{type} {name}({self.params.in_func()})"
+        return f"{type} {name}{self.params.in_func()}"
 
     def attrs(self) -> Iterator[Attr]:
         yield from super().attrs()
         yield Attr(self, 'name')
         yield Attr(self, 'type')
+
+    def in_grammar(self) -> str:
+        """ Text of the name, as it appears in the grammar file. """
+        parts: list[str] = []
+        if self.name:
+            parts.append(str(self.name))
+        parts.append(self.type.in_grammar())
+        return ' '.join(parts)
 
     def __str__(self) -> str:
         if not SIMPLE_STR and (self.params or self.type):
@@ -610,6 +681,7 @@ class Grammar(GrammarTree):
     #def pre_init(self) -> None:
 
     def post_init(self) -> None:
+        super().post_init()
         self.make_parse_recipes()
         self.validate()
 
@@ -617,7 +689,7 @@ class Grammar(GrammarTree):
         for rule in dict(self.rules).values():
             try: rule.validate(visited, level + 1)
             except GrammarError as e:
-                del self.rules[rule.name]
+                rule.delete()
         if self._errors:
             for name in sorted(self._errors):
                 print(self._errors[name])
@@ -651,8 +723,8 @@ T = TypeVar('T')
 class TrueHashableList(Generic[T]):
     """ Acts like List[T] except that it is hashable and always true. """
     def __init__(self, items: Sequence[T] = [], **kwds):
-        super().__init__(**kwds)
         self._items = list(items)
+        super().__init__(**kwds)
 
     def __hash__(self) -> int: return id(self)
 
@@ -673,37 +745,38 @@ class Meta:
         self.name = name
         self.val = val
 
-    def __iter__(self) -> Iterable:
+    def __iter__(self) -> Iterator:
         yield self.name
         yield self.val
 
 
-class Rule(ParseExpr):
+class Rule(TypedName):
     max_local_vars: int = 0         # Greatest number of local names for any node in the tree.
+    _deleted: bool = False          # True after a GrammarError has occurred.
+    left_recursive: bool = False
+    leader: bool = False
 
-    def __init__(self, rulename: TypedName, rhs: Rhs, memo: Optional[object] = None):
-        params = rulename.params or Params(())
-        super().__init__()
+    def __init__(self, rulename: TypedName, params: OptVal[Params], rhs: Rhs, memo: Optional[object] = None):
+        params = params.opt or NoParams()
+        super().__init__(rulename.name, self.make_proxy_type(rhs, params=params))
         #super().__init__(rulename.name, rulename.type, params)
-        self.name, self.type, self.params = (rulename.name, rulename.type, params)
+        self.name, self.params = (rulename.name, params)
         self.rhs = rhs
         self.memo = bool(memo)
-        self.left_recursive = False
-        self.leader = False
-        #rhs.type = self.type
-
+        if rulename.return_type:
+            self.return_type = rulename.return_type
 
     def pre_init(self) -> None:
         super().pre_init()
-        if not self.type: self.type = self.gen.default_type()
-        self.rhs.type = self.type
+        #if not self.type: self.type = self.gen.default_type()
         if len(self.params):
             for param in self.params:
                 self.add_local_name(param, param.name)
 
     def post_init(self) -> None:
+        super().post_init()
+        #self.type.dump()
         pass
-        #self.message(f"Rule {self.name} # vars = {self.max_local_vars}")
 
     def need_local_vars(self, n: int) -> None:
         """ At least this many local variables may be needed. """
@@ -714,12 +787,15 @@ class Rule(ParseExpr):
     def rule(self) -> Rule:
         return self
 
+    def delete(self) -> None:
+        """ Mark for later deletion.  Names can still resolve to self, and\
+        a dummy parse function will be generated.
+        """
+        self._deleted = True
+
     def uniq_name(self) -> str:
         """ A name which is unique among all tree objects. """
         return f"_{self.name}"
-
-    def __str__(self) -> str:
-        return f"{self.full_name()}: {self.rhs}"
 
     def show(self, leader: str = ''):
         res = str(self)
@@ -728,9 +804,6 @@ class Rule(ParseExpr):
         lines = [res.split(":")[0] + ":"]
         lines += [f"{leader}| {alt}" for alt in self.rhs]
         return "\n".join(lines)
-
-    def __repr__(self) -> str:
-        return f"<Rule {self.name}, {self.type}, {self.rhs!r}>"
 
     def __iter__(self) -> Iterator[Rhs]:
         if self.name: yield self.name
@@ -764,25 +837,17 @@ class Rule(ParseExpr):
                 f"Rule with parameters may not be memoized or left-recursive leader.")
 
         return self.gen.rule_recipe(self, parser)
-        return ParseRecipeExternal(
-            self, self.name, parser, '&_rule_descriptor',
-            self.local_env.count and "_local_values" or self.gen.default_value(),
-            params=self.params,
-            extra=lambda: self.gen.gen_rule(self),
-            inlines = [self.rhs],
-            value_type=self.type,
-            use_inline=False,
-            **kwds,
-            )
 
     @property
     def param_names(self) -> List[str]:
         return [param.name for param in self.params]
 
-    @classmethod
-    def simple(cls, name: str, params: Params, *args, **kwds) -> Rule:
-        # Make Rule from just the name and any parameters.
-        return cls(TypedName(name, params=params), *args, **kwds)
+    def __str__(self) -> str:
+        self.gen.format_typed_name(self)
+        return f"{self.full_name()}: {self.rhs}"
+
+    def __repr__(self) -> str:
+        return f"<Rule {self.name}, {self.type}, {self.rhs!r}>"
 
 
 class Param(TypedName, GrammarTree):
@@ -794,57 +859,23 @@ class Param(TypedName, GrammarTree):
         self.set_name(name)
 
 
-class Params(TrueHashableList[Param], GrammarTree):
-    """ Parameters for a Rule or other callable. """
+#class NoParams(Params):
+#    empty: bool = True
 
-    empty: bool = False
+#    def __init__(self):
+#        super().__init__()
 
-    def __init__(self, params: List[Param] = []):
-        super().__init__(items=params)
-        if params:
-            # Verify that the names are unique.
-            names = tuple(param.name for param in params)
-            unique_names = set(names)
-            if len(unique_names) != len(params):
-                self.grammar_error(f'Parameter names {names} must be different.')
+#    def __bool__(self) -> bool:
+#        return False
 
-    def __str__(self) -> str:
-        """ String used in a call expression, including the parens. """
-        return f'({", ".join([param.name.string for param in self])})'
+#    def in_func(self) -> str:
+#        return ''
 
-    def __repr__(self) -> str:
-        return f"<Params{self}>"
+#    def __str__(self) -> str:
+#        return ''
 
-    def get(self, name: str) -> Optional[Param]:
-        for param in self:
-            if param.name == name: return param
-        return None
-
-    def in_func(self) -> str:
-        """ Text of the parameters, as included in a function def or decl. """
-        if not len(self):
-            return self.gen.default_params()
-        return ', '.join(
-            [f"{param.typed_name(param.name)}" for param in self])
-
-
-class NoParams(Params):
-    empty: bool = True
-
-    def __init__(self):
-        super().__init__()
-
-    def __bool__(self) -> bool:
-        return False
-
-    def in_func(self) -> str:
-        return ''
-
-    def __str__(self) -> str:
-        return ''
-
-    def __repr__(self) -> str:
-        return '<No params>'
+#    def __repr__(self) -> str:
+#        return '<No params>'
 
 
 class Arg(GrammarTree):
@@ -855,28 +886,28 @@ class Arg(GrammarTree):
         self.code = code
         if inline: self.inline = inline
 
-    def __iter__(self) -> Iterable[GrammarTree]:
+    def __iter__(self) -> Iterator[GrammarTree]:
         yield self.code
 
-    def show_typed(self, type: TypedName) -> str:
-        """ Name of this Arg, possibly coerced to given type. """
+    #def show_typed(self, type: TypedName) -> str:
+    #    """ Name of this Arg, possibly coerced to given type. """
 
-        result = str(self)
-        # Check for a type cast needed.
-        if self.inline:
-            my_type: TypedName = self.inline.parse_recipe.func_name
-            my_type_name = my_type.full_type()
-            type_name = str(type.type)
-            if my_type_name != type_name:
-                if type_name == 'ParseFunc*' and my_type_name == 'ParseStatus (*) (Parser* _p, ParseResultPtr* _ppRes)':
-                    pass
-                elif type_name == 'ParseTest*' and my_type_name == 'ParseStatus (*) (Parser* _p)':
-                    pass
-                elif type_name == 'ParseTrue*' and my_type_name == 'void (*) (Parser* _p, ParseResultPtr* _ppRes)':
-                    pass
-                else:
-                    result = type.gen.cast(result, type)
-        return result
+    #    result = str(self)
+    #    # Check for a type cast needed.
+    #    if self.inline:
+    #        my_type: TypedName = self.inline.parse_recipe.func_name
+    #        my_type_name = my_type.full_type()
+    #        type_name = str(type.type)
+    #        if my_type_name != type_name:
+    #            if type_name == 'ParseFunc*' and my_type_name == 'ParseStatus (*) (Parser* _p, ParseResultPtr* _ppRes)':
+    #                pass
+    #            elif type_name == 'ParseTest*' and my_type_name == 'ParseStatus (*) (Parser* _p)':
+    #                pass
+    #            elif type_name == 'ParseTrue*' and my_type_name == 'void (*) (Parser* _p, ParseResultPtr* _ppRes)':
+    #                pass
+    #            else:
+    #                result = type.gen.cast(result, type)
+    #    return result
 
     def __str__(self) -> str:
         return self.code and str(self.code) or self.inline.parse_recipe.func_name.name.string
@@ -903,26 +934,12 @@ class Args(TrueHashableList[Arg], GrammarTree):
             else: return Arg(*arg)
 
         super().__init__(items=[arg(a) for a in args])
-        self.show()
 
     def show(self, *after_args: str) -> str:
-        """ For display of an item following the name, including parens.
-        Includes trailing comma for a single argument.
+        """ For display of an item following the name, including brackets.
         """
-        args = ', '.join([*after_args, *(repr(arg) for arg in self[:])])
-        if len(args) == 1: args += ','              # Trailing comma for a single arg.
-        return f'({args})'
-
-    def show_typed(self, params: Params) -> str:
-        """ String with the arg names,
-        but some of them may be coerced to the corresponding param type.
-        """
-        if self.empty: return ''
-        args = list(
-            arg.show_typed(param)
-            for arg, param in zip(self[:], params[:])
-            )
-        return f"({', '.join(args)})"
+        args = ', '.join([*after_args, *(str(arg) for arg in self[:])])
+        return f'<{args}>'
 
     def __str__(self) -> str:
         res = ", ".join(str(arg) for arg in self)
@@ -937,9 +954,9 @@ class NoArgs(Args):
     empty: bool = True
 
     def show(self, *after_args: str) -> str:
-        """ For display of an item following the name, including parens.
-        Includes trailing comma for a single argument.
+        """ For display of an item following the name, including brackets.
         """
+        return ''
 
     def __bool__(self) -> bool:
         return False
@@ -950,6 +967,20 @@ class NoArgs(Args):
     def __str__(self) -> str:
         return ''
 
+
+class ArgsList(GrammarTree):
+    """ Multiple layers of call arguments.  Each set of args is applied to some callable,
+    and the return value is called with the next set of args.
+    The list can be empty, meaning that the target is an object type.
+    """
+    def __init__(self, arg_lists: Sequence[Args]):
+        self.arg_lists = arg_lists
+
+    def children(self) -> Iterator[GrammarTree]:
+        yield from self.arg_lists
+
+    def __str__(self) -> str:
+        x
 
 class AltItem(ParseExpr):
     """ Anything which can be directly a part of an Alt.
@@ -964,47 +995,47 @@ class Alt(TrueHashableList[AltItem], ParseExpr):
 
     def __init__(self, items: List[AltItem], *, action: Optional[Code] = None):
         # The name will be chosen later when it is adopted by the Rhs.
-        super().__init__(items)
-        self.action = action
+        # The return type won't be set yet.  
+        #   It may be set by the parent's constructor to a specific type.
+        #   Otherwise, it will be set in pre_init() as a proxy.
+        super().__init__(items, typ=FuncType(ValueCode([])))
+        self.action = action or NoCode()
+        self.assign_names()
+        assert (isinstance(item, VarItem) for item in items)
+
+    def __iter__(self) -> Iterator[GrammarTree]:
+        yield from self.items()
+        if self.action: yield self.action
+        if isinstance(self.type, Type): yield self.type
+        
+    def pre_init(self) -> None:
+        super().pre_init()
         # Check unique item variable names.
         item_names = self.var_names()
         unique_names = set(item_names)
         if len(unique_names) < len(item_names):
             self.grammar_error(f'Variable names {item_names} must be different.')
-        assert (isinstance(item, VarItem) for item in items)
-
-    def __iter__(self) -> Iterable[GrammarTree]:
-        yield from self.items()
-        if self.action: yield self.action
-
-    @property
-    def alt(self) -> Alt:
-        return self
-
-    def items(self) -> list[ParseExpr]:
-        return self._items
-
-    def vars_used(self) -> Iterator[ObjName]:
-        """ All variable names used directly in this expression.
-        They require being defined in the generated code.
-        """
-        x=0
-        for item in self.items():
-            if hasattr(item, 'parse_recipe'):
-                if item.parse_recipe.mode in (item.parse_recipe.Rule, item.parse_recipe.Loc):
-                    yield from item.vars_used()
-        if self.action:
-            yield from self.action.iter_vars(self.local_env)
-
-    def pre_init(self) -> None:
-        super().pre_init()
+        # Make ProxyType for the item(s), unless it is set to something already.
+        if not self.return_type:
+            self.type = ProxyType(self.items(), node=self)
+        t = self.val_type
         if self.var_names():
             self.remove_local_names(*self.var_names())
 
     def post_init(self) -> None:
         super().post_init()
+        if not self.action:
+            ret_action = self.gen.gen_action(self)
+            self.action = Code(ret_action.expr, parent=self)
+            self.action_type = ret_action.type
+            if not self.val_type.has_value: self.type = ret_action.type
+        else:
+            self.action_type = NoType()
+            if not self.val_type.has_value:
+                self.grammar_error(f"Alternative <{self}> with an action must return a value")
         names = list(self.local_env)        # All variable names, old and new.
         self.codes = TargetCodeVisitor(self)
+        if not self.val_type: self.type = Type(self.gen.default_type())
 
         # Analyze names used by each item in turn.
         # A name which is defined in this or a later item are a GrammarError.
@@ -1025,6 +1056,51 @@ class Alt(TrueHashableList[AltItem], ParseExpr):
             vars = self.codes.vars(self.local_env)
             x = 0
 
+    @property
+    def alt(self) -> Alt:
+        return self
+
+    def items(self) -> list[VarItem]:
+        return self._items
+
+    def default_action_vars(self) -> list[VarItem]:
+        """ Which items participate in a default action. """
+        vars = self._items
+        if len(vars) <= 1:
+            return vars
+        # Multiple items.
+        # Try restricting to names variables.
+        named_vars = [var for var in vars if var.var_name]
+        if named_vars: return named_vars
+        # No named variables, so use all variables.
+        return vars
+
+    def vars_used(self) -> Iterator[ObjName]:
+        """ All variable names used directly in this expression.
+        They require being defined in the generated code.
+        """
+        x=0
+        for item in self.items():
+            if hasattr(item, 'parse_recipe'):
+                if item.parse_recipe.mode in (item.parse_recipe.Rule, item.parse_recipe.Loc):
+                    yield from item.vars_used()
+        if self.action:
+            yield from self.action.iter_vars(self.local_env)
+
+    def assign_names(self) -> None:
+        """ Set the assigned name for each VarItem.  Duplicate names will add a suffix. """
+        counts = collections.Counter()
+        for i in self.items():
+            if i.var_name:
+                name = i.var_name.name
+            else:
+                name = i.name
+                n = counts[name]
+                counts[name] += 1
+                if n:
+                    name = ObjName(f"{name}_{n}")
+            i.assigned_name = name
+
     @functools.cache
     def var_names(self):
         return tuple(item.var_name.name for item in self.items() if item.var_name)
@@ -1032,7 +1108,7 @@ class Alt(TrueHashableList[AltItem], ParseExpr):
     @functools.cache
     def all_vars(self):
         """ All assigned variables, including for anonymous items, which have a parse result. """
-        return tuple(item for item in self if item.func_type.has_result)
+        return tuple(item for item in self.items() if item.func_type.has_result)
 
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
         return ParseRecipeInline(self,
@@ -1043,10 +1119,13 @@ class Alt(TrueHashableList[AltItem], ParseExpr):
                      for item in self.items()
                      ],
             inline_locals=False,
-            value_type=self.type,
+            value_type=self.val_type,
             comment=str(self),
             **kwds,
             )
+
+    def show(self) -> str:
+        return " ".join(item.show(show_var=False) for item in self.items()) or '<always>'
 
     def __str__(self) -> str:
         core = " ".join(item.show(show_var=False) for item in self.items()) or '<always>'
@@ -1058,7 +1137,7 @@ class Alt(TrueHashableList[AltItem], ParseExpr):
     def __repr__(self) -> str:
         repr = str(self)
         if self.action:
-            repr += (f" {{{self.action!r}}}")
+            repr += (f" {{{self.action}}}")
         return f"<Alt {repr}>"
 
 
@@ -1067,10 +1146,9 @@ class Rhs(TrueHashableList[Alt], AltItem):
     name = '_rhs'
     nested: bool = False                    # Set True on instance if part of a Group.
 
-    def __init__(self, alts: Sequence[Alt], typ: Code = None):
-        super().__init__(items=alts)
-        assert not typ or type(typ) is Code
-        self.type = typ
+    def __init__(self, alts: Sequence[Alt]):
+        super().__init__(items=alts, typ=self.make_proxy_type(*alts))
+        self.alts = alts
         for i, alt in enumerate(alts, 1):
             if len(alts) == 1:
                 name = '_alt'
@@ -1078,11 +1156,9 @@ class Rhs(TrueHashableList[Alt], AltItem):
                 name = f"_alt{i}"
             alt.name = name
 
-    def pre_init(self) -> None:
-        super().pre_init()
-        if not self.type: self.type = self.gen.default_type()
-        for alt in self:
-            alt.type = self.type
+    def post_init(self) -> None:
+        r = self.return_type
+        super().post_init()
 
     def make_parse_recipe(self, name: str = None, dflt_name: str = '_rhs', **kwds) -> ParseRecipe:
 
@@ -1097,16 +1173,16 @@ class Rhs(TrueHashableList[Alt], AltItem):
 
         descr_name, extra = self.gen.gen_rhs_descriptors(self, alt_names)
 
-        return ParseRecipeInline(
+        return ParseRecipeExternal(
             self, name or dflt_name, parser_name, descr_name, extra=extra,
             inlines=list(self),
             func_type=ParseFunc,
-            value_type=self.type,
+            value_type=self.val_type,
             **kwds,
             )
 
     def show(self, leader: str = ''):
-        res = str(self)
+        res = " | ".join(str(alt.show()) for alt in self[:])
         if len(res) < 88:
             return res
         lines = [f"{leader}| {alt}" for alt in self]
@@ -1116,7 +1192,7 @@ class Rhs(TrueHashableList[Alt], AltItem):
         return " | ".join(str(alt) for alt in self[:])
 
     def __repr__(self) -> str:
-        return f"Rhs({list(self)!r})"
+        return f"<Rhs {list(self)!r}>"
 
     @property
     def can_be_inlined(self) -> bool:
@@ -1141,7 +1217,11 @@ class VarItem(AltItem):
     assigned_name: ObjName
 
     def __init__(self, name: TypedName | None, item: Item):
-        super().__init__()
+        if name and name.type:
+            typ = name.type
+        else:
+            typ = ProxyType([item], node=self)
+        super().__init__(typ=typ, func_type=item.func_type)
         assert item is not None
         self.var_name = name
         self.name = name and name.name or item.name
@@ -1151,27 +1231,15 @@ class VarItem(AltItem):
         super().pre_init()
         parent = self.parent
         assert type(parent) is Alt
+        self.item.assigned_name = self.assigned_name
         if self.var_name:
             parent.add_local_name(self.item, self.var_name.name)
-            if not self.var_name.type:
-                self.type = self.var_name.type = self.gen.default_type()
-        # Set assigned name.
-        name: ObjName = self.var_name and self.var_name.name
-        if not name:
-            # Add a suffix to given name if it appears earlier in parent Alt.
-            origname = name = self.name
-            counter = itertools.count(1)
-            for sib in parent:
-                if sib is self: break
-                if sib.assigned_name == name:
-                    # Earlier duplicate.  Add a suffix and keep looking for more.
-                    name = self.name = ObjName(f"{origname}_{next(counter)}")
-        self.assigned_name = name
-        assert isinstance(name, ObjName)
+            #if not self.var_name.type:
+            #    self.type = self.var_name.type = Type(self.gen.default_type())
 
     def validate(self, visited: set = set(), level: int = 0) -> None:
         if self.var_name:
-            if not self.item.parse_recipe.inner_call.func_type.has_result:
+            if not self.has_value():
                 self.item.grammar_error(
                     f"Item {self.name} with variable name must have a parse result.")
 
@@ -1182,7 +1250,8 @@ class VarItem(AltItem):
         return self.item.vars_used()
 
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
-        return self.item.make_parse_recipe(assigned_name=self.assigned_name, **kwds)
+        return self.item.make_parse_recipe(
+            assigned_name=self.assigned_name, owner=self, **kwds)
 
     def attrs(self) -> Iterator[Attr]:
         yield from super().attrs()
@@ -1190,9 +1259,9 @@ class VarItem(AltItem):
 
     def show(self, show_var: bool = True) -> str:
         if self.var_name and show_var:
-            return f"{self.var_name.name}={self.item}"
+            return f"{self.var_name.name}={self.item.show()}"
         else:
-            return str(self.item)
+            return self.item.show()
 
     def __str__(self) -> str:
         return self.show()
@@ -1216,12 +1285,18 @@ class Forced(Item):
     def __init__(self, node: Item):
         super().__init__()
         self.node = node
+        self.func_type = ParseTrue
+
+    def post_init(self) -> None:
+        super().post_init()
+        src = self.src = self.gen.parse_forced(self.node)
+        self.type = src.type
 
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
-        return ParseRecipeInline(
+        return ParseRecipeExternal(
             self,
             '_forced',
-            self.gen.parse_forced,
+            self.gen.parse_forced(self.node),
             (None, self.node),
             f'"{self.gen.str_value(str(self.node))}"',
             **kwds
@@ -1239,17 +1314,18 @@ class Forced(Item):
 
 class Lookahead(Item):
     name = '_lookahead'
-    has_result: bool = False
-    #use_res_ptr = False
 
-    def __init__(self, node: Item, positive: bool):
-        super().__init__()
+    def __init__(self, node: Atom, positive: bool):
+        super().__init__(func_type=ParseTest)
         self.node = node
         node.name = '_atom'
         self.positive = positive
 
+    def __iter__(self) -> Iterator[Plain]:
+        yield self.node
+
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
-        return ParseRecipeInline(
+        return ParseRecipeExternal(
             self, '_lookahead', self.gen.parse_lookahead,
             self.gen.bool_value(self.positive),
             Arg(inline=self.node),
@@ -1259,12 +1335,9 @@ class Lookahead(Item):
     def __str__(self) -> str:
         return f"{'!&'[self.positive]}{self.node}"
 
-    def __iter__(self) -> Iterator[Plain]:
-        yield self.node
-
 
 class PositiveLookahead(Lookahead):
-    def __init__(self, node: Plain):
+    def __init__(self, node: Atom):
         super().__init__(node, True)
 
     def __repr__(self) -> str:
@@ -1272,7 +1345,7 @@ class PositiveLookahead(Lookahead):
 
 
 class NegativeLookahead(Lookahead):
-    def __init__(self, node: Plain):
+    def __init__(self, node: Atom):
         super().__init__(node, False)
 
     def __repr__(self) -> str:
@@ -1281,7 +1354,10 @@ class NegativeLookahead(Lookahead):
 
 class Cut(Item):
     name = '_cut'
-    has_result: bool = False
+
+    def __init__(self):
+        super().__init__(typ=Type(NoValueCode()), func_type=ParseVoid)
+        #super().__init__()
 
     def validate(self, visited: set = set(), level: int = 0) -> None:
         pass
@@ -1289,6 +1365,7 @@ class Cut(Item):
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
         return ParseRecipeExternal(
             self, "_cut", self.gen.parse_cut,
+            func_type=ParseNone,
             **kwds, )
 
     def __repr__(self) -> str:
@@ -1304,27 +1381,63 @@ class Atom(Item):
     pass
 
 
+class Call(Atom):
+    """ An Atom which calls a given element, with given arguments. """
+    name: str = '_call'
+
+    def __init__(self, elem: Atom, args: Args, **kwds):
+        super().__init__(**kwds, typ=self.make_proxy_type(elem))
+        self.elem = elem
+        self.args = args
+
+    def children(self) -> Iterator[GrammarTree]:
+        yield from super().children()
+        yield self.elem
+        yield self.args
+
+    def pre_init(self) -> None:
+        super().pre_init()
+        self.src = self.gen.parse_call
+
+    def make_parse_recipe(self, **kwds) -> ParseRecipe:
+        # FOR NOW: do similar to Lookahead.
+        return ParseRecipeExternal(
+            self, '_call', self.src,
+            Arg(inline=self.elem),
+            func_type=ParseTest,
+            **kwds)
+
+    def __str__(self) -> str:
+        return f"{self.elem} {self.args}"
+
+    def __repr__(self) -> str:
+        return f"<Call {self}>"
+
 class Seq(Atom):
     """ An Atom whose parse result is a sequence of parse results of given element. """
 
-    no_local_recipe: bool = False
-    no_local_recipe: bool = False
-
-    def __init__(self, elem: Atom):
-        super().__init__()
+    def __init__(self, elem: Atom, **kwds):
+        super().__init__(**kwds)
         self.elem = elem
 
+    def post_init(self) -> None:
+        super().post_init()
+        src = self.src = self.recipe_src()(self.elem)
+        self.type = src.type
+
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
-        return ParseRecipeInline(
-            self, self.name, self.recipe_src()(self.elem),
+        return ParseRecipeExternal(
+            self, self.name, self.src,
             *self.gen.sequence_recipe_args(self, *self.parse_args()),
-            func_type=self.always_true and ParseTrue or ParseFunc,
+            func_type=self.func_type,
             **kwds)
 
 
 class Opt(Seq):
-    always_true: bool = True
     name: str = '_opt'
+
+    def __init__(self, elem: Atom):
+        super().__init__(elem, func_type=ParseTrue)
 
     def recipe_src(self) -> ParseSource: return self.gen.parse_opt
 
@@ -1362,7 +1475,9 @@ class Repeat(Seq):
 
 
 class Repeat0(Repeat):
-    always_true: bool = True
+
+    def __init__(self, elem: Atom):
+        super().__init__(elem, func_type=ParseTrue)
 
     def parse_args(self) -> Tuple[str, str]:
         return (self.gen.bool_value(False), )
@@ -1384,8 +1499,8 @@ class Gather(Seq):
 
     name = '_gather'
 
-    def __init__(self, separator: Plain, elem: Plain):
-        super().__init__(elem)
+    def __init__(self, separator: Atom, elem: Plain, **kwds):
+        super().__init__(elem, **kwds)
         self.separator = separator
         separator.name = '_sep'
 
@@ -1400,7 +1515,9 @@ class Gather(Seq):
 
 
 class Gather0(Gather):
-    always_true: bool = True
+
+    def __init__(self, separator: Atom, elem: Atom):
+        super().__init__(separator, elem, func_type=ParseTrue)
 
     def parse_args(self) -> Tuple[str, str]:
         return (Arg(inline=self.separator), self.gen.bool_value(False))
@@ -1431,8 +1548,10 @@ class Group(Primary):
 
     name = '_group'
 
-    def __init__(self, rhs: Rhs):
-        super().__init__()
+    def __init__(self, rhs: Rhs, typ: Type = None):
+        super().__init__(typ=self.make_proxy_type(rhs))
+        if typ:
+            self.return_type = typ.return_type
         self.rhs = rhs
         rhs.nested = True
 
@@ -1442,11 +1561,12 @@ class Group(Primary):
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
         func_name = self.rhs.parse_recipe.func_name
         src = ParseSource(
+            self.gen,
             func_name.name,
             self.rhs.parse_recipe.value_type(),
             #self.rhs.parse_recipe.params,
-            Params(),
-            func_type=ParseFunc.inline,
+            #Params(),
+            #func_type=ParseFunc.inline,
             )
         return ParseRecipeInline(self, self.name, src,
             inlines=[self.rhs],
@@ -1460,36 +1580,29 @@ class Group(Primary):
         return f"Group({self.rhs.__repr__()})"
 
 
-class OptGroup(Primary, Opt):
+class OptGroup(Opt):
     """ A lowest level parsed expression which wraps an arbitrary ParseExpr in square brackets.
     Same as an ordinary Group, except that the result is optional, and returns a sequence,
     either containing the parsed result or an empty sequence.
     Parsing an OptGroup always succeeds.
     """
 
-    always_true: bool = True
-    name = '_opt'
-
-    def __init__(self, rhs: Rhs):
-        super().__init__(rhs)
-        self.rhs = rhs
-
-    def __iter__(self) -> Iterator:
-        yield self.rhs
-
-    def make_parse_recipe(self, **kwds) -> ParseRecipe:
-        return super().make_parse_recipe(**kwds)
+    def __init__(self, rhs: Rhs, typ: Type = None):
+        super().__init__(Group(rhs, typ))
+        #super().__init__(typ=self.make_proxy_type(rhs))
+        #if typ: self.return_type = typ.return_type
+        #self.rhs = rhs
 
     def __str__(self) -> str:
-        return f"[{self.rhs.__str__()}]"
+        return f"[{self.elem.rhs}]"
 
     def __repr__(self) -> str:
-        return f"<OptGroup {self.rhs}>"
+        return f"<OptGroup {self.elem.rhs}>"
 
 
 class Leaf(Primary):
-    def __init__(self, value: Any):
-        super().__init__()
+    def __init__(self, value: Any, **kwds):
+        super().__init__(**kwds)
         self.value = value
 
     def __str__(self) -> str:
@@ -1528,20 +1641,61 @@ class NameLeaf(Leaf):
 
     args: Args
 
-    def __init__(self, name: Token, args: Optional[Args] = None):
+    def __init__(self, name: Token, args: list[Args] = []):
         super().__init__(ObjName(name))
-        self.args = args or NoArgs()
+        self.arg_lists = ArgsList(args)
         self.name = ObjName(f"_{self.value}")
 
-    def __iter__(self) -> Iterator[GrammarTree]:
+    def children(self) -> Iterator[GrammarTree]:
+        yield from super().children()
         yield self.value
-        yield self.args
+        yield self.arg_lists
 
     def pre_init(self) -> None:
         super().pre_init()
-        if self.value.string.startswith('_'):
+        self.src = self.get_src()
+        if str(self.value).startswith('_'):
             self.grammar_error(f"identifier {self.value} cannot start with an underscore.")
-        if not self.type: self.type = self.gen.default_type()
+        if self.isexternal():
+            self.type = self.src.type
+            self.func_type = self.src.func_type
+        else:
+            self.type = ProxyType([self.resolved], node=self)
+
+    def isexternal(self) -> bool:
+        return str(self.value).isupper()
+
+    def get_src(self) -> ParseSource:
+        name = self.value
+        if self.isexternal():
+            # The name is a type of token.
+
+            # Try a basic token name.
+            func_name: str = self.basic_parser_name()
+            if func_name:
+                return getattr(self.gen, f"parse{func_name}")
+
+            # Try some other token name.
+            tok_name: str = self.token_parser_name()
+            if tok_name:
+                return self.gen.parse_token
+
+            self.grammar_error(f"Token type {name} not recognized.")
+        else:
+            # The name is a rule, parameter, or variable.
+            resolved = self.resolved = self.resolve()
+            isrule = isinstance(resolved, Rule)
+            return ParseSource(
+                self.gen,
+                isrule and self.gen.rule_func_name(resolved) or self.value,
+                resolved.return_type,
+                #resolved.params,
+                func_type=(
+                    isrule and ParseFunc
+                    or ParseFunc
+                    ),
+                parent=self,
+                )
 
     def external_name(self) -> Optional[ObjName]:
         return self.basic_parser_name() or self.token_parser_name()
@@ -1563,66 +1717,61 @@ class NameLeaf(Leaf):
         """
         if self.external_name():
             return
-        resolved = self.resolve()
+        try: resolved = self.resolve()
+        except GrammarError: return
         # The name of a variable or parameter is used.
         if not isinstance(resolved, Rule):
             yield self.value
-        if self.args:
-            vis = TargetCodeVisitor(self.args)
+        if self.arg_lists.arg_lists:
+            vis = TargetCodeVisitor(self.arg_lists.arg_lists[0])
             item_names = vis.vars(self.local_env)
             yield from item_names
 
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
         name = self.value
-        if str(name).isupper():
+        try: src = self.src
+        except AttributeError: return None
+        if self.isexternal():
             # The name is a type of token.
 
             # Try a basic token name.
-            func_name: str = self.basic_parser_name()
-            if func_name:
-                return ParseRecipeInline(
-                    self, None, getattr(self.gen, f"parse{func_name}"),
-                    **kwds)
+            if self.basic_parser_name():
+                return ParseRecipeExternal(self, None, src, **kwds)
 
             # Try some other token name.
-            tok_name: str = self.token_parser_name()
-            if tok_name:
-                return ParseRecipeInline(
+            else:
+                return ParseRecipeExternal(
                     self, None, self.gen.parse_token,
                     f"{self.gen.token_types[name.string]}",
-                    **kwds)
-            self.grammar_error(f"Token type {name} not recognized.")
+                    **kwds,
+                    )
 
         # The name is a rule, parameter, or variable.
         resolved = self.resolve()
-        args = self.args
+        arg_lists = self.arg_lists
         isrule = isinstance(resolved, Rule)
         islocal = self.local_env.lookup(name) is resolved
         assert bool(isrule) != bool(islocal)
-        src = ParseSource(
-            isrule and self.gen.rule_func_name(resolved) or self.value,
-            resolved.type, resolved.params,
-            func_type=(
-                isrule and ParseFunc
-                or ParseNone
-                ),
-            **kwds,
-            )
-        if isrule and args.empty:
-            args = Args()
         # Validate the resolved parameters vs. the arguments.
-        params = resolved.params
-        if args.empty:
-            # No arguments, so there must be no parameters.
-            if params is not None:
-                self.grammar_error(f"Reference to name {resolved.string!r} requires argument list.")
-        elif params is None:
-            if not args.empty:
-                self.grammar_error(f"Reference to name {resolved.name.string!r} cannot have argument list.")
-        elif len(args) != len(params):
-            self.grammar_error(f"Reference to name {resolved.string!r} requires exactly {len(args)} arguments.")
+        # NOW: there are no arguments.  These are now in a Call parent.
+        args = NoArgs()
+        ####args = arg_lists.arg_lists and arg_lists.arg_lists[0] or NoArgs()
+        ####if isrule:
+        ####    params = resolved.type.params or Params()
+        ####    if not args: args = Args()
+        ####else:
+        ####    params = resolved.return_type.params
+
+        ####if not args:
+        ####    # No arguments, so there must be no parameters.
+        ####    if not params.empty:
+        ####        self.grammar_error(f"Reference to name {resolved.name.string!r} requires argument list.")
+        ####elif params is None:
+        ####    self.grammar_error(f"Reference to name {resolved.name.string!r} cannot have argument list.")
+        ####elif len(args) != len(params):
+        ####    self.grammar_error(f"Reference to name {resolved.name.string!r} requires exactly {len(args)} argument(s).")
         if islocal:
-            return ParseRecipeLocal(self, name, src, *self.args, func_type=ParseFunc, **kwds)
+            return ParseRecipeLocal(self, name, src, *args, func_type=ParseFunc, **kwds)
         elif isrule:
             return ParseRecipeRule(self, name, src, args, func_type=ParseFunc, **kwds)
         else:
@@ -1647,10 +1796,15 @@ class NameLeaf(Leaf):
 
         self.grammar_error(f"Undefined reference to name {name.string!r}.")
 
+    def show(self) -> str:
+        if self.value.string == "ENDMARKER":
+            return "$"
+        return ''.join((super().__str__(), * (args.show() for args in self.arg_lists.arg_lists)))
+
     def __str__(self) -> str:
         if self.value.string == "ENDMARKER":
             return "$"
-        return super().__str__() + str(self.args)
+        return ''.join((super().__str__(), * map(str, self.arg_lists.arg_lists)))
 
     def __repr__(self) -> str:
         return f"<NameLeaf {self.value}>"
@@ -1667,6 +1821,14 @@ class StringLeaf(Leaf):
         else:
             self.name = ObjName('_literal')
 
+    def pre_init(self) -> None:
+        super().pre_init()
+        src = self.src = (self.keyword_src()
+                          or self.soft_keyword_src()
+                          or self.literal_src()
+                          )
+        self.type = src.type
+
     @functools.cached_property
     def val(self) -> str:
         return ast.literal_eval(self.value)
@@ -1675,17 +1837,17 @@ class StringLeaf(Leaf):
     def is_keyword(self) -> bool:
         return bool(self.keyword_re.match(self.val))
 
-    def keyword_parser_name(self) -> Optional[ParseSource]:
+    def keyword_src(self) -> Optional[ParseSource]:
         """ If this is a regular keyword, return name of parser function. """
         if self.is_keyword and self.value.endswith("'"):
-            return self.gen.parse_token
+            return self.gen.parse_keyword
 
-    def soft_keyword_parser_name(self) -> Optional[ParseSource]:
+    def soft_keyword_src(self) -> Optional[ParseSource]:
         """ If this is a soft keyword, return name of parser function. """
         if self.is_keyword and not self.value.endswith("'"):
             return self.gen.parse_soft_keyword
 
-    def literal_parser_name(self) -> Optional[ParseSource]:
+    def literal_src(self) -> Optional[ParseSource]:
         """ If this is not a keyword, return name of parser function. """
         if not self.is_keyword:
             if self.val in self.gen.exact_tokens:
@@ -1696,28 +1858,25 @@ class StringLeaf(Leaf):
     def make_parse_recipe(self, **kwds) -> ParseRecipe:
 
         val = self.val
-        func_name = self.keyword_parser_name()
-        if func_name:
-            return ParseRecipeExternal(self, "_keyword", func_name, f"{self.gen.keywords[val]}",
-                comment=f"keyword = '{val}'",
-                func_type=ParseFunc,
-                **kwds,
-                )
-        func_name = self.soft_keyword_parser_name()
-        if func_name:
-            return ParseRecipeExternal(self, "_keyword", func_name, f"{self.value}",
-                comment=f"keyword = '{val}'",
-                func_type=ParseFunc,
-                **kwds,
-                )
-        func_name = self.literal_parser_name()
-        if func_name:
+        if self.keyword_src():
+            name = "_keyword"
+            arg = f"{self.gen.keywords[val]}"
+            comment = f"keyword = '{val}'"
+        elif self.soft_keyword_src():
+            name = "_keyword"
+            arg = f"{self.value}"
+            comment = f"keyword = '{val}'"
+        elif self.literal_src():
+            name = "_literal"
             type = self.gen.exact_tokens.get(val, val)
-            return ParseRecipeExternal(self, "_literal", func_name, f"{type!r}",
-                comment=f"token = \"{val}\"",
-                func_type=ParseFunc,
-                **kwds,
-                )
+            arg = f"{type!r}"
+            comment = f"keyword = '{val}'"
+
+        return ParseRecipeExternal(self, name, self.src, arg,
+            comment=comment,
+            func_type=ParseFunc,
+            **kwds,
+            )
 
     def __repr__(self) -> str:
         return f"StringLeaf({self.value!r})"
@@ -1769,7 +1928,10 @@ from pegen.parse_recipe import (
     ParseTrue,
     ParseData,
     ParseNone,
+    ParseVoid,
     )
 
-from pegen.target_code import Code, TargetCodeVisitor
+from pegen.target_code import Code, NoCode, NoValueCode, ValueCode, TargetCodeVisitor
+
+from pegen.expr_type import Type, ObjType, ProxyType, FuncType, NoType, Params, NoParams
 

@@ -10,7 +10,7 @@ _PyPegen_parse(Parser *_p)
     _p->soft_keywords = soft_keywords;
 
     // Run parser
-    _PyPegen_DECL_LOCAL_PARSE_RESULT(void *, result, );
+    _PyPegen_DECL_LOCAL(result, void *_type_result);
 
     result = NULL;
     if (_p->start_rule == Py_file_input) {
@@ -358,12 +358,12 @@ default[expr_ty]: '=' a=expression { a } | invalid_default
 if_stmt[stmt_ty]:
     | invalid_if_stmt
     | 'if' a=named_expression ':' b=block c=elif_stmt {
-        _PyAST_If(a, b, CHECK(asdl_stmt_seq*, _PyPegen_singleton_seq(_p, c)), EXTRA) }
+        _PyAST_If(a, b, _PyPegen_CHECK(_PyPegen_SINGLETON_SEQ(stmt, c)), EXTRA) }
     | 'if' a=named_expression ':' b=block c=[else_block] { _PyAST_If(a, b, c, EXTRA) }
 elif_stmt[stmt_ty]:
     | invalid_elif_stmt
     | 'elif' a=named_expression ':' b=block c=elif_stmt {
-        _PyAST_If(a, b, CHECK(asdl_stmt_seq*, _PyPegen_singleton_seq(_p, c)), EXTRA) }
+        _PyAST_If(a, b, _PyPegen_CHECK(_PyPegen_SINGLETON_SEQ(stmt, c)), EXTRA) }
     | 'elif' a=named_expression ':' b=block c=[else_block] { _PyAST_If(a, b, c, EXTRA) }
 else_block[asdl_stmt_seq*]:
     | invalid_else_stmt
@@ -447,7 +447,7 @@ match_stmt[stmt_ty]:
 
 subject_expr[expr_ty]:
     | value=star_named_expression ',' values=star_named_expressions? {
-        _PyAST_Tuple(CHECK(asdl_expr_seq*, _PyPegen_seq_insert_in_front(_p, value, values)), Load, EXTRA) }
+        _PyAST_Tuple(_PyPegen_CHECK(_PyPegen_SEQ_INSERT_IN_FRONT(expr, value, values)), Load, EXTRA) }
     | named_expression
 
 case_block[match_case_ty]:
@@ -551,11 +551,11 @@ sequence_pattern[pattern_ty]:
     | '[' patterns=maybe_sequence_pattern? ']' { _PyAST_MatchSequence(patterns, EXTRA) }
     | '(' patterns=open_sequence_pattern? ')' { _PyAST_MatchSequence(patterns, EXTRA) }
 
-open_sequence_pattern[asdl_seq*]:
-    | pattern=maybe_star_pattern ',' patterns=maybe_sequence_pattern? {
-        _PyPegen_seq_insert_in_front(_p, pattern, patterns) }
+open_sequence_pattern[asdl_pattern_seq*]:
+    | patt=maybe_star_pattern ',' patterns=maybe_sequence_pattern? {
+        _PyPegen_SEQ_INSERT_IN_FRONT(pattern, patt, patterns) }
 
-maybe_sequence_pattern[asdl_seq*]:
+maybe_sequence_pattern[asdl_pattern_seq*]:
     | patterns=','.maybe_star_pattern+ ','? { patterns }
 
 maybe_star_pattern[pattern_ty]:
@@ -632,8 +632,8 @@ keyword_pattern[KeyPatternPair*]:
 
 expressions[expr_ty]:
     | a=expression b=(',' c=expression { c })+ [','] {
-        _PyAST_Tuple(CHECK(asdl_expr_seq*, _PyPegen_seq_insert_in_front(_p, a, b)), Load, EXTRA) }
-    | a=expression ',' { _PyAST_Tuple(CHECK(asdl_expr_seq*, _PyPegen_singleton_seq(_p, a)), Load, EXTRA) }
+        _PyAST_Tuple(_PyPegen_CHECK(_PyPegen_SEQ_INSERT_IN_FRONT(expr, a, b)), Load, EXTRA) }
+    | a=expression ',' { _PyAST_Tuple(_PyPegen_CHECK(_PyPegen_SINGLETON_SEQ(expr, a)), Load, EXTRA) }
     | expression
 
 expression[expr_ty] (memo):
@@ -649,8 +649,8 @@ yield_expr[expr_ty]:
 
 star_expressions[expr_ty]:
     | a=star_expression b=(',' c=star_expression { c })+ [','] {
-        _PyAST_Tuple(CHECK(asdl_expr_seq*, _PyPegen_seq_insert_in_front(_p, a, b)), Load, EXTRA) }
-    | a=star_expression ',' { _PyAST_Tuple(CHECK(asdl_expr_seq*, _PyPegen_singleton_seq(_p, a)), Load, EXTRA) }
+        _PyAST_Tuple(_PyPegen_CHECK(_PyPegen_SEQ_INSERT_IN_FRONT(expr, a, b)), Load, EXTRA) }
+    | a=star_expression ',' { _PyAST_Tuple(_PyPegen_CHECK(_PyPegen_SINGLETON_SEQ(expr, a)), Load, EXTRA) }
     | star_expression
 
 star_expression[expr_ty] (memo):
@@ -676,14 +676,14 @@ named_expression[expr_ty]:
 disjunction[expr_ty] (memo):
     | a=conjunction b=('or' c=conjunction { c })+ { _PyAST_BoolOp(
         Or,
-        CHECK(asdl_expr_seq*, _PyPegen_seq_insert_in_front(_p, a, b)),
+        _PyPegen_CHECK(_PyPegen_SEQ_INSERT_IN_FRONT(expr, a, b)),
         EXTRA) }
     | conjunction
 
 conjunction[expr_ty] (memo):
     | a=inversion b=('and' c=inversion { c })+ { _PyAST_BoolOp(
         And,
-        CHECK(asdl_expr_seq*, _PyPegen_seq_insert_in_front(_p, a, b)),
+        _PyPegen_CHECK(_PyPegen_SEQ_INSERT_IN_FRONT(expr, a, b)),
         EXTRA) }
     | inversion
 
@@ -882,7 +882,8 @@ list[expr_ty]:
     | '[' a=[star_named_expressions] ']' { _PyAST_List(a, Load, EXTRA) }
 
 tuple[expr_ty]:
-    | '(' a=[y=star_named_expression ',' z=[star_named_expressions] { _PyPegen_seq_insert_in_front(_p, y, z) } ] ')' {
+    | '(' a=[y=star_named_expression ',' z=[star_named_expressions] {
+        _PyPegen_CHECK(_PyPegen_SEQ_INSERT_IN_FRONT(expr, y, z)) } ] ')' {
         _PyAST_Tuple(a, Load, EXTRA) }
 
 set[expr_ty]: '{' a=star_named_expressions '}' { _PyAST_Set(a, EXTRA) }
@@ -980,7 +981,7 @@ kwarg_or_double_starred[KeywordOrStarred*]:
 star_targets[expr_ty]:
     | a=star_target !',' { a }
     | a=star_target b=(',' c=star_target { c })* [','] {
-        _PyAST_Tuple(CHECK(asdl_expr_seq*, _PyPegen_seq_insert_in_front(_p, a, b)), Store, EXTRA) }
+        _PyAST_Tuple(_PyPegen_CHECK(_PyPegen_SEQ_INSERT_IN_FRONT(expr, a, b)), Store, EXTRA) }
 
 star_targets_list_seq[asdl_expr_seq*]: a[asdl_expr_seq*]=','.star_target+ [','] { a }
 
@@ -1289,7 +1290,7 @@ invalid_class_argument_pattern[asdl_pattern_seq*]:
     | [positional_patterns ','] keyword_patterns ',' a=positional_patterns { a }
 invalid_if_stmt:
     | 'if' named_expression NEWLINE { RAISE_SYNTAX_ERROR("expected ':'") }
-    | a='if' named_expression ':' NEWLINE !INDENT {
+    | 'if' a=named_expression ':' NEWLINE !INDENT {
         RAISE_INDENTATION_ERROR("expected an indented block after 'if' statement on line %d", a->lineno) }
 invalid_elif_stmt:
     | 'elif' named_expression NEWLINE { RAISE_SYNTAX_ERROR("expected ':'") }

@@ -56,7 +56,8 @@ from pegen.grammar import (
     TypedName,
 )
 
-from pegen.target_code import Code
+from pegen.target_code import Code, NoValueCode, ValueCode
+from pegen.expr_type import Type, ObjType, ProxyType, SubscrType, NoType
 from pegen.parse_recipe import ParseSource
 from pegen.tokenizer import TokenMatch, TokenLocations
 
@@ -65,8 +66,11 @@ class KeywordCollectorVisitor(GrammarVisitor):
     Constructor provides collection objects for the results.
     """
 
-    def __init__(self, keywords: Dict[str, int], soft_keywords: Set[str]):
+    def __init__(self, gen: ParserGenerator,
+                 keywords: Dict[str, int],
+                 soft_keywords: Set[str]):
         self.keywords = keywords
+        self.gen = gen
         self.soft_keywords = soft_keywords
 
     def visit_StringLeaf(self, node: StringLeaf) -> None:
@@ -74,7 +78,7 @@ class KeywordCollectorVisitor(GrammarVisitor):
         if re.match(r"[a-zA-Z_]\w*\Z", val):  # This is a keyword
             if node.value.endswith("'"):
                 if val not in self.keywords:
-                    self.keywords[val] = node.gen.keyword_type()
+                    self.keywords[val] = self.gen.keyword_type()
             else:
                 return self.soft_keywords.add(node.value.replace('"', ""))
 
@@ -140,21 +144,22 @@ class RuleCheckingVisitor(GrammarVisitor):
         params = name.params
         # If a rule name, then an empty args is same as not empty.
 
-        args = node.args
-        if params is None:
-            if args.empty: return
-            if name.name in self.rules and not len(args): return
+        arg_lists = node.arg_lists
+        if not params:
+            if not arg_lists: return
+            if name.name in self.rules and not len(arg_lists.arg_lists): return
             raise GrammarError(f"Calling {node}, no arguments allowed.")
-        if args.empty and not isinstance(name, Rule):
+        if not arg_lists and not isinstance(name, Rule):
             raise GrammarError(f"Calling {node}, arguments required.")
         nparams = len(params)
-        if len (args) != nparams:
+        if len (arg_lists.arg_lists[0]) != nparams:
             raise GrammarError(f"Calling {node}, requires exactly {nparams} arguments.")
 
 
 class TargetLanguageTraits(ABC):
     """ Methods of a ParserGenerator which vary with the target language. """
-    language: ClassVar[str]
+
+    language: ClassVar[str] = 'c'
 
     @abstractmethod
     def default_header(self) -> str: ...
@@ -181,6 +186,9 @@ class TargetLanguageTraits(ABC):
     def bool_type(self) -> str: ...
 
     @abstractmethod
+    def gen_subscr_type(self, val_type: str, *subs: Type) -> str: ...
+
+    @abstractmethod
     def str_value(self, value: bool) -> str: ...
 
     @abstractmethod
@@ -190,7 +198,7 @@ class TargetLanguageTraits(ABC):
     def parser_param(self) -> Param: ...
 
     @abstractmethod
-    def parse_result_ptr_arg(self, assigned_name: ObjName = None) -> Arg: ...
+    def parse_result_ptr_param(self, assigned_name: ObjName = None) -> Param: ...
 
     @abstractmethod
     def return_param(self) -> Param: ...
@@ -229,7 +237,7 @@ class TargetLanguageTraits(ABC):
     @dataclass
     class Action:
         expr: str           # Expression for the value of the action
-        type: str           # Expression for the type of the value.
+        type: Type          # Expression for the type of the value.
 
     @abstractmethod
     def gen_action(self, node: Alt) -> Action:
@@ -276,6 +284,8 @@ class ParserGenerator(ABC):
         ):
         self.grammar = grammar
         grammar._thread_vars.gen = self
+        self.parser = grammar._thread_vars.parser
+        self.parser.gen = self
         self.tokens = set(tokens.values())
         self.keywords: Dict[str, int] = {}
         self.soft_keywords: Set[str] = set()
@@ -312,6 +322,7 @@ class ParserGenerator(ABC):
         self.validate_rule_names()
         checker = RuleCheckingVisitor(self.rules, self.tokens, self)
         for rule in self.rules.values():
+            if rule._deleted: continue
             try: checker.visit(rule)
             except GrammarError: pass
 
@@ -358,11 +369,6 @@ class ParserGenerator(ABC):
             yield
         finally:
             self.level -= levels
-
-    break_lines: List[int] = [139, 141]
-    break_tokens: TokenMatch = TokenMatch('''
-        60, 34 - 39
-        ''')
 
     def print(self, *args: object, comment: str = None) -> None:
         if not (args or comment):
@@ -423,7 +429,7 @@ class ParserGenerator(ABC):
 
     def collect_keywords(self, rules: Dict[str, Rule]) -> None:
         self.keyword_counter = 499          # For keyword_type()
-        keyword_collector = KeywordCollectorVisitor(self.keywords, self.soft_keywords)
+        keyword_collector = KeywordCollectorVisitor(self, self.keywords, self.soft_keywords)
         for rule in rules.values():
             keyword_collector.visit(rule)
 
@@ -433,36 +439,33 @@ class ParserGenerator(ABC):
 
     def make_parser_name(
         self,
-        name: str, typ: str, *params: Tuple[str, str],
+        name: str, typ: str | Type, *params: Tuple[str, str],
         **kwds,
         ) -> ParseSource:
         return ParseSource(
-            name, Code(typ), Params(tuple(Param(TypedName(name, Code(type)))
-                                    for name, type in params)),
+            self,
+            name,
+            Type(typ,
+                 Params(tuple(Param(TypedName(name, typ))
+                              for name, type in params)),                 ),
             **kwds,
             )
 
-    # Older version, still used by Py generator
-    @staticmethod
-    def _make_parser_name(
-        name: str, typ: str, *params: Tuple[str, str], use_parser: bool = True,
-        ) -> TypedName:
-        return TypedName(
-            name, typ, Params(tuple(TypedName(name, type) for name, type in params)),
-            use_parser=use_parser
-            )
+    ## Older version, still used by Py generator
+    #@staticmethod
+    #def _make_parser_name(
+    #    name: str, typ: str, *params: Tuple[str, str], use_parser: bool = True,
+    #    ) -> TypedName:
+    #    return TypedName(
+    #        name, typ, Params(tuple(TypedName(name, type) for name, type in params)),
+    #        use_parser=use_parser
+    #        )
 
     def brk(self, delta: int = 0) -> bool:
         """ True if current output line + delta is in break_lines container.
         Used as a breakpoint condition with a debugger.
         """
-        return self.lineno() + delta in self.break_lines
-
-    def brk_token(self, node: GrammarTree) -> bool:
-        """ True if input range of given node matches with break_tokens matcher.
-        Used as a breakpoint condition with a debugger.
-        """
-        return self.break_tokens.match(node.locations)
+        return self.grammar.parser.brk(delta)
 
 
 class NullableVisitor(GrammarVisitor):
@@ -549,7 +552,7 @@ class InitialNamesVisitor(GrammarVisitor):
 
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Set[Any]:
         names: Set[str] = set()
-        for value in node:
+        for value in node.children():
             if isinstance(value, list):
                 for item in value:
                     names |= self.visit(item, *args, **kwargs)

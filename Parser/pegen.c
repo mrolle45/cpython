@@ -505,7 +505,7 @@ ParseStatus _PyPegen_parse_any_soft_keyword(Parser * p, ParseResultPtr * ppRes) 
         return true;
     }
     else
-    return false;
+        return false;
 }
 
 // Parse a specific soft keyword.
@@ -554,6 +554,15 @@ _PyPegen_lookahead(int positive, void *(func)(Parser *), Parser *p)
     void *res = (void*)func(p);
     p->mark = mark;
     return (res != NULL) == positive;
+}
+
+ParseStatus
+_PyPegen_parse_lookahead(Parser *p, ParseResultPtr * ppRes, ParseStatus positive, ParseFunc item)
+{
+    int mark = p->mark;
+    ParseStatus res = item(p, ppRes);
+    p->mark = mark;
+    return res == positive;
 }
 
 ParseStatus
@@ -683,7 +692,7 @@ _PyPegen_expect_soft_keyword(Parser *p, const char *keyword)
 // Optionally provide a separator item, which must be parsed between consecutive items.
 
 ParseStatus _PyPegen_parse_seq(Parser * p, ParseResultPtr * ppRes,
-    ParseFunc item, size_t item_size, ParseFunc * sep, int min, int max
+    ParseFunc item, size_t element_size, ParseFunc * sep, int min, int max
     ) {
     if (p->level == MAXSTACK) {
         p->error_indicator = 1;
@@ -697,6 +706,8 @@ ParseStatus _PyPegen_parse_seq(Parser * p, ParseResultPtr * ppRes,
     int _mark = p->mark;
     int _start_mark = p->mark;
     size_t _children_capacity = 0;
+    size_t element_size = ppRes->size;
+
     // _children contains the child results, all packed into a single buffer.
     char * _children = NULL;
     size_t _n = 0;
@@ -839,31 +850,40 @@ _PyPegen_name_from_token(Parser *p, Token* t)
 }
 
 expr_ty
-_PyPegen_name_token(Parser *p)
+_PyPegen_parse_name_token(Parser *p)
 {
     Token *t = _PyPegen_expect_token(p, NAME);
     return _PyPegen_name_from_token(p, t);
 }
 
 Token*
-_PyPegen_string_token(Parser* p)
+_PyPegen_parse_string(Parser* p)
 {
     return _PyPegen_expect_token(p, STRING);
 }
 
 Token*
-_PyPegen_type_comment_token(Parser* p)
+_PyPegen_parse_type_comment(Parser* p)
 {
     return _PyPegen_expect_token(p, TYPE_COMMENT);
 }
 
 Token *
-_PyPegen_op_token(Parser* p)
+_PyPegen_parse_op_token(Parser* p)
 {
     return _PyPegen_expect_token(p, OP);
 }
 
-expr_ty _PyPegen_soft_keyword_token(Parser *p) {
+expr_ty
+_PyPegen_parse_name_token(Parser *p)
+{
+    Token *t = _PyPegen_expect_token(p, NAME);
+    return _PyPegen_name_from_token(p, t);
+}
+
+expr_ty
+_PyPegen_parse_soft_keyword_token(Parser *p)
+{
     Token *t = _PyPegen_expect_token(p, NAME);
     if (t == NULL) {
         return NULL;

@@ -332,8 +332,8 @@ def build_python_parser_and_generator(
             # Let the nodes in the grammar know the state of the input file
             #   in their constructors.
             GrammarTree.set_parser(parser)
-            grammar = parser._get_val(parser.start())
-            if not grammar:
+            grammar, valid = parser.start()
+            if not valid:
                 tokenizer.dump(10)
 
             gen: ParserGenerator = PythonParserGenerator(grammar, result, verbose=verbose_parser)

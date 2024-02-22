@@ -18,21 +18,33 @@ class Code(GrammarTree):
     The str() representation concatenates the tokens with appropriate spacing.
     If constructed with expand = True (the default), then macro replacement happens.
     """
-    def __new__(cls, tokens: list[Token] | str | None, expand: bool = True):
+    def __new__(cls, tokens: list[Token] | str = None, expand: bool = True, **kwds):
         if tokens is None:
             return None
         return super().__new__(cls)
 
-    def __init__(self, tokens: list[Token] | str, expand: bool = True):
-        super().__init__()
+    def __init__(self, tokens: list[Token] | str, expand: bool = True, **kwds):
+        self.expand = expand
         if isinstance(tokens, str):
             # Tokenize the string
             tokens = _tokenize(tokens)
-        self.expand = expand
+        if isinstance(tokens, Code):
+            # Use tokens from Code
+            tokens = tokens.tokens
         self.tokens = tokens
+        super().__init__(**kwds)
         assert all(type(token) is Token for token in tokens)
 
+    def __bool__(self) -> bool: return bool(self.tokens)
+
+    def __contains__(self, name: str) -> bool:
+        """ Does self contain any Token with given name? """
+        for token in self.tokens:
+            if token.string == name: return True
+        return False
+
     def pre_init(self):
+        super().pre_init()
         # Expand tokens with macros (if desired).
         if self.expand:
             self.tokens = list(self.do_expand(*self.tokens))
@@ -108,6 +120,50 @@ class Code(GrammarTree):
                         if not my_val or val is my_val:
                             yield ObjName(name)
 
+
+class NoCode(Code):
+    """ Specialized Code with no tokens, and tests false. """
+    def __new__(cls):
+        return super().__new__(cls, [])
+
+    def __init__(self):
+        super().__init__([])
+
+    def __bool__(self) -> bool: return False
+
+    def __repr__(self) -> str: return "<no code>"
+
+
+class ValueCode(Code):
+    """ A Code which is found in an annotation, denoting a value type. """
+    has_value: bool = True
+
+
+class NoValueCode(ValueCode):
+    """ A Code which is found in an annotation, denoting NO value type.
+    Tests as true.
+    """
+    has_value: bool = False
+
+    def __new__(cls):
+        return super().__new__(cls, [])
+
+    def __init__(self):
+        super().__init__([])
+
+    def __bool__(self) -> bool: return True
+
+    def pre_init(self):
+        super().pre_init()
+        super().__init__(self.gen.no_value_type())
+
+    def __str__(self) -> str:
+        return super().__str__() or "no value"
+
+    def __repr__(self) -> str:
+        res = super().__str__()
+        return res and f"<ValueCode {res}>" or "<no value>"
+
 class TargetCodeVisitor(GrammarVisitor):
     """ Visitor that collects all the target code items in a GrammarTree.
     Object Codes (from arguments and actions) and type Codes (from annotations) are separate.
@@ -151,7 +207,7 @@ class TargetCodeVisitor(GrammarVisitor):
         return set(chain(*(code.iter_vars(env) for code in self.objs)))
 
     def visit_Alt(self, tree: Alt) -> None:
-        self.add_type(tree.type)
+        self.add_type(tree.val_type)
         self.add_obj(tree.action)
         self.generic_visit(tree)
 
@@ -160,14 +216,14 @@ class TargetCodeVisitor(GrammarVisitor):
         self.generic_visit(tree)
 
     def visit_TypedName(self, tree: TypedName) -> None:
-        self.add_type(tree.type)
+        self.add_type(tree.val_type)
         self.generic_visit(tree)
 
     def add_obj(self, code: Code) -> None:
         if code: self.objs.add(code)
 
-    def add_type(self, code: Code) -> None:
-        if code: self.types.add(code)
+    def add_type(self, typ: Code) -> None:
+        if typ: self.types.add(typ)
 
 def _tokenize(text: str) -> list[Token]:
     """ Separate given string into Tokens and return list of them. """

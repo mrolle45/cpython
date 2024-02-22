@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os.path
 import token
-from typing import IO, Any, Dict, List, Optional, Sequence, Set, Text, Tuple, Type, Iterable
+#from typing import IO, Any, Dict, List, Optional, Sequence, Set, Text, Tuple, Type, Iterable
 from dataclasses import dataclass, field, replace
 from abc import abstractmethod
 import re
@@ -37,6 +37,7 @@ from pegen.grammar import (
 from pegen import parse_recipe
 from pegen.parser import Parser, ParseResult, Token
 from pegen.parser_generator import *
+from pegen.expr_type import ObjType
 
 
 class InvalidNodeVisitor(GrammarVisitor):
@@ -124,8 +125,17 @@ class _Traits(TargetLanguageTraits):
     def comment_leader(self) -> str:
         return '# '
 
-    def default_type(self, type: str = None) -> Code:
-        return type or Code('Any')
+    def default_type(self, typ: Type = None) -> ValueCode:
+        return ValueCode('Any') 
+
+    def bool_type(self) -> ValueCode: return ValueCode('bool')
+
+    def gen_subscr_type(self, val_type: str, *subs: Type) -> str:
+        """ How the value type, with subscripts, appears in target languge. """
+        return f"{val_type}[{', '.join([str(sub) for sub in subs])}]"
+
+    def circular_type(self) -> ValueCode:
+        return ValueCode('CircularType')
 
     def default_value(self) -> str:
         return 'None'
@@ -133,15 +143,18 @@ class _Traits(TargetLanguageTraits):
     def default_params(self, params: str = None) -> str:
         return ''
 
+    def no_value_type(self) -> str:
+        return 'None'
+
     def parser_param(self) -> TypedName:
-        return TypedName('_p', Code('Parser'))
+        return TypedName('_p', 'Parser')
 
     def parse_result_ptr_arg(self, assigned_name: ObjName = None) -> Arg:
         return
 
     def return_param(self, type: str = None) -> TypedName:
         if not type: type = self.default_type()
-        return TypedName('_ppRes', Code(f'{self.default_type(type)}'))
+        return TypedName('_ppRes', self.default_type(type))
 
     def inline_params(self, type: str = None) -> Params:
         return None
@@ -155,16 +168,18 @@ class _Traits(TargetLanguageTraits):
     def bool_value(self, value: bool) -> str:
         return f"{bool(value)}"
 
-    def bool_type(self) -> str: return Code('bool')
-
     def str_value(self, value: bool) -> str:
         return value.replace('"', r'\"')
 
     def parse_result_ptr_param(self, assigned_name: str = None) -> Param:
         name = assigned_name and f"&_ptr_{assigned_name}" or "_ppRes"
-        return Param(TypedName(name, Code('ParseResultPtr *')))
+        return Param(TypedName(name, 'ParseResultPtr *'))
 
-    def parse_func_params(self, name: TypedName = None) -> Params: ...
+    def parse_func_params(self, name: TypedName = None) -> Params:
+        return Params()
+
+    def parse_func_args(self, name: TypedName) -> Args:
+        return Args()
 
     def rule_func_name(self, rule: Rule) -> ObjName: ...
 
@@ -176,8 +191,7 @@ class _Traits(TargetLanguageTraits):
             func_type=ParseFunc,
             extra=lambda: self.gen_rule(rule),
             inlines = [rule.rhs],
-            value_type=rule.type,
-            use_inline=False,           # Call as parser method.
+            value_type=rule.val_type,
             )
 
     def sequence_recipe_args(self, seq: Seq, *seq_args: Args) -> Args:
@@ -191,16 +205,22 @@ class _Traits(TargetLanguageTraits):
             *seq_args,
             ])
 
-    def default_func_type(self) -> ParseFunc:
-        return ParseFunc
+    def format_parse_call(self, call: ParseCall) -> str:
+        name = call.name
+        func_type = call.func_type
+        recipe = call.parent
+        if func_type and func_type.use_parser and recipe.mode is not recipe.Inl:
+            name = f"self.{name}"
+
+        return f"{name}{call.args or '()'}"
 
     def parse_value_expr(
-            self, name: ObjName, args: Args, params: Params, *,
-            func_type: Type[FuncBase] = None,
+            self, recipe: ParseRecipe, name: ObjName, args: Args, params: Params, *,
+            func_type: ParseFuncType = None,
             assigned_name: ObjName = None,
         ) -> str:
         """ An expression which produces the desired parse result. """
-        if func_type and func_type.use_parser and not func_type.nested:
+        if func_type and func_type.use_parser and recipe.mode is not recipe.Inl:
             name = f"self.{name}"
         return f"{name}{args}"
 
@@ -211,20 +231,29 @@ class _Traits(TargetLanguageTraits):
         self.print("tok: Token = self._tokenizer.peek()")
         self.print("start_lineno, start_col_offset = tok.start")
 
-    def gen_action(self, node: Alt) -> str:
+    def gen_action(self, alt: Alt) -> Action:
         """ String to be generated in a return statement in the Alt. """
-        action = node.action
+        action = str(alt.action)
+        typ: Type = Type(self.default_type())
         if not action:
-            if not node.items:
+            if not alt.items():
                 action = "True"
-            elif self.invalidvisitor.visit(node):
+            elif self.invalidvisitor.visit(alt):
                 action = "UNREACHABLE"
             else:
-                names = [str(var.assigned_name) for var in node.all_vars()]
-                if len(names) == 1:
-                    action = names[0]
+                vars = alt.default_action_vars()
+                names = [str(var.name) for var in vars]
+                if len(names) <= 1:
+                    if names:
+                        action = names[0]
+                        typ = ProxyType([vars[0]], node=alt)
+                    else:
+                        action = "True"
+                        typ = self.bool_type()
                 else:
                     action = f"[{', '.join(names)}]"
+                    typ = Type(ValueCode('list'))
+
         elif "LOCATIONS" in action:
             # The start location variables have already been set by self.gen_start()
             self.print("tok = self._tokenizer.get_last_non_whitespace_token()")
@@ -234,7 +263,7 @@ class _Traits(TargetLanguageTraits):
         if "UNREACHABLE" in action:
             action = action.replace("UNREACHABLE", self.unreachable_formatting)
 
-        return action
+        return self.Action(action, typ)
 
     def forward_declare_inlines(self, recipe: ParseRecipe) -> None:
         pass
@@ -243,29 +272,88 @@ class _Traits(TargetLanguageTraits):
         """ Code to define inherited names and set their values stored in the parser. """
         return
 
-    def enter_function(
-            self, name: TypedName,
-            func_type: ParseFunc,
+    def enter_function(self, recipe: ParseRecipe,
             comment: str = ''
         ) -> Iterator:
         return self.enter_scope(
-            self.decl_func(name, func_type),
+            self.decl_func(recipe),
             comment=comment
             )
 
-    def decl_func(self, func: TypedName, func_type: ParseFunc) -> str:
+    def format_params(
+        self, params: Params,
+        brackets: str = '()',
+        hide_names: bool = False,
+        hide_param_names: bool = False,
+        ) -> str:
+        """ A parameter list, with optional () or other brackets. """
+        parts: list[str] = []
+        for param in params:
+            parts.append(self.format_typed_name
+                (param,
+                    hide_names=hide_names,
+                    hide_param_names=hide_param_names,
+                    )
+                )
+        return f"{brackets[:1]}{', '.join(parts)}{brackets[1:]}"
+
+    def format_typed_name(self, name: TypedName, **kwds) -> str:
+        """ A C declaration for a variable, typedef or function parameter. """
+        return self.format_type_and_name(name.type, name.name, **kwds)
+
+    def format_type_and_name(
+            self,
+            typ: Type,
+            name: ObjName = None,
+            ptr: bool = False,                  # Declare as pointer to type.  Functions are always pointers.
+            hide_names: bool = False,           # Names hidden at all depths.
+            hide_param_names: bool = False,     # Names of function params hidden at all depths.`
+        ) -> str:
+        """ A C declaration for a variable or a function parameter. """
+        decl: str = ''
+        if typ.callable:
+            # Build the declarator expression, possibly at multiple levels.
+            # The first parameter list is the innermost.
+            # All parameters are formatted recursively
+            if not hide_names:
+                decl = str(name)
+            for params in typ.param_lists():
+                # Wrap each declarator level in (* ... )(params)
+                params_str = self.format_params(
+                    params, hide_names=hide_names or hide_param_names)
+                decl = f"(*{decl}){params_str}"
+        else:
+            if ptr:
+                decl = '*'
+            if not hide_names:
+                decl += str(name)
+
+        if typ.val_type:
+            decl = f"{typ.val_type} {decl}"
+        return decl
+
+    def decl_func(self, recipe: ParseRecipe
+            #func: TypedName,
+            #func_type: ParseFunc,
+            #node: ParseExpr,
+        ) -> str:
         """ The declaration of a callable name (without the value), as a function.
         The variable is a function (not a function pointer), including function parameters.
         """
+        func = recipe.func_name
+        func_type = recipe.node.func_type
         assert func.params and func.name
-        type = str(func.type)
-        if func_type.has_result:
-            type = f"ParseResult[{type}]"
+        if func.val_type.has_value:
+            typ = f"ParseResult[{func.val_type}]"
+        elif not recipe.node.func_type.always_true:
+            typ = 'ParseStatus'
+        else:
+            typ = 'None'
         name = func.name
         params = func.params
-        if func_type.use_parser and not func_type.nested:
-            params = Params([Param(TypedName('self', Code(''))), *params])
-        return f"def {name}({ObjName(params.in_func())}) -> {type}:"
+        if func_type.use_parser and isinstance(recipe.node, Rule):
+            params = Params([Param(TypedName('self', '')), *params])
+        return f"def {name}{ObjName(params.in_func())} -> {typ}:"
 
     def fix_parse_recipe(self, recipe: ParseRecipe) -> None:
         recipe.expr_name = recipe.src.name or recipe.name
@@ -276,7 +364,7 @@ class _Traits(TargetLanguageTraits):
         recipe.func_name = TypedName(
             func_name,
             recipe.outer_call.type,
-            recipe.params)
+            )
         recipe.outer_call.name = ObjName(func_name)
 
     def parse_recipe(self, recipe: ParseRecipe, **kwds) -> None:
@@ -301,13 +389,13 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         unreachable_formatting: Optional[str] = None,
         verbose: bool = False,
     ):
+        self.invalidvisitor: InvalidNodeVisitor = InvalidNodeVisitor()
         super().__init__(grammar, tokens, exact_tokens, set(), file)
         # The Python generator doesn't have a choice of Tokens file, like the C generator has.
         # It always uses Parser/Tokens, and this is incorporated into the tokens module when the library is built.
         self.exact_tokens = exact_tokens
         self.non_exact_tokens = set(tokens) - set(exact_tokens)
         self.token_types = {name: type for type, name in token.tok_name.items()}
-        self.invalidvisitor: InvalidNodeVisitor = InvalidNodeVisitor()
         self.unreachable_formatting = unreachable_formatting or "None  # pragma: no cover"
         self.location_formatting = (
             location_formatting
@@ -345,7 +433,7 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
 
                 self.print()
                 self.print(f"KEYWORDS = {tuple(self.keywords)}")
-                self.print(f"SOFT_KEYWORDS = {tuple(self.soft_keywords)}")
+                self.print(f"SOFT_KEYWORDS = {tuple(sorted(self.soft_keywords, key=str))}")
 
     def gen_rule(self, rule: Rule) -> None:
         """ Generate extra code inside a Rule parse function. """
@@ -355,7 +443,9 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         self, alt: Alt, **kwds
         ) -> str:
         # Generate a function for each item, using the corresponding variable name
-        fail_value = self.default_value()
+        fail_value = (
+            alt.val_type.has_value and self.default_value()
+            or self.bool_value(False))
         for item in alt.items():
             self.print()
             self.print(comment=f"{item}")
@@ -364,7 +454,10 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         self.print()
         self.print(comment="parse succeeded")
 
-        action = f"return {self.gen_action(alt)},"
+        if alt.val_type and not alt.val_type.has_value:
+            action = "return True"
+        else:
+            action = f"return {alt.action},"
         return action
 
 
@@ -380,25 +473,30 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         name = item.assigned_name
 
         item_type = item.parse_recipe.outer_call.type
-        var_type = item_type
+        var_type = item_type.val_type
         rawname = f"_result_{name}"
-        rawtype = f"ParseResult[{item_type}]"
+        rawtype = f"ParseResult[{var_type}]"
         fail_value = fail_value or self.default_value()
         self.gen_parse(item.parse_recipe)
         parse_name = item.parse_recipe.outer_call.name
-        if item.parse_recipe.outer_call.func_type.always_true:
-            if item.parse_recipe.outer_call.func_type.has_result:
+        if item.parse_recipe.node.func_type.always_true:
+            if item.val_type.has_value:
                 self.print(f"{name}: {var_type}")
                 self.print(f"{name}, = {parse_name}()")
             else:
                 self.print(f"{parse_name}()")
-        elif not item.parse_recipe.outer_call.func_type.has_result:
-            self.print(f"if not {parse_name}(): return {fail_value}")
+        elif not item.val_type.has_value:
+            self.print(f"if not {parse_name}():")
+            with self.indent(): self.print(f"return {fail_value}")
+        elif not item_type.val_type.has_value:
+            self.print(f"if not {parse_name}():")
+            with self.indent(): self.print(f"return {fail_value}")
 
         else:
             self.print(f"{name}: {var_type}; {rawname}: {rawtype}")
             self.print(f"{rawname} = {parse_name}()")
-            self.print(f"if not {rawname}: return {fail_value}")
+            self.print(f"if not {rawname}:")
+            with self.indent(): self.print(f"return {fail_value}")
             self.print(f"{name}, = {rawname}")
 
     def alts_uses_locations(self, alts: Sequence[Alt]) -> bool:
@@ -451,20 +549,17 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         return_type = recipe.src.type
         if isinstance(recipe.node, Rule):
             return_type = recipe.node.type
-        with self.enter_function(
-            recipe.func_name,
-            recipe.func_type,
-            ):
+        with self.enter_function(recipe):
             for inline in recipe.inline_recipes():
                 # Expand the inline items.
                 self.gen_node(inline.node)
-            call: str | None = None
+            call: str = None
             if recipe.extra:
                 call = recipe.extra()
             if call is None:
                 # Was not supplied by extra()
                 call = recipe.value_expr()
-                if recipe.func_type.returns_status:
+                if recipe.node.func_type.returns_status:
                     call = f"return {call}"
                 if recipe.comment:
                     call = f"{call}   {self.comment(recipe.comment)}"
@@ -521,6 +616,11 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         '_string', 'Token'
         )
     @functools.cached_property
+    def parse_CHAR(self) -> TypedName:
+        return self.make_parser_name(
+        '_char', 'Token'
+        )
+    @functools.cached_property
     def parse_OP(self) -> TypedName:
         return self.make_parser_name(
         '_op', 'Token'
@@ -559,40 +659,43 @@ class PythonParserGenerator(ParserGenerator, _Traits, GrammarVisitor):
         '_expect_name', 'Token', ('name', 'str')
         )
     def parse_repeat(self, elem: ParseExpr) -> TypedName:
+        typ = SubscrType(ValueCode('list'), elem.return_type)
+        typ.initialize(elem)
         return self.make_parser_name(
-            '_repeat', f'list[{elem.parse_recipe.outer_call.type}]',
+            '_repeat', f'{typ}',
+            #'_repeat', f'list[{elem.val_type}]',
             ('item', 'Callable[[], ParseResult]'),
             ('repeat1', 'int'),
         )
     def parse_gather(self, elem: ParseExpr) -> TypedName:
         return self.make_parser_name(
-            '_gather', f'list[{elem.parse_recipe.outer_call.type}]',
+            '_gather', f'list[{elem.val_type}]',
             ('item', 'Callable[[], ParseResult]'),
             ('sep', 'Callable[[], ParseResult]'),
             ('repeat1', 'int'),
         )
     def parse_opt(self, elem: ParseExpr) -> TypedName:
         return self.make_parser_name(
-            '_opt', f'list[{elem.parse_recipe.outer_call.type}]',
+            '_opt', f'OptVal[{elem.val_type}]',
             ('item', 'Callable[[], ParseResult]'),
         )
     @functools.cached_property
-    def parse_group(self) -> TypedName:
+    def parse_group(self) -> ParseSource:
         return self.make_parser_name(
             '_rhs', 'Any',
             ('rhs', 'Callable[[], ParseResult]'),
         )
     @functools.cached_property
-    def parse_lookahead(self) -> TypedName:
+    def parse_lookahead(self) -> ParseSource:
         return self.make_parser_name(
-            '_lookahead', 'ParseStatus',
+            '_lookahead', NoValueCode(),
             ('positive', 'bool'),
             ('atom', 'Callable[[], ParseResult]'),
         )
     @functools.cached_property
-    def parse_cut(self) -> TypedName:
+    def parse_cut(self) -> ParseSource:
         return self.make_parser_name(
-            '_cut', None,
+            '_cut', NoValueCode(),
             func_type=parse_recipe.ParseVoid,
         )
 

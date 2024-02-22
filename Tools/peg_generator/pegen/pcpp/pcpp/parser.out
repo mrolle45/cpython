@@ -1,0 +1,3383 @@
+Created by PLY version 3.11 (http://www.dabeaz.com/ply)
+
+Grammar
+
+Rule 0     S' -> expression
+Rule 1     expression -> CPP_INTEGER
+Rule 2     expression -> CPP_CHAR
+Rule 3     expression -> CPP_STRING
+Rule 4     expression -> CPP_LESS expression CPP_GREATER
+Rule 5     expression -> CPP_LPAREN expression CPP_RPAREN
+Rule 6     expression -> CPP_PLUS expression
+Rule 7     expression -> CPP_MINUS expression
+Rule 8     expression -> CPP_EXCLAMATION expression
+Rule 9     expression -> CPP_TILDE expression
+Rule 10    expression -> expression CPP_STAR expression
+Rule 11    expression -> expression CPP_FSLASH expression
+Rule 12    expression -> expression CPP_PERCENT expression
+Rule 13    expression -> expression CPP_PLUS expression
+Rule 14    expression -> expression CPP_MINUS expression
+Rule 15    expression -> expression CPP_LSHIFT expression
+Rule 16    expression -> expression CPP_RSHIFT expression
+Rule 17    expression -> expression CPP_LESS expression
+Rule 18    expression -> expression CPP_LESSEQUAL expression
+Rule 19    expression -> expression CPP_GREATER expression
+Rule 20    expression -> expression CPP_GREATEREQUAL expression
+Rule 21    expression -> expression CPP_EQUALITY expression
+Rule 22    expression -> expression CPP_INEQUALITY expression
+Rule 23    expression -> expression CPP_AMPERSAND expression
+Rule 24    expression -> expression CPP_HAT expression
+Rule 25    expression -> expression CPP_BAR expression
+Rule 26    expression -> expression CPP_LOGICALAND expression
+Rule 27    expression -> expression CPP_LOGICALOR expression
+Rule 28    expression -> expression CPP_COMMA expression
+Rule 29    expression -> expression CPP_QUESTION expression CPP_COLON expression
+Rule 30    expression -> CPP_ID CPP_LPAREN expression CPP_RPAREN
+Rule 31    expression -> CPP_ID
+
+Terminals, with rules where they appear
+
+CPP_AMPERSAND        : 23
+CPP_BAR              : 25
+CPP_CHAR             : 2
+CPP_COLON            : 29
+CPP_COMMA            : 28
+CPP_EQUALITY         : 21
+CPP_EXCLAMATION      : 8
+CPP_FSLASH           : 11
+CPP_GREATER          : 4 19
+CPP_GREATEREQUAL     : 20
+CPP_HAT              : 24
+CPP_ID               : 30 31
+CPP_INEQUALITY       : 22
+CPP_INTEGER          : 1
+CPP_LESS             : 4 17
+CPP_LESSEQUAL        : 18
+CPP_LOGICALAND       : 26
+CPP_LOGICALOR        : 27
+CPP_LPAREN           : 5 30
+CPP_LSHIFT           : 15
+CPP_MINUS            : 7 14
+CPP_PERCENT          : 12
+CPP_PLUS             : 6 13
+CPP_QUESTION         : 29
+CPP_RPAREN           : 5 30
+CPP_RSHIFT           : 16
+CPP_STAR             : 10
+CPP_STRING           : 3
+CPP_TILDE            : 9
+error                : 
+
+Nonterminals, with rules where they appear
+
+expression           : 4 5 6 7 8 9 10 10 11 11 12 12 13 13 14 14 15 15 16 16 17 17 18 18 19 19 20 20 21 21 22 22 23 23 24 24 25 25 26 26 27 27 28 28 29 29 29 30 0
+
+Parsing method: LALR
+
+state 0
+
+    (0) S' -> . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 1
+
+state 1
+
+    (0) S' -> expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+    CPP_HAT         shift and go to state 26
+    CPP_BAR         shift and go to state 27
+    CPP_LOGICALAND  shift and go to state 28
+    CPP_LOGICALOR   shift and go to state 29
+    CPP_COMMA       shift and go to state 30
+    CPP_QUESTION    shift and go to state 31
+
+
+state 2
+
+    (1) expression -> CPP_INTEGER .
+
+    CPP_STAR        reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_FSLASH      reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_PERCENT     reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_PLUS        reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_MINUS       reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_LSHIFT      reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_RSHIFT      reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_LESS        reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_LESSEQUAL   reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_GREATER     reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_GREATEREQUAL reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_EQUALITY    reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_INEQUALITY  reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_AMPERSAND   reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_HAT         reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_BAR         reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_LOGICALAND  reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_LOGICALOR   reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_COMMA       reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_QUESTION    reduce using rule 1 (expression -> CPP_INTEGER .)
+    $end            reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_RPAREN      reduce using rule 1 (expression -> CPP_INTEGER .)
+    CPP_COLON       reduce using rule 1 (expression -> CPP_INTEGER .)
+
+
+state 3
+
+    (2) expression -> CPP_CHAR .
+
+    CPP_STAR        reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_FSLASH      reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_PERCENT     reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_PLUS        reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_MINUS       reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_LSHIFT      reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_RSHIFT      reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_LESS        reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_LESSEQUAL   reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_GREATER     reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_GREATEREQUAL reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_EQUALITY    reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_INEQUALITY  reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_AMPERSAND   reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_HAT         reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_BAR         reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_LOGICALAND  reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_LOGICALOR   reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_COMMA       reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_QUESTION    reduce using rule 2 (expression -> CPP_CHAR .)
+    $end            reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_RPAREN      reduce using rule 2 (expression -> CPP_CHAR .)
+    CPP_COLON       reduce using rule 2 (expression -> CPP_CHAR .)
+
+
+state 4
+
+    (3) expression -> CPP_STRING .
+
+    CPP_STAR        reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_FSLASH      reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_PERCENT     reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_PLUS        reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_MINUS       reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_LSHIFT      reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_RSHIFT      reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_LESS        reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_LESSEQUAL   reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_GREATER     reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_GREATEREQUAL reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_EQUALITY    reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_INEQUALITY  reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_AMPERSAND   reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_HAT         reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_BAR         reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_LOGICALAND  reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_LOGICALOR   reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_COMMA       reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_QUESTION    reduce using rule 3 (expression -> CPP_STRING .)
+    $end            reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_RPAREN      reduce using rule 3 (expression -> CPP_STRING .)
+    CPP_COLON       reduce using rule 3 (expression -> CPP_STRING .)
+
+
+state 5
+
+    (4) expression -> CPP_LESS . expression CPP_GREATER
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 32
+
+state 6
+
+    (5) expression -> CPP_LPAREN . expression CPP_RPAREN
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 33
+
+state 7
+
+    (6) expression -> CPP_PLUS . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 34
+
+state 8
+
+    (7) expression -> CPP_MINUS . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 35
+
+state 9
+
+    (8) expression -> CPP_EXCLAMATION . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 36
+
+state 10
+
+    (9) expression -> CPP_TILDE . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 37
+
+state 11
+
+    (30) expression -> CPP_ID . CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> CPP_ID .
+
+    CPP_LPAREN      shift and go to state 38
+    CPP_STAR        reduce using rule 31 (expression -> CPP_ID .)
+    CPP_FSLASH      reduce using rule 31 (expression -> CPP_ID .)
+    CPP_PERCENT     reduce using rule 31 (expression -> CPP_ID .)
+    CPP_PLUS        reduce using rule 31 (expression -> CPP_ID .)
+    CPP_MINUS       reduce using rule 31 (expression -> CPP_ID .)
+    CPP_LSHIFT      reduce using rule 31 (expression -> CPP_ID .)
+    CPP_RSHIFT      reduce using rule 31 (expression -> CPP_ID .)
+    CPP_LESS        reduce using rule 31 (expression -> CPP_ID .)
+    CPP_LESSEQUAL   reduce using rule 31 (expression -> CPP_ID .)
+    CPP_GREATER     reduce using rule 31 (expression -> CPP_ID .)
+    CPP_GREATEREQUAL reduce using rule 31 (expression -> CPP_ID .)
+    CPP_EQUALITY    reduce using rule 31 (expression -> CPP_ID .)
+    CPP_INEQUALITY  reduce using rule 31 (expression -> CPP_ID .)
+    CPP_AMPERSAND   reduce using rule 31 (expression -> CPP_ID .)
+    CPP_HAT         reduce using rule 31 (expression -> CPP_ID .)
+    CPP_BAR         reduce using rule 31 (expression -> CPP_ID .)
+    CPP_LOGICALAND  reduce using rule 31 (expression -> CPP_ID .)
+    CPP_LOGICALOR   reduce using rule 31 (expression -> CPP_ID .)
+    CPP_COMMA       reduce using rule 31 (expression -> CPP_ID .)
+    CPP_QUESTION    reduce using rule 31 (expression -> CPP_ID .)
+    $end            reduce using rule 31 (expression -> CPP_ID .)
+    CPP_RPAREN      reduce using rule 31 (expression -> CPP_ID .)
+    CPP_COLON       reduce using rule 31 (expression -> CPP_ID .)
+
+
+state 12
+
+    (10) expression -> expression CPP_STAR . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 39
+
+state 13
+
+    (11) expression -> expression CPP_FSLASH . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 40
+
+state 14
+
+    (12) expression -> expression CPP_PERCENT . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 41
+
+state 15
+
+    (13) expression -> expression CPP_PLUS . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 42
+
+state 16
+
+    (14) expression -> expression CPP_MINUS . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 43
+
+state 17
+
+    (15) expression -> expression CPP_LSHIFT . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 44
+
+state 18
+
+    (16) expression -> expression CPP_RSHIFT . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 45
+
+state 19
+
+    (17) expression -> expression CPP_LESS . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 46
+
+state 20
+
+    (18) expression -> expression CPP_LESSEQUAL . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 47
+
+state 21
+
+    (19) expression -> expression CPP_GREATER . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 48
+
+state 22
+
+    (20) expression -> expression CPP_GREATEREQUAL . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 49
+
+state 23
+
+    (21) expression -> expression CPP_EQUALITY . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 50
+
+state 24
+
+    (22) expression -> expression CPP_INEQUALITY . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 51
+
+state 25
+
+    (23) expression -> expression CPP_AMPERSAND . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 52
+
+state 26
+
+    (24) expression -> expression CPP_HAT . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 53
+
+state 27
+
+    (25) expression -> expression CPP_BAR . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 54
+
+state 28
+
+    (26) expression -> expression CPP_LOGICALAND . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 55
+
+state 29
+
+    (27) expression -> expression CPP_LOGICALOR . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 56
+
+state 30
+
+    (28) expression -> expression CPP_COMMA . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 57
+
+state 31
+
+    (29) expression -> expression CPP_QUESTION . expression CPP_COLON expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 58
+
+state 32
+
+    (4) expression -> CPP_LESS expression . CPP_GREATER
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_GREATER     shift and go to state 59
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+    CPP_HAT         shift and go to state 26
+    CPP_BAR         shift and go to state 27
+    CPP_LOGICALAND  shift and go to state 28
+    CPP_LOGICALOR   shift and go to state 29
+    CPP_COMMA       shift and go to state 30
+    CPP_QUESTION    shift and go to state 31
+
+
+state 33
+
+    (5) expression -> CPP_LPAREN expression . CPP_RPAREN
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_RPAREN      shift and go to state 60
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+    CPP_HAT         shift and go to state 26
+    CPP_BAR         shift and go to state 27
+    CPP_LOGICALAND  shift and go to state 28
+    CPP_LOGICALOR   shift and go to state 29
+    CPP_COMMA       shift and go to state 30
+    CPP_QUESTION    shift and go to state 31
+
+
+state 34
+
+    (6) expression -> CPP_PLUS expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_STAR        reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_FSLASH      reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_PERCENT     reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_PLUS        reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_MINUS       reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_LSHIFT      reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_RSHIFT      reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_LESS        reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_LESSEQUAL   reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_GREATER     reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_GREATEREQUAL reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_EQUALITY    reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_INEQUALITY  reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_AMPERSAND   reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_HAT         reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_BAR         reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_LOGICALAND  reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_LOGICALOR   reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_COMMA       reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_QUESTION    reduce using rule 6 (expression -> CPP_PLUS expression .)
+    $end            reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_RPAREN      reduce using rule 6 (expression -> CPP_PLUS expression .)
+    CPP_COLON       reduce using rule 6 (expression -> CPP_PLUS expression .)
+
+  ! CPP_STAR        [ shift and go to state 12 ]
+  ! CPP_FSLASH      [ shift and go to state 13 ]
+  ! CPP_PERCENT     [ shift and go to state 14 ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 35
+
+    (7) expression -> CPP_MINUS expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_STAR        reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_FSLASH      reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_PERCENT     reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_PLUS        reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_MINUS       reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_LSHIFT      reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_RSHIFT      reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_LESS        reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_LESSEQUAL   reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_GREATER     reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_GREATEREQUAL reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_EQUALITY    reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_INEQUALITY  reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_AMPERSAND   reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_HAT         reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_BAR         reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_LOGICALAND  reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_LOGICALOR   reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_COMMA       reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_QUESTION    reduce using rule 7 (expression -> CPP_MINUS expression .)
+    $end            reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_RPAREN      reduce using rule 7 (expression -> CPP_MINUS expression .)
+    CPP_COLON       reduce using rule 7 (expression -> CPP_MINUS expression .)
+
+  ! CPP_STAR        [ shift and go to state 12 ]
+  ! CPP_FSLASH      [ shift and go to state 13 ]
+  ! CPP_PERCENT     [ shift and go to state 14 ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 36
+
+    (8) expression -> CPP_EXCLAMATION expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_STAR        reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_FSLASH      reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_PERCENT     reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_PLUS        reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_MINUS       reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_LSHIFT      reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_RSHIFT      reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_LESS        reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_LESSEQUAL   reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_GREATER     reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_GREATEREQUAL reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_EQUALITY    reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_INEQUALITY  reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_AMPERSAND   reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_HAT         reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_BAR         reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_LOGICALAND  reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_LOGICALOR   reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_COMMA       reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_QUESTION    reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    $end            reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_RPAREN      reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+    CPP_COLON       reduce using rule 8 (expression -> CPP_EXCLAMATION expression .)
+
+  ! CPP_STAR        [ shift and go to state 12 ]
+  ! CPP_FSLASH      [ shift and go to state 13 ]
+  ! CPP_PERCENT     [ shift and go to state 14 ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 37
+
+    (9) expression -> CPP_TILDE expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_STAR        reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_FSLASH      reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_PERCENT     reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_PLUS        reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_MINUS       reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_LSHIFT      reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_RSHIFT      reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_LESS        reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_LESSEQUAL   reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_GREATER     reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_GREATEREQUAL reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_EQUALITY    reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_INEQUALITY  reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_AMPERSAND   reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_HAT         reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_BAR         reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_LOGICALAND  reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_LOGICALOR   reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_COMMA       reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_QUESTION    reduce using rule 9 (expression -> CPP_TILDE expression .)
+    $end            reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_RPAREN      reduce using rule 9 (expression -> CPP_TILDE expression .)
+    CPP_COLON       reduce using rule 9 (expression -> CPP_TILDE expression .)
+
+  ! CPP_STAR        [ shift and go to state 12 ]
+  ! CPP_FSLASH      [ shift and go to state 13 ]
+  ! CPP_PERCENT     [ shift and go to state 14 ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 38
+
+    (30) expression -> CPP_ID CPP_LPAREN . expression CPP_RPAREN
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_INTEGER     shift and go to state 2
+    CPP_CHAR        shift and go to state 3
+    CPP_STRING      shift and go to state 4
+    CPP_LESS        shift and go to state 5
+    CPP_LPAREN      shift and go to state 6
+    CPP_PLUS        shift and go to state 7
+    CPP_MINUS       shift and go to state 8
+    CPP_EXCLAMATION shift and go to state 9
+    CPP_TILDE       shift and go to state 10
+    CPP_ID          shift and go to state 11
+
+    expression                     shift and go to state 61
+
+state 39
+
+    (10) expression -> expression CPP_STAR expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_STAR        reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_FSLASH      reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_PERCENT     reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_PLUS        reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_MINUS       reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_LSHIFT      reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_RSHIFT      reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_LESS        reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_LESSEQUAL   reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_GREATER     reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_GREATEREQUAL reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_EQUALITY    reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_INEQUALITY  reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_AMPERSAND   reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_HAT         reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_BAR         reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_LOGICALAND  reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_LOGICALOR   reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_COMMA       reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_QUESTION    reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    $end            reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_RPAREN      reduce using rule 10 (expression -> expression CPP_STAR expression .)
+    CPP_COLON       reduce using rule 10 (expression -> expression CPP_STAR expression .)
+
+  ! CPP_STAR        [ shift and go to state 12 ]
+  ! CPP_FSLASH      [ shift and go to state 13 ]
+  ! CPP_PERCENT     [ shift and go to state 14 ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 40
+
+    (11) expression -> expression CPP_FSLASH expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_STAR        reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_FSLASH      reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_PERCENT     reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_PLUS        reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_MINUS       reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_LSHIFT      reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_RSHIFT      reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_LESS        reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_LESSEQUAL   reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_GREATER     reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_GREATEREQUAL reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_EQUALITY    reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_INEQUALITY  reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_AMPERSAND   reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_HAT         reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_BAR         reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_LOGICALAND  reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_LOGICALOR   reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_COMMA       reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_QUESTION    reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    $end            reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_RPAREN      reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+    CPP_COLON       reduce using rule 11 (expression -> expression CPP_FSLASH expression .)
+
+  ! CPP_STAR        [ shift and go to state 12 ]
+  ! CPP_FSLASH      [ shift and go to state 13 ]
+  ! CPP_PERCENT     [ shift and go to state 14 ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 41
+
+    (12) expression -> expression CPP_PERCENT expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_STAR        reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_FSLASH      reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_PERCENT     reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_PLUS        reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_MINUS       reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_LSHIFT      reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_RSHIFT      reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_LESS        reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_LESSEQUAL   reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_GREATER     reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_GREATEREQUAL reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_EQUALITY    reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_INEQUALITY  reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_AMPERSAND   reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_HAT         reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_BAR         reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_LOGICALAND  reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_LOGICALOR   reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_COMMA       reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_QUESTION    reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    $end            reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_RPAREN      reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+    CPP_COLON       reduce using rule 12 (expression -> expression CPP_PERCENT expression .)
+
+  ! CPP_STAR        [ shift and go to state 12 ]
+  ! CPP_FSLASH      [ shift and go to state 13 ]
+  ! CPP_PERCENT     [ shift and go to state 14 ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 42
+
+    (13) expression -> expression CPP_PLUS expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_PLUS        reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_MINUS       reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_LSHIFT      reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_RSHIFT      reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_LESS        reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_LESSEQUAL   reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_GREATER     reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_GREATEREQUAL reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_EQUALITY    reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_INEQUALITY  reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_AMPERSAND   reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_HAT         reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_BAR         reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_LOGICALAND  reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_LOGICALOR   reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_COMMA       reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_QUESTION    reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    $end            reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_RPAREN      reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_COLON       reduce using rule 13 (expression -> expression CPP_PLUS expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+
+  ! CPP_STAR        [ reduce using rule 13 (expression -> expression CPP_PLUS expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 13 (expression -> expression CPP_PLUS expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 13 (expression -> expression CPP_PLUS expression .) ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 43
+
+    (14) expression -> expression CPP_MINUS expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_PLUS        reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_MINUS       reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_LSHIFT      reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_RSHIFT      reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_LESS        reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_LESSEQUAL   reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_GREATER     reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_GREATEREQUAL reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_EQUALITY    reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_INEQUALITY  reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_AMPERSAND   reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_HAT         reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_BAR         reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_LOGICALAND  reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_LOGICALOR   reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_COMMA       reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_QUESTION    reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    $end            reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_RPAREN      reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_COLON       reduce using rule 14 (expression -> expression CPP_MINUS expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+
+  ! CPP_STAR        [ reduce using rule 14 (expression -> expression CPP_MINUS expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 14 (expression -> expression CPP_MINUS expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 14 (expression -> expression CPP_MINUS expression .) ]
+  ! CPP_PLUS        [ shift and go to state 15 ]
+  ! CPP_MINUS       [ shift and go to state 16 ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 44
+
+    (15) expression -> expression CPP_LSHIFT expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_LSHIFT      reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_RSHIFT      reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_LESS        reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_LESSEQUAL   reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_GREATER     reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_GREATEREQUAL reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_EQUALITY    reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_INEQUALITY  reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_AMPERSAND   reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_HAT         reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_BAR         reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_LOGICALAND  reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_LOGICALOR   reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_COMMA       reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_QUESTION    reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    $end            reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_RPAREN      reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_COLON       reduce using rule 15 (expression -> expression CPP_LSHIFT expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+
+  ! CPP_STAR        [ reduce using rule 15 (expression -> expression CPP_LSHIFT expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 15 (expression -> expression CPP_LSHIFT expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 15 (expression -> expression CPP_LSHIFT expression .) ]
+  ! CPP_PLUS        [ reduce using rule 15 (expression -> expression CPP_LSHIFT expression .) ]
+  ! CPP_MINUS       [ reduce using rule 15 (expression -> expression CPP_LSHIFT expression .) ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 45
+
+    (16) expression -> expression CPP_RSHIFT expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_LSHIFT      reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_RSHIFT      reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_LESS        reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_LESSEQUAL   reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_GREATER     reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_GREATEREQUAL reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_EQUALITY    reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_INEQUALITY  reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_AMPERSAND   reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_HAT         reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_BAR         reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_LOGICALAND  reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_LOGICALOR   reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_COMMA       reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_QUESTION    reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    $end            reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_RPAREN      reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_COLON       reduce using rule 16 (expression -> expression CPP_RSHIFT expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+
+  ! CPP_STAR        [ reduce using rule 16 (expression -> expression CPP_RSHIFT expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 16 (expression -> expression CPP_RSHIFT expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 16 (expression -> expression CPP_RSHIFT expression .) ]
+  ! CPP_PLUS        [ reduce using rule 16 (expression -> expression CPP_RSHIFT expression .) ]
+  ! CPP_MINUS       [ reduce using rule 16 (expression -> expression CPP_RSHIFT expression .) ]
+  ! CPP_LSHIFT      [ shift and go to state 17 ]
+  ! CPP_RSHIFT      [ shift and go to state 18 ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 46
+
+    (17) expression -> expression CPP_LESS expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_LESS        reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_LESSEQUAL   reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_GREATER     reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_GREATEREQUAL reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_EQUALITY    reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_INEQUALITY  reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_AMPERSAND   reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_HAT         reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_BAR         reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_LOGICALAND  reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_LOGICALOR   reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_COMMA       reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_QUESTION    reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    $end            reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_RPAREN      reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_COLON       reduce using rule 17 (expression -> expression CPP_LESS expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+
+  ! CPP_STAR        [ reduce using rule 17 (expression -> expression CPP_LESS expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 17 (expression -> expression CPP_LESS expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 17 (expression -> expression CPP_LESS expression .) ]
+  ! CPP_PLUS        [ reduce using rule 17 (expression -> expression CPP_LESS expression .) ]
+  ! CPP_MINUS       [ reduce using rule 17 (expression -> expression CPP_LESS expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 17 (expression -> expression CPP_LESS expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 17 (expression -> expression CPP_LESS expression .) ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 47
+
+    (18) expression -> expression CPP_LESSEQUAL expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_LESS        reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_LESSEQUAL   reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_GREATER     reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_GREATEREQUAL reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_EQUALITY    reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_INEQUALITY  reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_AMPERSAND   reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_HAT         reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_BAR         reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_LOGICALAND  reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_LOGICALOR   reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_COMMA       reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_QUESTION    reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    $end            reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_RPAREN      reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_COLON       reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+
+  ! CPP_STAR        [ reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .) ]
+  ! CPP_PLUS        [ reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .) ]
+  ! CPP_MINUS       [ reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 18 (expression -> expression CPP_LESSEQUAL expression .) ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 48
+
+    (19) expression -> expression CPP_GREATER expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_LESS        reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_LESSEQUAL   reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_GREATER     reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_GREATEREQUAL reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_EQUALITY    reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_INEQUALITY  reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_AMPERSAND   reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_HAT         reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_BAR         reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_LOGICALAND  reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_LOGICALOR   reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_COMMA       reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_QUESTION    reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    $end            reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_RPAREN      reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_COLON       reduce using rule 19 (expression -> expression CPP_GREATER expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+
+  ! CPP_STAR        [ reduce using rule 19 (expression -> expression CPP_GREATER expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 19 (expression -> expression CPP_GREATER expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 19 (expression -> expression CPP_GREATER expression .) ]
+  ! CPP_PLUS        [ reduce using rule 19 (expression -> expression CPP_GREATER expression .) ]
+  ! CPP_MINUS       [ reduce using rule 19 (expression -> expression CPP_GREATER expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 19 (expression -> expression CPP_GREATER expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 19 (expression -> expression CPP_GREATER expression .) ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 49
+
+    (20) expression -> expression CPP_GREATEREQUAL expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_LESS        reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_LESSEQUAL   reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_GREATER     reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_GREATEREQUAL reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_EQUALITY    reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_INEQUALITY  reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_AMPERSAND   reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_HAT         reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_BAR         reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_LOGICALAND  reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_LOGICALOR   reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_COMMA       reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_QUESTION    reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    $end            reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_RPAREN      reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_COLON       reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+
+  ! CPP_STAR        [ reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .) ]
+  ! CPP_PLUS        [ reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .) ]
+  ! CPP_MINUS       [ reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 20 (expression -> expression CPP_GREATEREQUAL expression .) ]
+  ! CPP_LESS        [ shift and go to state 19 ]
+  ! CPP_LESSEQUAL   [ shift and go to state 20 ]
+  ! CPP_GREATER     [ shift and go to state 21 ]
+  ! CPP_GREATEREQUAL [ shift and go to state 22 ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 50
+
+    (21) expression -> expression CPP_EQUALITY expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_EQUALITY    reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_INEQUALITY  reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_AMPERSAND   reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_HAT         reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_BAR         reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_LOGICALAND  reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_LOGICALOR   reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_COMMA       reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_QUESTION    reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    $end            reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_RPAREN      reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_COLON       reduce using rule 21 (expression -> expression CPP_EQUALITY expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+
+  ! CPP_STAR        [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_PLUS        [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_MINUS       [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_LESS        [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_LESSEQUAL   [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_GREATER     [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_GREATEREQUAL [ reduce using rule 21 (expression -> expression CPP_EQUALITY expression .) ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 51
+
+    (22) expression -> expression CPP_INEQUALITY expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_EQUALITY    reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_INEQUALITY  reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_AMPERSAND   reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_HAT         reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_BAR         reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_LOGICALAND  reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_LOGICALOR   reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_COMMA       reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_QUESTION    reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    $end            reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_RPAREN      reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_COLON       reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+
+  ! CPP_STAR        [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_PLUS        [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_MINUS       [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_LESS        [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_LESSEQUAL   [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_GREATER     [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_GREATEREQUAL [ reduce using rule 22 (expression -> expression CPP_INEQUALITY expression .) ]
+  ! CPP_EQUALITY    [ shift and go to state 23 ]
+  ! CPP_INEQUALITY  [ shift and go to state 24 ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 52
+
+    (23) expression -> expression CPP_AMPERSAND expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_AMPERSAND   reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_HAT         reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_BAR         reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_LOGICALAND  reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_LOGICALOR   reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_COMMA       reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_QUESTION    reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    $end            reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_RPAREN      reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_COLON       reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+
+  ! CPP_STAR        [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_PLUS        [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_MINUS       [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_LESS        [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_LESSEQUAL   [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_GREATER     [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_GREATEREQUAL [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_EQUALITY    [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_INEQUALITY  [ reduce using rule 23 (expression -> expression CPP_AMPERSAND expression .) ]
+  ! CPP_AMPERSAND   [ shift and go to state 25 ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 53
+
+    (24) expression -> expression CPP_HAT expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_HAT         reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    CPP_BAR         reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    CPP_LOGICALAND  reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    CPP_LOGICALOR   reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    CPP_COMMA       reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    CPP_QUESTION    reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    $end            reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    CPP_RPAREN      reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    CPP_COLON       reduce using rule 24 (expression -> expression CPP_HAT expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+
+  ! CPP_STAR        [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_PLUS        [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_MINUS       [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_LESS        [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_LESSEQUAL   [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_GREATER     [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_GREATEREQUAL [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_EQUALITY    [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_INEQUALITY  [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_AMPERSAND   [ reduce using rule 24 (expression -> expression CPP_HAT expression .) ]
+  ! CPP_HAT         [ shift and go to state 26 ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 54
+
+    (25) expression -> expression CPP_BAR expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_BAR         reduce using rule 25 (expression -> expression CPP_BAR expression .)
+    CPP_LOGICALAND  reduce using rule 25 (expression -> expression CPP_BAR expression .)
+    CPP_LOGICALOR   reduce using rule 25 (expression -> expression CPP_BAR expression .)
+    CPP_COMMA       reduce using rule 25 (expression -> expression CPP_BAR expression .)
+    CPP_QUESTION    reduce using rule 25 (expression -> expression CPP_BAR expression .)
+    $end            reduce using rule 25 (expression -> expression CPP_BAR expression .)
+    CPP_RPAREN      reduce using rule 25 (expression -> expression CPP_BAR expression .)
+    CPP_COLON       reduce using rule 25 (expression -> expression CPP_BAR expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+    CPP_HAT         shift and go to state 26
+
+  ! CPP_STAR        [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_PLUS        [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_MINUS       [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_LESS        [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_LESSEQUAL   [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_GREATER     [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_GREATEREQUAL [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_EQUALITY    [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_INEQUALITY  [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_AMPERSAND   [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_HAT         [ reduce using rule 25 (expression -> expression CPP_BAR expression .) ]
+  ! CPP_BAR         [ shift and go to state 27 ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 55
+
+    (26) expression -> expression CPP_LOGICALAND expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_LOGICALAND  reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .)
+    CPP_LOGICALOR   reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .)
+    CPP_COMMA       reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .)
+    CPP_QUESTION    reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .)
+    $end            reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .)
+    CPP_RPAREN      reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .)
+    CPP_COLON       reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+    CPP_HAT         shift and go to state 26
+    CPP_BAR         shift and go to state 27
+
+  ! CPP_STAR        [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_PLUS        [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_MINUS       [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_LESS        [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_LESSEQUAL   [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_GREATER     [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_GREATEREQUAL [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_EQUALITY    [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_INEQUALITY  [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_AMPERSAND   [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_HAT         [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_BAR         [ reduce using rule 26 (expression -> expression CPP_LOGICALAND expression .) ]
+  ! CPP_LOGICALAND  [ shift and go to state 28 ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 56
+
+    (27) expression -> expression CPP_LOGICALOR expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_LOGICALOR   reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .)
+    CPP_COMMA       reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .)
+    CPP_QUESTION    reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .)
+    $end            reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .)
+    CPP_RPAREN      reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .)
+    CPP_COLON       reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+    CPP_HAT         shift and go to state 26
+    CPP_BAR         shift and go to state 27
+    CPP_LOGICALAND  shift and go to state 28
+
+  ! CPP_STAR        [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_PLUS        [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_MINUS       [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_LESS        [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_LESSEQUAL   [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_GREATER     [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_GREATEREQUAL [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_EQUALITY    [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_INEQUALITY  [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_AMPERSAND   [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_HAT         [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_BAR         [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_LOGICALAND  [ reduce using rule 27 (expression -> expression CPP_LOGICALOR expression .) ]
+  ! CPP_LOGICALOR   [ shift and go to state 29 ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+  ! CPP_QUESTION    [ shift and go to state 31 ]
+
+
+state 57
+
+    (28) expression -> expression CPP_COMMA expression .
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_COMMA       reduce using rule 28 (expression -> expression CPP_COMMA expression .)
+    $end            reduce using rule 28 (expression -> expression CPP_COMMA expression .)
+    CPP_RPAREN      reduce using rule 28 (expression -> expression CPP_COMMA expression .)
+    CPP_COLON       reduce using rule 28 (expression -> expression CPP_COMMA expression .)
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+    CPP_HAT         shift and go to state 26
+    CPP_BAR         shift and go to state 27
+    CPP_LOGICALAND  shift and go to state 28
+    CPP_LOGICALOR   shift and go to state 29
+    CPP_QUESTION    shift and go to state 31
+
+  ! CPP_STAR        [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_FSLASH      [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_PERCENT     [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_PLUS        [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_MINUS       [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_LSHIFT      [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_RSHIFT      [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_LESS        [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_LESSEQUAL   [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_GREATER     [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_GREATEREQUAL [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_EQUALITY    [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_INEQUALITY  [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_AMPERSAND   [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_HAT         [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_BAR         [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_LOGICALAND  [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_LOGICALOR   [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_QUESTION    [ reduce using rule 28 (expression -> expression CPP_COMMA expression .) ]
+  ! CPP_COMMA       [ shift and go to state 30 ]
+
+
+state 58
+
+    (29) expression -> expression CPP_QUESTION expression . CPP_COLON expression
+    (10) expression -> expression . CPP_STAR expression
+    (11) expression -> expression . CPP_FSLASH expression
+    (12) expression -> expression . CPP_PERCENT expression
+    (13) expression -> expression . CPP_PLUS expression
+    (14) expression -> expression . CPP_MINUS expression
+    (15) expression -> expression . CPP_LSHIFT expression
+    (16) expression -> expression . CPP_RSHIFT expression
+    (17) expression -> expression . CPP_LESS expression
+    (18) expression -> expression . CPP_LESSEQUAL expression
+    (19) expression -> expression . CPP_GREATER expression
+    (20) expression -> expression . CPP_GREATEREQUAL expression
+    (21) expression -> expression . CPP_EQUALITY expression
+    (22) expression -> expression . CPP_INEQUALITY expression
+    (23) expression -> expression . CPP_AMPERSAND expression
+    (24) expression -> expression . CPP_HAT expression
+    (25) expression -> expression . CPP_BAR expression
+    (26) expression -> expression . CPP_LOGICALAND expression
+    (27) expression -> expression . CPP_LOGICALOR expression
+    (28) expression -> expression . CPP_COMMA expression
+    (29) expression -> expression . CPP_QUESTION expression CPP_COLON expression
+
+    CPP_COLON       shift and go to state 62
+    CPP_STAR        shift and go to state 12
+    CPP_FSLASH      shift and go to state 13
+    CPP_PERCENT     shift and go to state 14
+    CPP_PLUS        shift and go to state 15
+    CPP_MINUS       shift and go to state 16
+    CPP_LSHIFT      shift and go to state 17
+    CPP_RSHIFT      shift and go to state 18
+    CPP_LESS        shift and go to state 19
+    CPP_LESSEQUAL   shift and go to state 20
+    CPP_GREATER     shift and go to state 21
+    CPP_GREATEREQUAL shift and go to state 22
+    CPP_EQUALITY    shift and go to state 23
+    CPP_INEQUALITY  shift and go to state 24
+    CPP_AMPERSAND   shift and go to state 25
+    CPP_HAT         shift and go to state 26
+    CPP_BAR         shift and go to state 27
+    CPP_LOGICALAND  shift and go to state 28
+    CPP_LOGICALOR   shift and go to state 29
+    CPP_COMMA       shift and go to state 30
+    CPP_QUESTION    shift and go to state 31
+
+
+state 59
+
+    (4) expression -> CPP_LESS expression CPP_GREATER .
+    (19) expression -> expression CPP_GREATER . expression
+    (1) expression -> . CPP_INTEGER
+    (2) expression -> . CPP_CHAR
+    (3) expression -> . CPP_STRING
+    (4) expression -> . CPP_LESS expression CPP_GREATER
+    (5) expression -> . CPP_LPAREN expression CPP_RPAREN
+    (6) expression -> . CPP_PLUS expression
+    (7) expression -> . CPP_MINUS expression
+    (8) expression -> . CPP_EXCLAMATION expression
+    (9) expression -> . CPP_TILDE expression
+    (10) expression -> . expression CPP_STAR expression
+    (11) expression -> . expression CPP_FSLASH expression
+    (12) expression -> . expression CPP_PERCENT expression
+    (13) expression -> . expression CPP_PLUS expression
+    (14) expression -> . expression CPP_MINUS expression
+    (15) expression -> . expression CPP_LSHIFT expression
+    (16) expression -> . expression CPP_RSHIFT expression
+    (17) expression -> . expression CPP_LESS expression
+    (18) expression -> . expression CPP_LESSEQUAL expression
+    (19) expression -> . expression CPP_GREATER expression
+    (20) expression -> . expression CPP_GREATEREQUAL expression
+    (21) expression -> . expression CPP_EQUALITY expression
+    (22) expression -> . expression CPP_INEQUALITY expression
+    (23) expression -> . expression CPP_AMPERSAND expression
+    (24) expression -> . expression CPP_HAT expression
+    (25) expression -> . expression CPP_BAR expression
+    (26) expression -> . expression CPP_LOGICALAND expression
+    (27) expression -> . expression CPP_LOGICALOR expression
+    (28) expression -> . expression CPP_COMMA expression
+    (29) expression -> . expression CPP_QUESTION expression CPP_COLON expression
+    (30) expression -> . CPP_ID CPP_LPAREN expression CPP_RPAREN
+    (31) expression -> . CPP_ID
+
+    CPP_STAR        reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_FSLASH      reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_PERCENT     reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_LSHIFT      reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_RSHIFT      reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_LESS        reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_LESSEQUAL   reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_GREATER     reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_GREATEREQUAL reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_EQUALITY    reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_INEQUALITY  reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_AMPERSAND   reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)
+    CPP_HAT         reduce using rule 4 (expression -> CPP_LESS expression CPP_GREATER .)

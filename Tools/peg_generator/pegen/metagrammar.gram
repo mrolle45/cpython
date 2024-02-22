@@ -9,6 +9,7 @@ from pegen.grammar import (
     AltItems,
     Arg,
     Args,
+    Call,
     Cut,
     Forced,
     Gather0,
@@ -20,6 +21,8 @@ from pegen.grammar import (
     Meta,
     NameLeaf,
     NegativeLookahead,
+    NoArgs,
+    NoName,
     ObjName,
     Opt,
     OptGroup,
@@ -32,14 +35,17 @@ from pegen.grammar import (
     Rhs,
     Rule,
     StringLeaf,
+    Type,
     TypedName,
     VarItem,
 )
 
-from pegen.target_code import Code
+from pegen.target_code import Code, ValueCode, NoValueCode
 """
 
-start[Grammar]: g=grammar ENDMARKER { g }
+start[Tuple[Grammar, bool]]: g=grammar e=endmarker? { g, e }
+
+endmarker[bool]: (ENDMARKER | "END" NEWLINE) { True } | { False }
 
 grammar[Grammar]:
     | metas=meta* rules=rule+ { Grammar(rules, metas) }
@@ -52,42 +58,37 @@ metavalue[str]:
     | val=STRING { literal_eval(val.string) }
     | { None }
 
+# A rule has both a return type and optional parameters.
+# The return type may be callable, to several levels, or just a plain type.
+#   This is part of the typed_name.
+# The optional rule parameters follow the typed_name.
 rule[Rule]:
-    | n=typed_name m=memoflag? ":" a=maybe_alts? NEWLINE aa=more_alts? {
-          Rule(n, Rhs([*chain (*a, *aa)]), memo=m) }
-
-params[Params]:
-    | !memoflag '(' n=','.param+ [','] ')' { Params(n) }
-    | '(' ')' { Params([]) }
-
-param[Param]:
-    | n=typed_name { Param(n) }
-
-typed_name[TypedName]:
-    | n=NAME p=params? typ=annotation? { TypedName(n.string, Code(typ.val), p.val) }
+    | n=typed_name p=params? m=memoflag? ":" a=maybe_alts? NEWLINE aa=more_alts? {
+          Rule(n, p, Rhs([*chain(*a.val, *aa.val)]), memo=m) }
 
 # In the future this may return something more complicated
 memoflag[str]:
     | '(' "memo" ')' { "memo" }
 
-# Alternatives, in various contexts.  Returns an Rhs holding the alternatives.
+# Alternatives, in various contexts.  Returns a list[Alt] holding the alternatives...
+
 #   Within (...) or [...], or after indented '|'.  One or more with '|' separator.
-alts[Rhs]:
-    | a="|".alt+  { Rhs(a) }
+alts[list[Alt]]:
+    | aa="|".alt+  { aa }
 
 #   After ':' in a rule on same line.  Zero or more with '|' separator.
-maybe_alts[Rhs] (memo):
-    | !NEWLINE a="|".alt+  { Rhs(a) }
-    | { Rhs([]) }
+maybe_alts[list[Alt]] (memo):
+    | !NEWLINE aa="|".alt+  { aa }
+    | { [] }
 
 #   Indented block following a rule, each line introduced by '|', or nothing.
-more_alts[Rhs] (memo):
-    | INDENT a=( "|" b=alts NEWLINE { b } )+ DEDENT { Rhs (chain (*a)) }
-    | { Rhs(()) }
+more_alts[list[Alt]] (memo):
+    | INDENT aa=( "|" bb=alts NEWLINE { bb } )+ DEDENT { [*chain(*aa)] }
+    | { [] }
 
 # Single alternative.  May be nothing at all.
 alt[Alt]:
-    | i=alt_items a=action? { Alt(i, action=Code(a.val)) }
+    | i=alt_items a=action? { Alt(i, action=Code(a.opt)) }
 
 alt_items[AltItems]:
     | ii=alt_item* { AltItems(ii) }
@@ -100,33 +101,63 @@ item[Item] (memo):
     | '&' '&' ~ i=item {Forced(i)}
     | '&' ~ i=item {PositiveLookahead(i)}
     | '!' ~ i=item {NegativeLookahead(i)}
-    | '~' {Cut()}
+    | atoms
+
+atoms[Atom] (memo):
+    | a=atom '*' {Repeat0(a)}
+    | a=atom '+' {Repeat1(a)}
     | atom
 
 atom[Atom] (memo):
     | a=atom '?' {Opt(a)}
-    | a=atom '*' {Repeat0(a)}
-    | a=atom '+' {Repeat1(a)}
-    | sep=atom '.' node=primary '*' {Gather0(sep, node)}
-    | sep=atom '.' node=primary '+' {Gather1(sep, node)}
+    | sep=atom '.' node=atom '*' {Gather0(sep, node)}
+    | sep=atom '.' node=atom '+' {Gather1(sep, node)}
+    | node=atom a=arguments { Call(node, a) }
     | primary
 
 primary[Primary] (memo):
-    | '(' ~ a=alts ')' typ=annotation? {Group(Rhs(a, Code(typ.val)))}
-    | '[' ~ a=alts ']' typ=annotation? {OptGroup(Rhs(a, Code(typ.val)))}
-    | n=NAME a=arguments? {NameLeaf(n, a.val) }
+    | '~' {Cut()}
+    | '(' ~ a=alts ')' typ=type? {Group(Rhs(a), typ.opt)}
+    | '[' ~ a=alts ']' typ=type? {OptGroup(Rhs(a), typ.opt)}
+    | n=NAME { NameLeaf(n) }
+    # | n=NAME a=arguments* {NameLeaf(n, a) }
     | s=STRING {StringLeaf(s)}
+
+# Properties of other parsed expressions:
+#   name, type, param, and combinations of these.
+
+name[ObjName]:
+    | n=NAME { ObjName(n.string) }
+
+type[Type]:
+    | "[" a=annotation pp=params* "]" { Type(a, *pp) }
+    # | pp=params+ { Type(NoCode(), *pp)}
+
+params[Params]:
+    | '<' '>' { Params([]) }
+    | '<' pp=','.param+ [','] '>' { Params(pp) }
+
+param[Param]:
+    | n=typed_name { Param(n) }
+    | typ=type { Param(TypedName(NoName(), typ)) }
+
+typed_name[TypedName]:
+    | n=name typ=type? { TypedName(n, typ.opt) }
 
 # Mini-grammar for the actions and annotations and call arguments
 
 action[list[Token]]: "{" t=target_atoms "}" { t }
-annotation[list[Token]]: "[" t=target_atoms "]" { t }
+annotation[ValueCode]:
+    | aa=anno_atom+ { ValueCode([*chain(*aa)]) }
+    | { NoValueCode() }
 arguments[Args]:
-    | '(' a=arg "," b=",".arg+ ","? ')'  { Args([a] + b) }  # Multiple args, comma optional
-    | '(' a=arg "," ')' { Args([a]) }                       # One arg, comma required.
-    | '(' ')' { Args() }                                    # No args, no comma.
+    | '<' aa=",".arg* ","? '>'  { Args(aa) } # One or more args, comma optional
+    | '<' '>' { Args() }                                    # No args, no comma.
+
 arg[Arg]: a=arg_atom+ { Arg(Code([*chain(*a)])) }
-arg_atom[list[Token]]: !"," a=target_atom { a }
+arg_atom[list[Token]]: ! "," !">" a=target_atom { a }
+
+anno_atom[list[Token]]: !"<" !"]" a=target_atom { a }
 
 target_atoms[list[Token]]:
     | a=target_atom+ { [*chain.from_iterable(a)] }
@@ -141,4 +172,5 @@ target_atom[list[Token]] (memo):
     | s=STRING { [s] }
     | c="?" { [c] }
     | c=":" { [c] }
+    | c="!" { [c] }
     | !")" !"}" !"]" op=OP { [op] }

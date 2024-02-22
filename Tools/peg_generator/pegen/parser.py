@@ -13,7 +13,7 @@ from typing import (
     Type, TypeVar, Union, cast
     )
 
-from pegen.tokenizer import Mark, Tokenizer, exact_token_types, TokenRange
+from pegen.tokenizer import Mark, Tokenizer, exact_token_types, TokenRange, TokenMatch, TokenLocations
 from pegen.grammar import Cut, Alt, OptVal
 
 T = TypeVar("T")
@@ -24,7 +24,7 @@ Token = tokenize.TokenInfo
 
 ParseStatus = bool
 ParseResult = Union[Tuple[T], None]
-ParseFunc = Callable[[], ParseResult]
+ParseFunc = Callable[[], Union[ParseResult[T] , ParseStatus]]
 
 
 def logger(method: F) -> F:
@@ -37,14 +37,14 @@ def logger(method: F) -> F:
     def logger_wrapper(self: P, *args: object) -> T:
         if not self._verbose:
             return method(self, *args)
-        argsr = ",".join(repr(arg) for arg in args)
-        fill = "  " * self._level
-        self._log(f"{method_name}({argsr}) .... (looking at {self._showpeek()})")
-        self._level += 1
-        tree = method(self, *args)
-        self._level -= 1
-        self._log(f"... {method_name}({argsr}) --> {tree!s:.200}")
-        return tree
+        return self._call_logged(method, *args)
+        #argsr = ",".join(repr(arg) for arg in args)
+        #self._log(f"{method_name}({argsr}) .... (looking at {self._showpeek()})")
+        #self._level += 1
+        #tree = method(self, *args)
+        #self._level -= 1
+        #self._log(f"... {method_name}({argsr}) --> {tree!s:.200}")
+        #return tree
 
     logger_wrapper.__wrapped__ = method  # type: ignore
     logger_wrapper._nolog = True
@@ -66,21 +66,16 @@ def memoize(method: F) -> F:
         # Slow path: no cache hit, or verbose.
         verbose = self._verbose
         argsr = ",".join(repr(arg) for arg in args)
-        fill = "  " * self._level
         if key not in self._cache:
+            tree = self._call_logged(method, *args)
             if verbose:
-                self._log(f"{method_name}({argsr}) ... (looking at {self._showpeek()})")
-            self._level += 1
-            tree = method(self, *args)
-            self._level -= 1
-            if verbose:
-                self._log(f"... {method_name}({argsr}) -> {tree!s:.200}")
+                self._log(f"[{self._mark()}] {method_name}({argsr}) [fresh]")
             endmark = self._mark()
             self._cache[key] = tree, endmark
         else:
             tree, endmark = self._cache[key]
             if verbose:
-                self._log(f"{method_name}({argsr}) -> {tree!s:.200}")
+                self._log(f"[{self._mark()}] {method_name}({argsr}) [cached]")
             self._reset(endmark)
         return tree
 
@@ -128,18 +123,18 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
                 self._reset(mark)
                 self.in_recursive_rule += 1
                 try:
-                    result = method(self)
+                    result = self._call_logged(method)
                 finally:
                     self.in_recursive_rule -= 1
                 endmark = self._mark()
                 depth += 1
                 if verbose:
-                    print(
-                        f"{fill}Recursive {method_name} at {mark} depth {depth}: {result!s:.200} to {endmark}"
+                    self._log(
+                        f"[{self._mark()}] Recursive {method_name} depth {depth}: {result!s:.200} to {endmark}"
                     )
                 if not result:
                     if verbose:
-                        self._log(f"Fail with {lastresult!s:.200} to {lastmark}")
+                        self._log(f"[{self._mark()}] Fail with {lastresult!s:.200} to {lastmark}")
                     break
                 if endmark <= lastmark:
                     if verbose:
@@ -152,7 +147,7 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
 
             self._level -= 1
             if verbose:
-                self._log(f"{method_name}() -> {tree!s:.200} [cached]")
+                self._log(f"[{self._mark()}] {method_name}() [cached]")
             if tree:
                 endmark = self._mark()
             else:
@@ -162,7 +157,7 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
         else:
             tree, endmark = self._cache[key]
             if verbose:
-                self._log(f"{method_name}() -> {tree!s:.200} [fresh]")
+                self._log(f"[{self._mark()}] {method_name}() [fresh]")
             if tree:
                 self._reset(endmark)
         return tree
@@ -179,6 +174,7 @@ class Parser:
 
     SOFT_KEYWORDS: ClassVar[Tuple[str, ...]]
 
+    gen: ParserGenerator = None             # Set by constructor of the generator.
     _cut_occurred: bool = False             # Set by parsing a Cut, cleared at start of every Alt.
 
     def __init__(self, tokenizer: Tokenizer, *, verbose: bool = False):
@@ -195,11 +191,12 @@ class Parser:
             # Apply logger() to some methods to make instance variables with same name.
             for name in dir(self):
                 if name.startswith('__'): continue
-                method = getattr(self, name)
+                method = getattr(type(self), name, None)
                 if not callable(method): continue
                 if name.startswith('_'):
-                    # Log sunder methods 
-                    continue
+                    # Log sunder methods unless they have method._nolog = True.
+                    if getattr(method, '_nolog', False): continue
+                    pass
                 else:
                     # Log regular methods (which are rules) unless they have method._nolog = True.
                     if getattr(method, '_nolog', False): continue
@@ -214,17 +211,41 @@ class Parser:
 
     def _call_verbose(self, method) -> Callable:
         def wrapper(*args):
-            method_name = method.__name__
-            if not self._verbose:
-                return method(self, *args)
-            argsr = ",".join(repr(arg) for arg in args)
-            self._log(f"{method_name}({argsr}) .... (looking at {self._showpeek()})")
-            self._level += 1
-            tree = method(*args)
-            self._level -= 1
-            self._log(f"... {method_name}({argsr}) --> {tree!s:.200}")
-            return tree
+            return self._call_logged(method, *args)
         return wrapper
+
+    _call_verbose._nolog = True
+
+    def _call_logged(self, method: method, *args: object) -> object:
+        """ Calls method and prints info about the call.  Indents during the call. """
+        if not self._verbose:
+            return method(self, *args)
+        #argsr = ",".join(repr(arg) for arg in args)
+        argsr = ", ".join(self._format_log_arg(arg) for arg in args)
+        method_name = method.__name__
+        self._log(f"[{self._mark()}] {method_name}({argsr}) .... (looking at {self._showpeek()})")
+        self._level += 1
+        tree = method(self, *args)
+        self._level -= 1
+        if tree is None:
+            self._log(f"... FAIL {method_name}({argsr})")
+        else:
+            try: result = tree[0]
+            except: result = tree
+            self._log(f"... [{self._mark()}] {method_name}({argsr}) --> {result!r:.50}")
+        return tree
+
+    _call_logged._nolog = True
+
+    def _format_log_arg(self, arg: object) -> str:
+        """ A nicer display of an argument being logged. """
+        if isinstance(arg, list):
+            return f"[{', '.join([self._format_log_arg(a) for a in arg])}]"
+        if callable(arg):
+            return function_name(arg)
+        return str(arg)
+
+    _format_log_arg._nolog = True
 
     @abstractmethod
     def start(self) -> Any:
@@ -246,6 +267,8 @@ class Parser:
     def _showpeek(self) -> str:
         tok = self._tokenizer.peek()
         return f"{tok.start[0]}.{tok.start[1]}: {token.tok_name[tok.type]}:{tok.string!r}"
+
+    _showpeek._nolog = True
 
     @memoize
     def _name(self) -> ParseResult[Token]:
@@ -272,6 +295,13 @@ class Parser:
     def _op(self) -> ParseResult[Token]:
         tok = self._tokenizer.peek()
         if tok.type == token.OP:
+            return self._tokenizer.getnext(),
+        return None
+
+    @memoize
+    def _char(self) -> ParseResult[Token]:
+        tok = self._tokenizer.peek()
+        if tok.type == token.CHAR:
             return self._tokenizer.getnext(),
         return None
 
@@ -350,7 +380,8 @@ class Parser:
         self._reset(mark)
         return result
 
-    def _opt(self, item_func: Callable[..., ParseResult[ValueType]]) -> ParseResult[OptVal[ValueType]]:
+    def _opt(self, item_func: Callable[[],  ParseResult[ValueType]]
+             ) -> ParseResult[OptVal[ValueType]]:
         """ A tuple of (the item if parsed) or (empty if not parsed).
         This is wrapped in an OptVal object.
         """
@@ -423,18 +454,53 @@ class Parser:
         fill = "  " * self._level
         import textwrap
         lines = textwrap.wrap(
-            msg, width=80,
+            msg,
+            width=max(80, len(fill) + 20),
             initial_indent=fill,
             subsequent_indent=fill + '    '
             )
         for line in lines:
             print(line)
 
+    _log._nolog = True
+
     def _dump(self, ctx: int = 0) -> None:
         self._tokenizer.dump(ctx)
 
+    break_lines: List[int] = [71]
+    break_tokens: TokenMatch = TokenMatch('''
+        #
+        64, 11 - 21
+        #64,  1 - 40
+        #64, 76 - 88
+        ''')
+
+    def brk(self, delta: int = 0) -> bool:
+        """ True if current output line + delta is in break_lines container.
+        Used as a breakpoint condition with a debugger.
+        """
+        gen = self.gen
+        if gen:
+            return gen.lineno() + delta in self.break_lines
+        else:
+            return False
+
+    def brk_token(self, node: GrammarTree) -> bool:
+        """ True if input range of given node matches with break_tokens matcher.
+        Used as a breakpoint condition with a debugger.
+        """
+        return self.break_tokens.match(node.locations)
+
     def __repr__(self) -> str:
         return f"<Parser [{self._mark()}] at {self._tokenizer.peek().start}>"
+
+def function_name(f: function) -> str:
+    """ Condensed name of a function, usually nested. """
+    s = f.__qualname__
+    s = s.replace('.<locals>', '')
+    parts = s.split('.')[1:]
+    del parts[1]
+    return '.'.join(parts)
 
 def simple_parser_main(parser_class: Type[Parser]) -> None:
     argparser = argparse.ArgumentParser()
