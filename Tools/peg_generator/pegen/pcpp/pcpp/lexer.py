@@ -2,649 +2,1179 @@
 Defines a lexer, to use with ply.lex, to turn input string into tokens.
 """
 
+# TODO: Treat comments as non-whitespace if passthru comments and gcc.
+#   This hides a following directive and the # is an ordinary token.
+#   Otherwise treat comments as whitespace.
+
 from __future__ import annotations
 
+import codecs
 import dataclasses
+from dataclasses import replace
 import enum
 import re
-import copy
+import os.path
+from functools import cached_property
+from itertools import count, product, zip_longest
+import operator
+from typing import Callable, NewType, TypeVar, Union
 
-from ply import lex, yacc
-from ply.lex import LexToken, Lexer, LexError, TOKEN
-from pcpp.parser import in_production
+from pcpp.ply import lex
+from pcpp.ply.lex import LexToken, Lexer, LexError, TOKEN
 
-# -----------------------------------------------------------------------------
-# Default preprocessor lexer definitions.   These tokens are enough to get
-# a basic preprocessor working.   Other modules may import these if they want
-# -----------------------------------------------------------------------------
-
-# Special tokenizing for preprocessing directives
-#   A '#' after possible whitespace, introduces a directive.  Token type is CPP_DIRECTIVE,
-#       and new state is DIRECTIVE.
-#   Following whitespace is skipped.  The next token should be the directive name, a CPP_ID.
-#       If it is 'include', type is CPP_INCLUDE and new state is INCLUDE.
-#       If it is 'define', type is CPP_DEFINE and new state is DEFINE.
-#       Any other token of any type goes back to the INITIAL state.
-#   Reaching a newline goes back to the INITIAL state.
-
-states = [
-    ('DIRECTIVE', 'inclusive'),
-    ('INCLUDE', 'inclusive'),
-    ('DEFINE', 'inclusive')
-    ]
-
-tokens = (
-   'CPP_ID','CPP_INTEGER', 'CPP_FLOAT', 'CPP_STRING', 'CPP_CHAR', 'CPP_WS', 'CPP_COMMENT1', 'CPP_COMMENT2',
-   'CPP_NEWLINE', 'CPP_DIRECTIVE', 'CPP_OBJ_MACRO', 'CPP_FUNC_MACRO',
-   'CPP_POUND','CPP_DPOUND', 'CPP_PLUS', 'CPP_MINUS', 'CPP_STAR', 'CPP_FSLASH', 'CPP_PERCENT', 'CPP_BAR',
-   'CPP_AMPERSAND', 'CPP_TILDE', 'CPP_HAT', 'CPP_LESS', 'CPP_GREATER', 'CPP_EQUAL', 'CPP_EXCLAMATION',
-   'CPP_QUESTION', 'CPP_LPAREN', 'CPP_RPAREN', 'CPP_LBRACKET', 'CPP_RBRACKET', 'CPP_LCURLY', 'CPP_RCURLY',
-   'CPP_DOT', 'CPP_COMMA', 'CPP_SEMICOLON', 'CPP_COLON', 'CPP_BSLASH', 'CPP_SQUOTE', 'CPP_DQUOTE',
-
-   'CPP_DEREFERENCE', 'CPP_MINUSEQUAL', 'CPP_MINUSMINUS', 'CPP_LSHIFT', 'CPP_LESSEQUAL', 'CPP_RSHIFT',
-   'CPP_GREATEREQUAL', 'CPP_LOGICALOR', 'CPP_OREQUAL', 'CPP_LOGICALAND', 'CPP_ANDEQUAL', 'CPP_EQUALITY',
-   'CPP_INEQUALITY', 'CPP_XOREQUAL', 'CPP_MULTIPLYEQUAL', 'CPP_DIVIDEEQUAL', 'CPP_PLUSEQUAL', 'CPP_PLUSPLUS',
-   'CPP_PERCENTEQUAL', 'CPP_LSHIFTEQUAL', 'CPP_RSHIFTEQUAL', 'CPP_ELLIPSIS',
-   'CPP_H_HEADER_NAME', 'CPP_Q_HEADER_NAME',
-   'CPP_PLACEMARKER', 'CPP_NULL', 'CPP_PASTED', 'error',
-)
-
-comment_tokens = ('CPP_COMMENT1', 'CPP_COMMENT2', )
-space_tokens = ('CPP_WS', 'CPP_NEWLINE', 'CPP_NULL', )
-ws_tokens = space_tokens + comment_tokens
-
-# Note, unmatched quote characters are an error, not a literal
-literals = "+-*/%|&~^<>=!?()[]{}.,;:\\"
-#literals = "+-*/%|&~^<>=!?()[]{}.,;:\\\'\""
-
-# Whitespace, but don't match past the end of a line
-def t_ANY_CPP_WS(t):
-    r'([ \t]+)'
-    return t.lexer.whitespace(t)
-
-r_newline = r'(\n)'
-
-# Special newline in a directive.  Returns to INITIAL state.
-@TOKEN(r_newline)
-def t_DIRECTIVE_INCLUDE_DEFINE_CPP_NEWLINE(t):
-    t.lexer.begin('INITIAL')
-    return t_ANY_CPP_NEWLINE(t)
-
-# Newline.  Type CPP_WS, advances line number.
-@TOKEN(r_newline)
-def t_ANY_CPP_NEWLINE(t):
-    t.lexer.newline()
-    #t.type = 'CPP_WS'
-    return t
-
-def t_DIRECTIVE_CPP_ID(t):
-    r'[A-Za-z_][\w_]*'
-    if t.value == 'include':
-        t.lexer.begin('INCLUDE')
-    elif t.value == 'define':
-        t.lexer.begin('DEFINE')
-    return t
-_string_literal_linecont_pat = re.compile(r'\\[ \t]*\n')
-
-def t_CPP_DPOUND(t: LexToken) -> LexToken:
-    r'\#\#|%:%:'
-    return t
-
-# A '#', the first non-whitespace in a line, is a directive.
-def t_CPP_POUND(t: LexToken) -> LexToken:
-    r'\#|%:'
-    if t.lexer.all_ws:
-        t.lexer.begin('DIRECTIVE')
-        t.type = 'CPP_DIRECTIVE'
-    return t
-
-t_CPP_PLUS = r'\+'
-t_CPP_MINUS = r'-'
-t_CPP_STAR = r'\*'
-t_CPP_FSLASH = r'/'
-t_CPP_PERCENT = r'%'
-t_CPP_BAR = r'\|'
-t_CPP_AMPERSAND = r'&'
-t_CPP_TILDE = r'~'
-t_CPP_HAT = r'\^'
-t_CPP_LESS = r'<'
-t_CPP_GREATER = r'>'
-t_CPP_EQUAL = r'='
-t_CPP_EXCLAMATION = r'!'
-t_CPP_QUESTION = r'\?'
-t_CPP_LPAREN = r'\('
-t_CPP_RPAREN = r'\)'
-
-# Include digraphs, which are different spellings of single characters.
-t_CPP_LBRACKET = r'\[|<:'
-t_CPP_RBRACKET = r'\]|:>'
-t_CPP_LCURLY = r'{|<%'
-t_CPP_RCURLY = r'}|%>'
-
-t_CPP_DOT = r'\.'
-t_CPP_COMMA = r','
-t_CPP_SEMICOLON = r';'
-t_CPP_COLON = r':'
-t_CPP_BSLASH = r'\\'
-
-# Matched quotes on the same line are CPP_CHAR or CPP_STRING.
-# Unmatched quotes will be errors, so the following are commented out.
-#t_CPP_SQUOTE = r"'"
-#t_CPP_DQUOTE = r'"'
-
-t_CPP_DEREFERENCE = r'->'
-t_CPP_MINUSEQUAL = r'-='
-t_CPP_MINUSMINUS = r'--'
-t_CPP_LSHIFT = r'<<'
-t_CPP_LESSEQUAL = r'<='
-t_CPP_RSHIFT = r'>>'
-t_CPP_GREATEREQUAL = r'>='
-t_CPP_LOGICALOR = r'\|\|'
-t_CPP_OREQUAL = r'\|='
-t_CPP_LOGICALAND = r'&&'
-t_CPP_ANDEQUAL = r'&='
-t_CPP_EQUALITY = r'=='
-t_CPP_INEQUALITY = r'!='
-t_CPP_XOREQUAL = r'^='
-t_CPP_MULTIPLYEQUAL = r'\*='
-t_CPP_DIVIDEEQUAL = r'/='
-t_CPP_PLUSEQUAL = r'\+='
-t_CPP_PLUSPLUS = r'\+\+'
-t_CPP_PERCENTEQUAL = r'%='
-t_CPP_LSHIFTEQUAL = r'<<='
-t_CPP_RSHIFTEQUAL = r'>>='
-t_CPP_ELLIPSIS = r'\.\.\.'
+from pcpp.common import *
+#from pcpp.dfltlexer import *
+from pcpp.regexes import *
+from pcpp.replacements import *
+from pcpp.tokens import (PpTok, RawTok, Tokens, TokIter, TokLoc, TokenSep)
+from pcpp.directive import Directive
+from pcpp.writer import OutPosFlag, OutPosChange, OutPosMove, OutPosEnter
 
 
-# Identifier
-t_CPP_ID = r'[A-Za-z_][\w_]*'
-
-# Object and function macro identifiers.
-# CPP_OBJ_MACRO is the macro name, skipping the following whitespace
-@TOKEN(rf'{t_CPP_ID}(?=\()')
-def t_DEFINE_CPP_FUNC_MACRO(t):
-    t.type = 'CPP_FUNC_MACRO'
-    t.lexer.begin('INITIAL')
-    return t
-@TOKEN(rf'{t_CPP_ID}')
-def t_DEFINE_CPP_OBJ_MACRO(t):
-    t.type = 'CPP_OBJ_MACRO'
-    t.lexer.begin('INITIAL')
-    return t
-
-# Floating literal
-def t_CPP_FLOAT(t):
-    r'((\d+)(\.\d+)(e(\+|-)?(\d+))?|(\d+)e(\+|-)?(\d+))([lL]|[fF])?'
-    return t
-
-# Integer literal
-def t_CPP_INTEGER(t):
-    r'(((((0x)|(0X))[0-9a-fA-F]+)|(\d+))([uU][lL]|[lL][uU]|[uU]|[lL])?)'
-    return t
-
-# String literal
-# Terminating " required.
-r_schar = r'[^"\n]'
-@TOKEN(rf'(L|U|u|u8)?\"{r_schar}*\"')
-def t_CPP_STRING(t):
-    return t
-
-# h-char.  Part of a <...> header name
-#   Anything other than newline or >.
-r_hchar = r'[^>\n]'
-r_hname = re.compile(f'<({r_hchar})*>')
-
-# q-char.  Part of a "..." header name
-#   Anything other than newline or ".
-r_qchar = r'[^"\n]'
-r_qname = re.compile(f'<({r_qchar})*>')
-
-# h-type and q-type header names.  Only used in INCLUDE state.
-# Note, some things in these names are undefined behavior (C99 Section 6.4.7),
-#   and this is checked in the preprocessor.include() method.
-
-t_INCLUDE_CPP_H_HEADER_NAME = rf'<({r_hchar})*>'
-#t_INCLUDE_CPP_Q_HEADER_NAME = rf'\"({r_qchar})*\"'
-
-# Character constant 'c+' or L'c+' or (U|u|u8)'c'.
-# Terminating ' required.
-r_cchar = r"[^'\n]"
-@TOKEN(rf"(L?\'{r_cchar}*|(U|u|u8)\'{r_cchar})\'")
-#@TOKEN(rf"(L?\'{r_cchar}*|(U|u|u8)\'{r_cchar})\'?")
-def t_CPP_CHAR(t):
-    return t
-
-# VBlock comment, possibly spanning multiple lines
-def t_CPP_COMMENT1(t):
-    r'(/\*(.|\n)*?\*/)'
-    ncr = t.value.count("\n")
-    t.lexer.lineno += ncr
-    return t.lexer.whitespace(t)
-
-# Line comment
-def t_CPP_COMMENT2(t):
-    r'(//[^\n]*)'
-    return t.lexer.whitespace(t)
-    
-def t_ANY_error(t):
-    # Check for unmatched quote character.
-    if t.value[0] in '\'\"':
-        endline = t.value.find('\n')
-        t.value = t.value[:endline]
-        message = f"Unmatched quote {t.value}\\n"
-    else:
-        t.value = t.value[0]
-        message = f"Illegal character {t.value!r}"
-
-    t.type = TokType.error
-    t.lexer.prep.on_error_token(t, message)
-    t.lexer.skip(len(t.value))
-    return t
-
-class Tokens(list[LexToken]):
-    """ A list of tokens with some extra capabilities.
-    Can make copies of another list.
-    Can mark a span within the list, which can be replaced by some other tokens.
-    Indicates if changes have been made.
-    Can iterate the mark forward.
+class Lines:
     """
-    def __init__(self, input: Iterable[LexToken] = ()):
-        self[:] = map(copy.copy, input)
-        self.start, self.end = 0, len(self)
+    A mixin class for the PpLex lexer, which tracks lines as tokens are lexed
+    from the data.  Attributes lexdata, lexlen, lexpos, and lineno are
+    contained in the lex.Lexer class, the base class of PpLex.
 
-    def moveto(self, start: int) -> None:
-        self.start = self.end = start
-        self.changed = False
+    When a token is lexed by lex.Lexer, self.lexpos and self.lineno are copied
+    to the token, and self.lexpos is bumped up by the length of the
+    token.value.  It is up to the Lines class to update self.lineno and any
+    other variables.  This is done by the update_lines(token) method.
+    """
 
-    def mark(self, end: int) -> None:
-        self.end = end
-        self.changed = False
+    # Position of first character in current physical line.  Beginning of
+    # file, or after last line splice or newline character.
+    linepos: int
+
+    # Change of position after replacements in current line.
+    repl_delta: int
+
+    # Position after next newline char at or after linepos.  Will become
+    # linepos when lexpos reaches this point, starting a new logical line.
+    next_linepos: int
+
+    # Number of physical lines within the logical line.
+    phys_lines: int
+
+    # The current logical line has only whitespace so far.  Useful for
+    # detecting the first non-whitespace token.  Such as the '#' in a
+    # directive.
+    only_ws_this_line: bool = True
 
     @property
-    def span(self) -> Tokens:
-        return Tokens(self[self.start : self.end])
+    def colno(self) -> int:
+        """
+        Column number (starting at 1) for current lexer position in current
+        physical line.  A line splice sets the colno back to 1 by setting
+        linepos = splice position.
+        """
+        return self.lex.lexpos - self.linepos + self.repl_delta + 1
 
-    def replace(self, rep: Tokens) -> None:
-        self[self.start : self.end] = rep
-        self.end = self.start + len(rep)
-        self.changed = True
-
-    def __str__(self) -> str:
-        return ''.join(tok.value for tok in self)
-
-    def __repr__(self) -> str:
-        s = str(self)
-        more = "'..." if len(s) > 20 else ''
-        return f"<Tokens {s!r:.20}{more}>"
-
-# TokType
-# An enum class for the .type of a token, where the members are TokAttrs objects.
-# The enum member is a str subclass with its name as the value.
-# Thus TokType[name] can be used like name, such as a key in another dict.
-# The members have other attributes to get properties of a token from its type.  Such as TokType.CPP_WS.ws is True.
-
-class TokAttrs(str):
-    def __new__(cls, value: str):
-        return super().__new__(cls, value)
-
-    def __init__(self, value):
-        self.ws = self in ws_tokens
-        self.space = self in space_tokens
-        self.comment = self in comment_tokens
-        self.nl = self == 'CPP_NEWLINE'
-        self.err = self == 'error'
-        super().__init__()
-
-TokType = enum.Enum('TokType', {tok:tok for tok in tokens}, type=TokAttrs)
-
-class Hide(frozenset[str]):
-
-    def __new__(cls, names: Set = frozenset()):
-        return super().__new__(cls, names)
-
-    def __or__(self, other: Set) -> Hide:
-        return Hide(super().__or__(other))
-
-    def __and__(self, other: Set) -> Hide:
-        return Hide(super().__and__(other))
-
-    def __repr__(self) -> str:
-        if self:
-            return f"{{{', '.join(sorted(self))}}}"
-        else:
-            return "{}"
-
-class PpTok(LexToken):
-    hide: set[str] = Hide()            # Macro names to suppress expansion.
-
-    def add_hide(self, name: str) -> None:
-        """ Add the name to the hide set """
-        self.hide |= {name}
-
-    def __repr__(self) -> str:
-        rep = f"{self.value!r} @ {self.lineno}:{self.colno}"
-        if self.hide:
-            rep = f"{rep} - {self.hide!r}"
-        return rep
-
-class PpLex(Lexer):
-    """ This is a subclass of lex.Lexer.
-    It performs translation phases 1 and 2 (C99 Section 5.1.1.2) on the input data.
-    It does tokenizing (phase 3) using global variables to define the states, rules, etc.
-    It maintains the current line number (the base class has a line number but relies on
-        rule actions to advance it).  Also provides column position within the current line.
-    Note that digraph sequences are not replaced.  Rather, they are treated as punctuator tokens
-        in a context where a punctuator is possible.  Within a character constant or a string,
-        a digraph is just two characters.  See C99 Section 6.4.6, Para 3.
-    """
-    all_ws: bool                # The current line has only whitespace so far.
-                                # Useful for detecting the first non-whitespace token.
-    is_ws: bool                # Current token is whitespace.
-    cuts: _Cuts                 # Places where the original data was shortened.
-
-    def __new__(cls, prep: Preprocessor = None, from_lexer: Lexer = None, *args, source: str = '', **kwds) -> Self:
-        if from_lexer:
-            lexer = from_lexer.clone()
-            lexer.__class__ = cls
-            return lexer
-        else:
-            return super().__new__(cls)
-
-    def __init__(self, prep: Preprocessor, *args, **kwds):
-        self.prep = prep
-        self.input('', source=prep.topsource)
-        pass
-
-    def __call__(self, text: str) -> None:
-        self.input(text)
-        return iter(self)
-
-    def input(self, data: str, source: Source = None):
-        self.cuts = self._Cuts(self)
-        super().input(self._do_cuts(data))
+    def input(self, data: str) -> None:
+        """ Set the input data here and in the lex.Lexer class.  Translation
+        phase 1 and 2 replacements have already been made in the data, and
+        self.repls records all of them.
+        """
+        # Initialize in lex.Lexer class.  Sets lexdata, lexlen, and lexpos.
+        data = super().input(data)
+        self.lineno = 1
         self.linepos = 0
-        if source: self.source = source
-        self.all_ws = True
+        self.repl_delta = 0
+        self.next_linepos = data.find('\n') + 1
+        self.only_ws_this_line = True
+        self.phys_lines = 1
 
-    def parse(self, data: str) -> Iterable[LexToken]:
-        lex = self.clone()
+    def update_lines(self, tok: PpTok) -> None:
+        """
+        Bring internal state up to date after given token, and also set some
+        token attributes.  lexpos is now at the end of the value.
+        """
+        def find_nl() -> int:
+            """
+            Position after next newline character after self.linepos, or
+            lexlen if not found.
+            """
+            return self.data.find('\n', self.linepos) + 1 or len(self.data) + 1
 
-    def token(self) -> PpTok | None:
-        self.is_ws = False      # Will be set to True by whitespace().
-        colno = self.colno      # Get this before the token is parsed.
-        tok: LexToken | None = super().token()
-        if tok:
-            tok.__class__ = PpTok
-            tok.lexer = self 
-            try: tok.type = TokType[tok.type]
-            except KeyError: pass
-            tok.colno = colno
+        # Did the token cross a newline?
+        if self.lex.lexpos >= self.next_linepos:
+            # Token could be a newline token, or it could be some other type
+            # with newlines embedded within it.
+            if tok.type.nl:
+                self.lineno += self.phys_lines
+                self.linepos = self.next_linepos
+                self.repl_delta = 0
+                self.next_linepos = find_nl()
+                self.phys_lines = 1
+                self.first_ws = None
+                self.only_ws_this_line = True
+            else:
+                # Newline(s) embedded in token value.
+                pos = self.next_linepos
+                while self.lex.lexpos >= pos:
+                    self.phys_lines += 1
+                    self.linepos = pos
+                    pos = find_nl()
+                self.repl_delta = 0
+                self.next_linepos = pos
 
-        if self.is_ws:
-            self.is_ws = False
-        elif not tok or tok.value != '\n':
-            self.all_ws = False
-        if tok:
-            newline = tok.value == '\n'
-            self.cuts.moveto(self.lexpos, newline)
-            tok.lineno = self.adjust_line() - newline
-            tok.source = self.source
-            if self.source.filename == '< top level >': print('----', tok.value)
-        return tok
+    def newphys(self, nextpos: int) -> None:
+        """
+        Start of a new physical line, same logical line.
+        """
+        self.phys_lines += 1
+        self.linepos = nextpos
+        self.repl_delta = 0
 
-    def null(self) -> PpTok:
-        lex = self.clone()
-        lex.input(' ')
-        tok = lex.token()
-        tok.type = TokType.CPP_NULL
-        tok.value = ''
-        return tok
 
-    def newline(self):
-        """ A new line ('\n') is tokenized. """
-        self.lineno += 1
-        self.all_ws = True
+class RawLexer:
+    """
+    Low level interface to the lex.Lexer class.  It accepts a data string,
+    which might be the contents of a source file, or otherwise artificially
+    constructed.
 
-    def whitespace(self, t: LexToken) -> LexToken:
-        """ A whitespace token is tokenized. """
-        self.is_ws = True
-        return t
+    It performs translation phases 1 and 2 on the input data.  The input data
+    is provided separately by the input() method.
+
+    Produces raw tokens serially from the data.  Also provides an iterator to
+    do this.  The raw token does not have complete PpTok information.  It does
+    provide enough information to analyze the tokens contained in an arbitrary
+    string.
+    """
+    # Enable error messages during lexing.  Can be set by subclass.
+    errors: bool = False
+
+    # Places where the original data was altered in phase 1 or 2.
+    repls: ReplMgr = EmptyReplMgr()
+
+    def __init__(self, lex: Lexer, *args, **kwds):
+        self.prep = prep = lex.prep
+        self.REs = lex.REs
+        self.TokType = lex.TokType
+        #self.clones = []
+        self.source = prep.currsource
+
+    def input(self, data: str) -> str:
+        """ Begin lexing.  Do transforms on the data, return new data. """
+        repls = ReplMgr(self)
+        data = repls.do_repls(self, data)
+        if repls: self.repls = repls
+        self.data = data
+        self.lex.input(data)
+        return data
+
+    def parse(self, data: str, raw: bool = True) -> Iterable[RawTok]:
+        """
+        Iterate over the tokens in given data, using only the superclass
+        methods and a clone of self.
+        """
+        lex: RawLexer
+        with self.cloned(errors=False, cls=RawLexer) as lex:
+            lex.input(data)
+            tok: RawTok = next(lex.raw_tokens())
+            yield tok
+
+    def raw_token(self) -> RawTok | None:
+        """
+        Next raw token, if any, in entire data string without any other
+        intervention.  Using superclass methods.
+        """
+        t: LexToken | None = self.lex.token()
+        if not t: return None
+        return RawTok(self, t)
+
+    def raw_tokens(self) -> Iterator[RawTok]:
+        """
+        All raw tokens in entire data string without any other intervention.
+        Using superclass methods.
+        """
+        while True:
+            t: LexToken | None = self.lex.token()
+            if not t: return
+            tok = RawTok(self, t)
+            yield tok
 
     def skip(self, n):
         """ Skip ahead n characters and note any newlines and cuts passed.
         Mainly used to skip over a character that is not the start of a token.
         """
         assert n >= 0, f"Trying to use skip({n}) to move backward."
-        pos = self.lexpos
-        super().skip(n)
-        while pos < self.lexpos:
-            if self.lexdata[pos] == '\n':
-                self.newline()
+        pos = self.lex.lexpos
+        self.lex.skip(n)
+        while pos < self.lex.lexpos:
+            if self.data[pos] == '\n':
+                self.newline(pos)
             pos += 1
-        self.cuts.moveto(pos, False)
 
-    def erase(self, tok: LexToken) -> None:
-        """ Change token into an empty whitespace, which will eventually be discarded,
-        without altering the token list it is a part of.
+    def spelling(self, start: int, stop: int) -> str:
+        return self.data[start : stop]
+
+
+class PpLex(Lines, RawLexer):
+    """ This is a subclass of lex.Lexer.
+    It performs translation phases 1 and 2 on the input data.  It
+    does tokenizing (phase 3) using global variables to define the states,
+    rules, etc.
+
+    It maintains the current line number (the base class has a line number but
+    relies on rule actions to advance it).  Also provides column position
+    within the current line.
+
+    Note that digraph sequences are not replaced.  Rather, they are treated as
+    punctuator tokens in a context where a punctuator is possible.  Within a
+    character constant or a string, a digraph is just two characters.
+    """
+    # Object representing the source file inclusion.
+    source: Source = None
+
+    lineno: int                 # Line number.
+
+    move: MoveTok = None        # Last change in output position.
+
+    errors: bool                # Enable error messages during tokens().
+
+    lex: Lexer                  # Original lexer this came from.
+    clones: list[PpLex] = []    # Any available clones of self.lex.
+
+    def __new__(cls, *, from_lexer: Lexer = None,
+                **kwds
+                ) -> Self:
+        lexer = super().__new__(cls)
+        if from_lexer:
+            lex = from_lexer.clone()
+            lexer.lex = lex
+            lexer.clones = []
+        return lexer
+
+    def __init__(self, *, lex: Lexer = None, **kwds):
+        if not lex:
+            lex = self.lex
+        super().__init__(lex)
+
+    def input(self, data: str, source: Source = None):
         """
-        tok.type = TokType.CPP_WS
-        tok.value = ''
-
-    def fix_paste(self, tok: PpTok) -> Iterable[PpTok]:
-        """ Handle token resulting from a ## operator.
-        If value is for a valid token, set its type.
-        Otherwise, make two or more tokens parsed from the value.
-        Generates the token(s).
+        Set the data to be lexed.  Performs Translation Phase 1 and 2
+        replacements.  Sets the source object, if given.
         """
-        self.input(tok.value)
-        toks = list(self)
+        self.source = source
+        super().input(data)
+        self.linepos = 0
+        #if source:
+        #    self.source = source
+        #    self.filename = source.filename
+        self.only_ws_this_line = True
 
-        if len(toks) != 1:
-            # Insert spaces between the tokens.
-            for j in reversed(range(1, len(toks))):
-                self.input(' ')
-                toks[j : j] = list(self)
-            self.prep.on_error_token(tok,
-                f"Pasting result {tok.value!r} is not a valid token.")
+    @contextlib.contextmanager
+    def cloned(self, cls: Type = None, errors: bool = True) -> PpLex:
+        """
+        A new lexer of same class, or given class.  Uses a clone of self.lex.
+
+        Can turn off error reporting during the context.
+        """
+        try:
+            clone = self.clone(cls)
+            clone.errors = errors
+            yield clone
+        finally:
+            clone.errors = True 
+            self.clones.append(clone.lex)
+
+    def clone(self, cls: type = None) -> Self:
+        """ Make a clone of the prep's PpLex.  It won't be reusable. """
+        lex = self.lex
+        clones = self.clones
+        if clones:
+            lex = clones.pop()
         else:
-            tok.type = toks[0].type
+            lex = lex.clone()
+        clone = (cls or type(self))(lex=lex)
+        clone.lex = lex
+        lex.owner = clone
+        clone.clones = clones
+        return clone
 
-        yield from toks
+    @contextlib.contextmanager
+    def setstate(self, state: str) -> None:
+        """ Set the lexing state during the context, then restore it. """
+        old = self.lexstate
+        self.begin(state)
+        try: yield
+        finally:
+            self.begin(old)
 
-    def separate(self, left: LexToken, right: LexToken) -> bool:
-        """ True if pasting the two tokens will parse differently from
-        the tokens, thus requiring whitespace between them.
-        See https://github.com/ned14/pcpp/issues/29, which is fixed by this.
+    @contextlib.contextmanager
+    def seterrors(self, errors: bool = True) -> None:
         """
+        Set the error message enabling during the context, then restore it.
+        """
+        old = self.errors
+        self.errors = errors
+        try: yield
+        finally:
+            self.errors = old
 
-    def adjust_pos(self) -> int:
-        return self.lexpos + self.cuts.addpos
-
-    def adjust_line(self) -> int:
-        return self.lineno + self.cuts.addline
+    def make_token(self, type: TokType, *, value: str = None,
+                   loc: TokLoc = None, cls: type = PpTok,
+                   **attrs
+                   ) -> PpTok:
+        """
+        Make a new token with given type and optional value, and any other
+        attributes desired.  The default value varies with the type.  The
+        token is at the current location of self, by default, or `loc` if not
+        None.
+        """
+        if value is None: value = type.val
+        if loc is None: loc = self.loc
+        return cls(self, type=type, value=value, loc=loc, **attrs)
 
     @property
-    def colno(self) -> int:
-        """ Column number (starting at 1) for current position.
-        A line splice sets the colno back to 1.
-        """
-        return self.lexpos - self.linepos + 1
+    def loc(self) -> TokLoc:
+        """ Current location, which will be stored in a new token. """
+        loc = TokLoc(lineno=self.lineno, colno=self.colno, source=self.source,
+                     datapos=self.lex.lexpos, move=self.move)
 
-    def _do_cuts(self, input: str) -> str:
-        """ Find all the shortenings of the input for translation phases 1 and 2.
-        These are:
-            - the 9 trigraphs, which are 3 characters and are replaced with one character.
-                This was a way of encoding source characters which were not in in a 6-bit
-                character set.
-            - line splice, which is a '\\\n' sequence which is simply deleted.
-            - A combination, which uses a trigraph for the backslash, as '??/\n'.
-                All 4 characters are deleted.
-        """
-        if not self._cuts_pat.search(input):
-            return input
-        cuts: list[Self._Cut] = []
+        phys_offset = self.phys_lines - 1
+        if phys_offset:
+            loc = replace(loc, phys_offset=phys_offset)
+        return loc
 
-        def replace(m: re.Match) -> str:
-            """ Replace the matched cut sequence with single character or nothing.
-            Also, note where the replacement took place in the data before replacement.
-            """
-            old = m.group()
-            new = self._cuts_rep[old]
-            cuts.append(self._Cut(m.start(), len(old) - len(new), not new))
-            return new
+    def nexttok(self) -> PpTok | None:
+        """ Get the next token from lexer, or None.  Skip whitespace and
+        newlines, but these are reflected in later tokens."""
 
-        shorter = self._cuts_pat.sub(replace, input)
-        cuts.append(self._Cut(len(input) + 1, 0, False))
-        self.cuts.set_cuts(cuts)
-        return shorter
-
-    _cuts_pat = re.compile(r'\?\?([=\'\(\)\!<>\-]|/\\?\n)|\\\n')
-    _cuts_rep = {
-        '??=':'#',      '??/':'\\',     "??'":'^',
-        '??(':'[',      '??)':']',      '??!':'|',
-        '??<':'{',      '??>':'}',      '??-':'~',
-        '\\\n':'',      '??/\n':'',
-    }
-
-    class _Cuts(list):
-        """ Manages places in the data where it was cut by replacing a substring
-        with a shorter string.
-        The purpose is to adjust position and line number based on the current position.
-        Tracks forward movement in the current position.
-        Maintains position of the current line of the original text.  If lines were
-        spliced together, then the position after the splice is a new line start.
-        Optimized when there are no cuts.
-        """
-        def __init__(self, lexer: Lexer):
-            # Set pass-through routines for the case where there are no cuts.
-            # Delete these if there are cuts, to revert to the class method.
-            self.lexer = lexer
-            self.addpos = self.addline = 0
-            self.adjust_pos = lambda : self.lexer.lexpos
-            self.adjust_line = lambda : self.lexer.lineno
-            pass
-
-        def set_cuts(self, cuts: list[_Cut]) -> None:
-            """ Record one or more Cuts made.  The last cut marks the end of the data plus 1. """
-            del self.adjust_pos, self.adjust_line
-            reduction = 0
-            for i, cut in enumerate(cuts):
-                cut.where -= reduction
-                reduction += cut.reduction
-            self.cuts_passed = 0
-            self.lexer.linepos = 0
-            self.nextpos = cuts[0].where
-            self.nextcut = cuts[0]
-            self[:] = cuts
-            pass
-
-        def moveto(self, pos: int, newline: bool):
-            """ Change current position in reduced data.
-            Update self.addpos and self.addline and lexer.linepos.
-            Note the last Cut which has been passed.
-            """
-            if newline:
-                self.lexer.linepos = pos
-            if not self: return
-            while self.nextpos <= pos:
-                cut = self.nextcut
-                if cut.joined:
-                    self.addline += 1
-                    self.lexer.linepos = cut.where
-                self.addpos += cut.reduction
-                self.cuts_passed += 1
-                cut = self.nextcut = self[self.cuts_passed]
-                self.nextpos = cut.where
-
-    @dataclasses.dataclass
-    class _Cut:
-        where: int              # Position in original data before the cut.
-                                # After adjustment, position in shortened data.
-        reduction: int          # How much shorter the data was made.
-                                # 2 for most things, 4 for ??/_n.
-        joined: bool            # If this was a line join --- \\\n or ??/\n.
-
-def default_lexer():
-    return lex.lex(optimize=in_production)
-
-""" Handling whitespace...
-A whitespace token is any of:
-    Space or tab characters.
-    Comment.
-    Newline.
-A backslash-newline sequence in the input has been removed already.
-When doing macro expansion:
-    Leading and trailing whitespace in a function argument is ignored.
-    However, this applies only to variable args as a group.
-    Thus, ( a , b ) matching ... becomes 'a , b'.
-    This is only relevant with # arg.  Initial and final whitespace is
-    deleted and consecutive whitespace elsewhere is replaced by a single ' '.
-    Otherwise, including the ## operator, all whitespace is deleted from the args.
-In phase 3, whitespace is condensed.  Newlines are kept.
-Each comment is replaced by a single space.  However, the passthru_comments flag
-will keep comments as they are.
-"""
-def no_ws(tokens: Iterable[LexToken]) -> Iterable[LexToken]:
-    """ Filters out all whitespace tokens from given tokens, inclusing newlines.
-    Consumes the input if it is an iterator.
-    """
-    # Get the iterator.
-    it: Iterable[LexToken] = iter(tokens)
-
-    tok: LexToken
-    for tok in it:
-        if not tok.type.ws:
-            yield tok
-
-def reduce_ws(tokens: Iterable[LexToken], prep: Preprocessor) -> Iterable[LexToken]:
-    """ Compresses whitespace, as in translation phase 3.
-    However, comments will be preserved if the Preprocessor says so.
-    Consumes the input if it is an iterator.
-    """
-    # Get the iterator.
-    it: Iterable[LexToken] = iter(tokens)
-
-    tok: LexToken
-    have_ws: bool = False
-    for tok in it:
-        if (tok.type.ws and not tok.type.nl
-            and (not tok.type.comment
-                 or not prep.on_comment(tok)
-                 )
-            ):
-            # This is whitespace to compress
-            if have_ws: continue
-            # First whitespace token.
-            have_ws = True
-            tok.value = ' '
-        else:
-            have_ws = False
-
-        yield tok
-
-def merge_ws(tokens: Iterable[LexToken]) -> Iterable[LexToken]:
-    """ Reduces all consecutive whitespace, including newlines and comments,
-    to a single space.
-    """
-    # Get the iterator.
-    it: Iterable[LexToken] = iter(tokens)
-
-    tok: LexToken
-    pend_ws: LexToken = None
-
-    for tok in it:
+        loc = self.loc
+        t: LexToken | None = self.lex.token()
+        if not t: return None
+        tok: PpTok = PpTok(self, t)
+        tok.loc = loc
+        repls = self.repls.movetotoken(tok)
+        self.update_lines(tok)
+        newline = tok.type.nl
         if tok.type.ws:
-            if not pend_ws:
-                pend_ws = tok
+            if newline:
+                self.only_ws_this_line = True
         else:
-            if pend_ws:
-                t = copy.copy(pend_ws)
-                t.value = ''
-                yield t
-                pend_ws = False
-            yield tok
-    if pend_ws:
-        t = copy.copy(pend_ws)
-        t.value = ''
-        yield t
+            self.only_ws_this_line = False
 
+        if repls:
+            if tok.type.revert:
+                tok = tok.revert(tok.type)
+
+        if newline:
+            self.phys_lines = 1
+        elif '\n' in tok.value:
+            pass
+            # Multiline token.  
+            # GCC will write leading space if it is at the start of the
+            # line.
+            #adjust_line: bool = not (tok.type.comment and self.prep.emulate)
+            #self.newlines_in_token(tok, adjust_line=adjust_line)
+        #if tok.brk():
+        #    print(f'--- {tok.source} {tok!r} pos = '
+        #          f'{tok.datapos} .. {self.lex.lexpos}')
+        return tok
+
+    def parse_tokens(self, data: str) -> Iterable[PpTok]:
+        """
+        Iterate over the tokens in given data, using a clone of self.  
+        """
+        lex: PpLexer
+        with self.cloned(errors=False) as lex:
+            lex.input(data)
+            yield from lex.tokens()
+
+    #def parse(self, input: str) -> TokIter:
+    #    """ Get iterator of tokens from input string. """
+    #    lex: PpLex
+    #    with self.cloned(errors=False, cls=PpLex) as lex:
+    #        lex.input(input)
+    #        yield from lex.tokens()
+
+    @TokIter.from_generator
+    def tokens(self, errors: bool = True
+               ) -> Iterator[PpTok]:
+        """
+        Generate all tokens for the entire data string.  Includes indent tokens
+        for logical lines.  Translation Phase 1 and 2 replacements have been
+        done already.
+        """
+        tok: PpTok = None
+        prev: PpTok = None
+        #toks: Iterable[PpTok] = self.raw_tokens(errors)
+
+        self.errors = errors
+        ws = False              # Whitespace seen since last token or newline.
+        lineno: int = 0         # Line # of last token seen.
+
+        def nexttok() -> PpTok | None:
+            """
+            Get the next token from lexer, or None.  Skip whitespace other than
+            newlines, but these are reflected in next returned token.
+            """
+
+            nonlocal prev, ws
+
+            while True:
+                tok: PpTok = self.nexttok()
+                if tok:
+                    newline = tok.type.nl
+                    if tok.type.ws:
+                        if newline:
+                            # newline: forget previous ws, and return token.
+                            ws = False
+                            prev = None
+                            tok.sep = TokenSep.create()
+                        else:
+                            # other whitespace: remember and go to next token.
+                            ws = True
+                            continue
+                    else:
+                        # Normal token.
+                        self.only_ws_this_line = False
+                        tok.sep = TokenSep.create(spacing=ws)
+                        ws = False
+                return tok
+            # end of nexttok()
+
+        while True:
+            tok = nexttok()
+            if not tok: break
+            tok.prev = prev
+            prev = tok
+            if tok.type.dir:
+                # Special handling for a directive.
+                dir = tok
+                dir.line = Tokens([tok.copy(type=self.TokType.CPP_POUND)])
+                ws = False
+                tok = nexttok()
+                while not tok.type.nl:
+                    dir.line.append(tok)
+                    tok = nexttok()
+                if self.prep.clang and self.source.in_macro:
+                    if self.source.in_macro.args is None:
+                        yield dir.make_null()
+                dir.dir = Directive(dir)
+                yield dir
+                continue
+            # Not directive.
+            # Check for change in line number.
+            if tok.lineno != lineno:
+                tok.sep = TokenSep.create(indent=tok.loc)
+                lineno = tok.lineno
+            if not tok.type.nl:
+                yield tok
+
+    def make_passthru(self, toks: Iterable[PpTok]) -> PpTok:
+        """ A CPP_PASSTHRU token at current location. """
+        return self.make_token(self.TokType.CPP_PASSTHRU, toks=toks, )
+
+    def newlines_in_token(
+            self, tok: PpTok, *,
+            #adjust_line: bool = True,           # Add to self.phys_lines.
+            nl_pat=re.compile(r'(?<![\\])\n'),  # Unescaped newline regex.
+            ) -> None:
+        """ Account for all (unescaped) newline characters in token. """
+        for m in re.finditer(nl_pat, tok.value):
+            self.newphys(tok.datapos + m.start() + 1)
+
+    def try_paste(self, lhs: PpTok, rhs:PpTok) -> PpTok | None:
+        """
+        Try to paste two tokens together.  Returns new token at the location
+        of the left token (or the right token if left is a placemarker).
+        Merges the two hide sets.  Returns None if not a valid token result.
+        """
+        lex: PpLex
+        if lhs.type.null: return rhs
+        if rhs.type.null: return lhs
+
+        value = lhs.value + rhs.value
+        with self.cloned(errors=False) as lex:
+            lex.input(value)
+            # Using this string as input data, lex the first token using base
+            # class lexer.  This should return a LexToken with exactly the
+            # same value, and not an error type.  Otherwise the input data is
+            # not valid.  Could call lex.token(), but this way is faster.
+            t: LexToken | None = lex.lex.token()
+            typ = self.TokType[t.type]
+            if not t or len(value) != lex.lex.lexpos or typ.err:
+                # Failure to match the value.
+                self.prep.on_error_token(lhs,
+                    f"Pasting result {value!r} is not a valid token.")
+                return None
+
+            return lhs.copy(value=value, type=typ,
+                            hide=lhs.hide and rhs.hide
+                            and lhs.hide & rhs.hide,
+                            )
+
+    def fix_paste(self, tok: PpTok) -> PpTok | None:
+        """ Handle token resulting from a ## operator.
+        If entire value is for a valid token, set its type and return it,
+        otherwise return None.
+        """
+        lex: PpLex
+        with self.cloned(errors=False) as lex:
+            lex.input(tok.value)
+            # Using given string as input data, lex the first token 
+            #   using self.lex.  This should return a LexToken with exactly
+            #   the same value, and not an error type.
+            #   Otherwise the input data is not valid.
+            #   Could call lex.token(), but this way is faster.
+            t: LexToken | None = lex.lex.token()
+            typ: self.TokType = t and self.TokType[t.type] or tok.type
+            if not t or len(tok.value) != lex.lex.lexpos or typ.err:
+                # Failure.
+                self.prep.on_error_token(tok,
+                    f"Pasting result {tok.value!r} is not a valid token.")
+                return None
+            tok.type = typ
+            return tok
+
+    def separate(self, left: str, right: str) -> bool:
+        """ True if two tokens with given values need a separating space. """
+        lex: PpLex
+        with self.cloned(errors=False) as lex:
+            lex.input(left + right)
+            tok: LexToken           # Might be a PpTok subclass.
+            if lex.repls:
+                tok = next(lex.tokens()).revert()
+                return tok.value != left
+            else:
+                # Could call lex.token(), but without input() replacements, 
+                # this way is faster and has same result
+                lex.lex.token()
+                # First token, value should match left.
+                return len(left) != lex.lex.lexpos
+
+    def brk(self) -> bool:
+        """ Break condition for debugging. """
+        return break_match(line=self.lineno, col=self.colno,
+                           pos=self.lex.lexpos, file=self.source.filename)
+
+    def __repr__(self) -> str:
+        return f"<PpLex {self.loc}>"
+
+
+def default_lexer(prep: Preprocessor) -> PpLex:
+    """ Creates a single PpLex lexer that handles everything,
+    along with clones.  Each clone handles a single input string, and some
+    clones may be used (serially) for different inputs.
+
+    The details of the PpLex vary with attributes of the prep provided.  This
+    function can be called repeatedly to make different lexers.
+    """
+    from pcpp.dfltlexer import default_lexer as dfltlex
+    newlex: PpLex = dfltlex(prep)
+    return newlex
+    # -------------------------------------------------------------------------
+    # Default preprocessor lexer definitions.   These tokens are enough to get
+    # a basic preprocessor working.   
+    # Other modules may import these if they want.
+    # -------------------------------------------------------------------------
+
+    # Special tokenizing for preprocessing directives, using lexer states.
+    #   A '#' after possible whitespace, at the start of a line, introduces a
+    #       directive.  Token type is CPP_DIRECTIVE, and new state = DIRECTIVE.
+    #   Following whitespace is skipped.  The next token should be the
+    #       directive name, a CPP_ID.
+    #       If it is 'include', type = CPP_INCLUDE and new state is INCLUDE.
+    #           Then looks for CPP_H_HDR_NAME or CPP_Q_HDR_NAME.
+    #       If it is 'define', type = CPP_DEFINE and new state is DEFINE.
+    #           Then looks for a CPP_OBJ_MACRO or CPP_FUNC_MACRO.
+    #           After that, it enters the MACREPL state, where any ## tokens
+    #           become CPP_PASTE, rather than CPP_DPOUND.
+    #       If it is 'if' or 'elif', new state is CONTROL.  Same as INITIAL
+    #           except that CHAR tokens will not revert \U or \u escapes.
+    #       Any other token of any type goes back to the INITIAL state.
+    #   Reaching a newline goes back to the INITIAL state.
+    #   All tokens from the '#' up to, but not including, the next newline
+    #       are put into a Tokens and set as (the # token).line.
+
+    #states = [
+    #    ('DIRECTIVE', 'inclusive'),
+    #    ('INCLUDE', 'inclusive'),
+    #    ('DEFINE', 'inclusive'),
+    #    ('CONTROL', 'inclusive'),
+    #    ]
+
+    #tokens = PpTok.type_names
+
+    ## Some common REs that are incorporated into other REs...
+    #REs = RegExes(prep)
+
+    ## Note, unmatched quote characters and misplaced backslashes are a token,
+    ##  not a literal.  GCC also recognizes $, @, and ` as source characters.
+    #literals = "+-*/%|&~^<>=!?()[]{}.,;:"
+    #if prep.emulate: literals += REs.ascii_not_source
+
+    #""" Lex Rules ...
+    #A lex rule is given to lex.lex() by means of creating an variable in the
+    #closure (i.e., the body of default_lexer().  The name of the variable is
+    #the name of the rule, and has the form 't_...'.  The value of the variable
+    #is either a string denoting the regex to be matched, or a function f(t:
+    #LexToken) -> LexToken, where f.regex is the regex.
+
+    #Rules are stored in the dictionary `rules`, where rules[name] = rule.
+    #`name` is the rule name without the leading 't_'.
+
+    #The Lexer tries to match function rules in the order they appear in rules,
+    #then it tries to match string rules.
+    #"""
+    #StrRule = NewType('StrRule', str)
+    #FuncRule = Callable[[LexToken], LexToken]
+    #Rule = Union[StrRule, FuncRule]
+
+    #rules: Mapping[str, Rule] = {}
+
+    #def funcrule(regex: str, name: str = None) -> Callable[[FuncRule], FuncRule]:
+    #    """
+    #    Decorator for a function f(t: LexToken) -> Lextoken.
+    #    """
+    #    def func(f: FuncRule) -> FuncRule:
+    #        f.regex = regex
+    #        if name:
+    #            fname = f.__name__ = f't_{name}'
+    #        else:
+    #            fname = f.__name__
+    #        rules[fname] = f
+    #    return func
+
+    #def puncrule(*values: str) -> Callable[[FuncRule], FuncRule]:
+    #    """
+    #    Decorator for a function f(t: LexToken) -> LexToken.
+
+    #    A proxy for f is added to rules[name of f].  Name is modified for
+    #    extra values.  punc_values[value] = name.
+    #    """
+    #    def func(f: FuncRule) -> FuncRule:
+    #        fname = f.__name__
+    #        punc(fname[2:], *values, proxy=f)
+    #    return func
+
+    ## These rules can be looked up by any matching string.
+    #punct_values: Mapping[str, str] = {}    # value -> name for each value.
+    
+    #funcs: list[Callable[[LexToken], LexToken]] = []
+
+    ## Token rules other than for punctuators...
+
+    ## Whitespace, one or more consecutive whitespace character(s) 
+    ## other than newline.
+    #t_ANY_CPP_WS = r'((?!\n)\s)+'
+
+    ## Special newline in a directive.  Returns to INITIAL state.
+
+    ## Place before the newline rule below!
+    #@TOKEN(REs.newline)
+    #def t_DIRECTIVE_INCLUDE_DEFINE_CONTROL_CPP_NEWLINE(t):
+    #    t.lexer.begin('INITIAL')
+    #    return t_ANY_CPP_NEWLINE(t)
+
+    ## Newline, other than in a directive.  Advances line number eventually.
+    #@TOKEN(REs.newline)
+    #def t_ANY_CPP_NEWLINE(t):
+    #    return t
+
+    #def t_DIRECTIVE_CPP_ID(t):
+    #    r'[A-Za-z_][\w_]*'
+    #    if t.value == 'include':
+    #        t.lexer.begin('INCLUDE')
+    #    elif t.value == 'define':
+    #        t.lexer.begin('DEFINE')
+    #    elif t.value.endswith('if'):
+    #        t.lexer.begin('CONTROL')
+    #    else:
+    #        t.lexer.begin('INITIAL')
+    #    return t
+    #_string_literal_linecont_pat = re.compile(r'\\[ \t]*\n')
+
+    ## A '##' rule has to come before the '#' rule.
+    #punc('CPP_DPOUND', '##', '%:%:',       func=True)
+
+    ## A '#', if the first non-whitespace in a line, is a directive.
+    ##@puncrule('#', '%:')
+    #def t_CPP_POUND(t: PpTok) -> PpTok:
+    #    r'\#|%:'
+    #    # A PpLex indicates if at the start of a line, RawLexer does not.
+    #    try:
+    #        if t.lexer.owner.only_ws_this_line:
+    #            t.lexer.begin('DIRECTIVE')
+    #            t.type = 'CPP_DIRECTIVE'
+    #    except AttributeError: pass
+    #    return t
+
+    ## Identifier 
+    #t_CPP_ID = REs.ident
+
+    ## Object and function macro identifiers.  
+    ## CPP_FUNC_MACRO is the macro name, if followed immediately by '('.
+    ## CPP_OBJ_MACRO is the macro name, otherwise.
+    #@TOKEN(rf'{REs.ident}(?=\()')
+    #def t_DEFINE_CPP_FUNC_MACRO(t):
+    #    t.type = 'CPP_FUNC_MACRO'
+    #    t.lexer.begin('INITIAL')
+    #    return t
+    ## Place this AFTER FUNC_MACRO!
+    #@TOKEN(REs.ident)
+    #def t_DEFINE_CPP_OBJ_MACRO(t):      
+    #    t.type = 'CPP_OBJ_MACRO'
+    #    t.lexer.begin('INITIAL')
+    #    return t
+
+    ## Floating literal.  Put these before integer.
+    #makefunc('CPP_FLOAT', REs.float)
+    #makefunc('CPP_DOT_FLOAT', REs.dotfloat)
+
+    ## Integer constant 
+    #makefunc('CPP_INTEGER', REs.int)
+
+    ## General pp-number, other than integer or float constant.  (C99 6.4.8,
+    ## C++14 5.9).  Put this after integer and float.
+    #makefunc('CPP_NUMBER', REs.ppnum)
+
+    ## String literal.  # Terminating " required on same logical line.
+    #t_CPP_STRING = REs.string
+
+    ## Raw string literal.  
+    ## Terminating matching delimiter required, possibly on later logical line.
+    ## Only tokenized if C++ or (C with GNU extensions).
+
+    ##if prep.cplus_ver or prep.emulate:
+    ##    @TOKEN(REs.rstring)
+    ##    def t_CPP_RSTRING(t):
+    ##        # Special handling for raw strings.  (C++14 5.4 (3.1)).
+
+    ##        # The transformations in phases 1 and 2 have been made already,
+    ##        # but they must be reverted.  Since GCC also replaces trigraphs,
+    ##        # these are also reverted.  
+    ##        return t
+
+    ## h-type and q-type header names.  Only used in INCLUDE state.  
+    ## Note, some things in these names are undefined behavior (C99 6.4.7), and
+    ## this is checked in the preprocessor.include() method.
+
+    #t_INCLUDE_CPP_H_HDR_NAME = REs.hhdrname
+    #t_INCLUDE_CPP_Q_HDR_NAME = REs.qhdrname
+
+    ## Character constant (L|U|u|u8)?'cchar*'.  # Terminating ' required.
+    #@TOKEN(REs.char)
+    #def t_CPP_CHAR(t):
+    #    return t
+
+    ## Same, within a CONTROL expression.  yacc evaluates this differently.
+    #t_CONTROL_CPP_EXPRCHAR = REs.char
+
+    ## Block comment (C), possibly spanning multiple lines.  
+    #t_CPP_COMMENT1 = r'(/\*(.|\n)*?\*/)'
+
+    ## Line comment (C++).  PCCP accepts them in C files also.  
+    #t_CPP_COMMENT2 = r'(//[^\n]*)'
+    
+    #def t_ANY_error(t):
+    #    # Check for unmatched quote character.  
+    #    if t.value[0] in '\'\"':
+    #        endline = t.value.find('\n')
+    #        t.value = t.value[:endline]
+    #        message = f"Unmatched quote character {t.value}"
+    #    else:
+    #        t.value = t.value[0]
+    #        message = f"Illegal character {t.value!r}"
+    #    t.lexer.skip(len(t.value))
+    #    return error(t, message)
+
+    #def error(t: PpTok, msg: str, keep_type: bool = False) -> PpTok:
+    #    if not keep_type:
+    #        t.type = TokType.error
+    #    if t.lexer.owner.errors:
+    #        t.lexer.prep.on_error_token(t, msg)
+    #    return t
+
+    ## PUNCTUATORS ...
+
+    ## Punctuator lexer rule has one or more fixed strings which it matches.
+    #def set_punctuators() -> None:
+    #    """ Add rules for most punctuator tokens. """
+
+    #    # Arithmetic operators
+    #    punc('CPP_PLUS',          '+')
+    #    punc('CPP_PLUSPLUS',      '++')
+    #    punc('CPP_MINUS',         '-')
+    #    punc('CPP_MINUSMINUS',    '--')
+    #    punc('CPP_STAR',          '*')
+    #    punc('CPP_FSLASH',        '/')
+    #    punc('CPP_PERCENT',       '%')
+    #    punc('CPP_LSHIFT',        '<<')
+    #    punc('CPP_RSHIFT',        '>>')
+
+    #    # Logical operators
+    #    #   Place && and || before & and |
+    #    punc('CPP_LOGICALAND',    '&&',   'and',    func=True)
+    #    punc('CPP_LOGICALOR',     '||',   'or',     func=True)
+    #    punc('CPP_EXCLAMATION',   '!',    'not')
+
+    #    # bitwise operators
+
+    #    punc('CPP_AMPERSAND',     '&',   'bitand')
+    #    punc('CPP_BAR',           '|',   'bitor')
+    #    punc('CPP_HAT',           '^',   'xor')
+    #    punc('CPP_TILDE',         '~',   'compl')
+
+    #    # Comparison operators
+    #    punc('CPP_EQUALITY',      '==')
+    #    punc('CPP_INEQUALITY',    '!=',   'not_eq')
+    #    punc('CPP_GREATEREQUAL',  '>=')
+    #    punc('CPP_GREATER',       '>')
+    #    punc('CPP_LESS',          '<')
+    #    punc('CPP_LESSEQUAL',     '<=')
+    #    punc('CPP_SPACESHIP',     '<=>')              # C++
+
+    #    # Conditional expression operators
+    #    punc('CPP_QUESTION',      '?')
+    #    punc('CPP_COLON',         ':')
+
+    #    # Member access operators
+    #    punc('CPP_DOT',           '.')
+    #    punc('CPP_DOTPTR',        '.*')               # C++
+    #    punc('CPP_DEREFERENCE',   '->')
+    #    punc('CPP_DEREFPTR',      '->*')              # C++
+    #    punc('CPP_DCOLON',        '::')               # C++
+
+    #    # Assignment operators
+    #    punc('CPP_EQUAL',         '=')
+    #    punc('CPP_XOREQUAL',      '^=',   'xor_eq')
+    #    punc('CPP_MULTIPLYEQUAL', '*=')
+    #    punc('CPP_DIVIDEEQUAL',   '/=')
+    #    punc('CPP_PLUSEQUAL',     '+=')
+    #    punc('CPP_MINUSEQUAL',    '-=')
+    #    punc('CPP_OREQUAL',       '|=',   'or_eq')
+    #    punc('CPP_ANDEQUAL',      '&=',   'and_eq')
+    #    punc('CPP_PERCENTEQUAL',  '%=')
+    #    punc('CPP_LSHIFTEQUAL',   '<<=')
+    #    punc('CPP_RSHIFTEQUAL',   '>>=')
+
+    #    # Grouping and separators
+    #    punc('CPP_LPAREN',        '(')
+    #    punc('CPP_RPAREN',        ')')
+    #    punc('CPP_LBRACKET',      '[',    '<:')
+    #    punc('CPP_RBRACKET',      ']',    ':>')
+    #    punc('CPP_LCURLY',        '{',    '<%')
+    #    punc('CPP_RCURLY',        '}',    '%>')
+
+    #    # Unmatched quotes, and backslashes not before newline, will be
+    #    # errors.  Matched quotes on the same line are part of CPP_CHAR or
+    #    # CPP_STRING.  Backslash before newline is removed from input before
+    #    #lexing.  punc('CPP_SQUOTE',       '\'') punc('CPP_DQUOTE',       '"')
+    #    punc('CPP_BSLASH',        '\\')
+
+    #    # Single-characters not in the source character set (valid in GCC).
+    #    if prep.emulate:
+    #        punc('CPP_DOLLAR',    '$')
+    #        punc('CPP_AT',        '@')
+    #        punc('CPP_GRAVE',     '`')
+
+    #    # Miscellaneous
+
+    #    punc('CPP_COMMA',         ',')
+    #    punc('CPP_SEMICOLON',     ';')
+    #    punc('CPP_ELLIPSIS',      '...')
+
+    #set_punctuators()
+
+    ## Add punctuator rules and lexer functions to local context, so that
+    ## lex.lex() will find them.
+    #locals().update(rules)
+    #def addfunc(name: str, func: FuncRule) -> FuncRule:
+    #    def proxy(t: LexToken) -> LexToken:
+    #        return func(t)
+    #    proxy.__name__ = name
+    #    proxy.regex = func.regex
+    #    return proxy
+
+    #for name, f in rules.items():
+    #    if hasattr(f, '__call__'):
+    #        try: del locals()[name]
+    #        except: pass
+    #        locals()[name] = addfunc(name, f)
+    #        locals()[name] = addfunc(name, f)
+    #        x=0
+    ## TokType. 
+    ## Enumeration for each type of token.
+    ## The enum member is a str subclass (TokAttrs) with its name as the value.
+    ## Thus TokType[name] can be used like name, such as a key in another dict.
+    ## The members have other attributes to get properties of a token 
+    ##   from its type, such as TokType.CPP_WS.ws == True.
+
+    #PpTok.TokAttrs.class_init(prep, REs)
+    #TokType = enum.Enum('TokType', {tok:tok for tok in tokens},
+    #                    type=PpTok.TokAttrs)
+
+    #TokType.__repr__ = lambda obj: obj.value
+
+    #prep.TokType = TokType
+
+    ## Token type map name to the type, or a name of a type.
+    ## Lexer token maps its own name to the TokType.
+    ## Aliases map a name to another name or several names separated by spaces.
+    #toktypedict = {name : TokType[name] for name in tokens}
+
+    ## Now that TokType exists, set the typ.lit properties for all punctuator
+    ## types.
+    #for value, typ in punct_values.items():
+    #    TokType[typ].lit = value
+
+    ## Alias names.  Alias name -> one or more token names, as a string.
+    ## These are added to toktypedict.
+
+    #def alias(name: str, tok: str) -> None:
+    #    toktypedict[name] = tok
+
+    #alias('ANYNUM', 'CPP_INTEGER CPP_FLOAT CPP_DOT_FLOAT CPP_NUMBER')
+    #alias('ANYCHAR', 'CPP_CHAR CPP_EXPRCHAR')
+    #alias('ANYSTR', 'CPP_STRING CPP_RSTRING')
+    #alias('ANYQUOTED', 'ANYSTR ANYCHAR')
+    #alias('LITERAL', 'ANYNUM ANYCHAR ANYSTR')
+
+    #'''
+    #AVOIDING PASTE.
+    #Here are rules for pairs of tokens which require whitespace separation,
+    #to avoid creating text which would lex differently if written adjacently.
+    #These mimic the rules found in GCC in avoid_paste() function.
+
+    #Most cases are accomplished by looking at types, and not the values, 
+    #of the tokens.
+    #If left.type.sep_from contains right.type, then the result is true.
+
+    #The rules for separating tokens are taken from the gcc file gcclib/lex.cc
+    #  in function cpp_avoid_paste().  
+    #  Each rule specifies the types of the two tokens.
+    #In some rules, the type of the right side can be any type whose spelling 
+    #  starts with a given character, 'x', and is here denoted as 'x'.
+    #  This is only for punctuators.  
+    #Otherwise, the rule uses the CPP_xxx name or the token value 
+    #for left and right tokens.
+    #Some punctuators, like '|', have alternate spellings in ISO 646.
+    #  For a C file, the input file must #include <iso646.h>, which defines 
+    #  them as macros for the normal spelling.  
+    #  Thus, the preprocessor is not involved.
+    #  For a C++ file, --c++ on the command line includes these spellings.
+
+    #Summary of the pairs of tokens:
+    #  Any of ( = ! < > + - * / % | & ^ << >> ), =
+    #  Digraphs: %: %:%: <: :> <% %>, using 'x' for the second character.
+    #  Repeats: > < + - * / : | & . # ID ANYNUM, using 'x' for punctuators.
+    #  - '>'
+    #  / '*'
+    #  . '%'
+    #  . ANYNUM
+    #  # '%'
+    #  ID ANYNUM (if ANYNUM is all [A-Za-z0-9_])
+    #  ID CHAR 
+    #  ID STRING
+    #  ANYNUM any of (ID CHAR '.' '+' '-')
+    #  '\' ID
+    #  <= '>'
+    #  STRING ID
+    #  STRING (anything other than a punctuator whose value starts with 
+    #          [A-Za-z0-9_])
+    #'''
+
+    #def add_sep(type1: str | TokType, type2: str | TokType, *,
+    #            failed_paste_only: bool = False,
+    #            sep: Callable[PpTok, PpTok, PpTok] = None,
+    #            ) -> None:
+    #    """ Set type1 to be separated from type2.
+    #    Either type can be several other type names separated by spaces,
+    #        or a TokType object.  A type name can be an alias.
+    #    type1 can be the value of a punctuator.
+
+    #    If type2 is a single character, this matches all punctuators
+    #        having any value that starts with that character.
+
+    #    If failed_paste_only is true, then separation applies
+    #        only to failed paste, and not to other cases of adjacent tokens.
+
+    #    If `sep` is provided, then this is a callable(before left token, left
+    #    token, right token) which returns True for separation.  The default
+    #    always returns True.
+    #    """
+    #    def inner1(type1: str | TokType, type2: str | TokType) -> None:
+    #        def inner2(type2: str | TokType) -> None:
+    #            if type(type2) is str:
+    #                if ' ' in type2:
+    #                    for t in type2.split():
+    #                        inner2(t)
+    #                elif len(type2) == 1:
+    #                    for value, typ in punct_values.items():
+    #                        if value.startswith(type2):
+    #                            inner2(typ)
+    #                else:
+    #                    inner2(toktypedict[type2])
+    #            else:
+    #                t1 = TokType[type1]
+    #                t2 = TokType[type2]
+    #                if not failed_paste_only:
+    #                    TokType[type1].sep_from[t2] = sep
+    #                TokType[type1].sep_from_paste[t2] = sep
+
+    #        if type(type1) is str:
+    #            if ' ' in type1:
+    #                for t in type1.split():
+    #                    inner1(t, type2)
+    #            elif type1 in punct_values:
+    #                inner1(punct_values[type1], type2)
+    #            else:
+    #                t = toktypedict[type1]
+    #                if type(t) is str:
+    #                    inner1(t, type2)
+    #                else:
+    #                    inner2(type2)
+    #        else:
+    #            inner2(type2)
+    #    inner1(type1, type2)
+
+    #def add_seps() -> None:
+    #    """ Set token separations for default use. """
+
+    #    # Any punctuator which becomes another punctuator by adding 
+    #    # a single character...
+    #    for p1, p2 in product(punct_values, repeat=2):
+    #        if p2.startswith(p1) and len(p2) == len(p1) + 1:
+    #            add_sep(punct_values[p1], p2[-1])
+    #            x = 0
+    #    add_sep('ANYNUM', '+ -')
+    #    if prep.gcc:
+    #        add_sep('CPP_ID', 'ANYCHAR CPP_STRING', failed_paste_only=True)
+    #    if prep.clang:
+    #        add_sep('= / $', 'CPP_ID', failed_paste_only=True)
+    #        add_sep('= / $', 'CPP_ID', failed_paste_only=True)
+    #    add_sep('CPP_DOT', 'ANYNUM CPP_ELLIPSIS')
+    #    add_sep('ANYNUM', '. + -')
+    #    add_sep('ANYNUM', 'CPP_ID ANYCHAR ANYNUM')
+
+    #def add_seps_clang() -> None:
+    #    """ Set token separations for clang simulation. """
+
+    #    # Reference AvoidConcat() in clang/lib/Lex/TokenConcatenation.cpp from
+    #    # clang 20.0 repository.
+
+    #    # Separation of `left` and `right` tokens is NOT tested if both came
+    #    # from the same source and were adjacent there.  In that case,
+    #    # separation is neither added nor removed.
+
+    #    # Separation is solely a function of the left and right types.  The
+    #    # right type of a punctuator could be identified by its first
+    #    # character, meaning all such punctuators.  
+    #    #
+    #    # When the left and right types are possibly separated, a
+    #    # corresponding callback is called with the actual tokens to make the
+    #    # decision.  In most cases, this is always True, but special cases are
+    #    # handled by custom callbacks.
+
+    #    # These are the cases implemented in the AvoidConcat() function.
+    #    #   left        right       right[0]    conditions
+    #    #   ----        -----       --------    ----------
+    #    #   punct x                 =           when 'x=' is a punct.
+    #    for p in punct_values:
+    #        if f'{p}=' in punct_values:
+    #            add_sep(p, '=')
+
+    #    #   quoted      ident                   C++ >= 11.
+    #    if prep.cplus_ver >= 2011:
+    #        add_sep('ANYQUOTED', 'CPP_ID')
+
+    #    #   quoted   same as for ident      C++ >= 11 and
+    #    #            (see below)            left has UD suffix.
+    #        #add_sep('ANYQUOTED', 'ANYNUM',
+    #        #        sep=SepLeftUD() & SepRightNoPeriod())
+
+    #    #   ident       number                  [0] is not '.'
+    #    add_sep('CPP_ID', 'CPP_INTEGER CPP_FLOAT')
+
+    #    #   ident       ident
+    #    add_sep('CPP_ID', 'CPP_ID')
+
+    #    #   ident       quoted                  right has size prefix
+    #    #   ident       quoted                  left is a size prefix and
+    #    #                                         right has no size prefix
+    #    # Size prefixes are different for C and C++.
+    #    # clang gets it wrong for C.
+
+    #    if prep.cplus_ver:
+    #        size_prefixes = 'L u u8 U R LR uR u8R UR'
+    #    else:
+    #        size_prefixes = 'L u8 u8R'  # according to clang.
+    #                                    # should be 'L u u8 U'.
+    #    pfxs = set(size_prefixes.split())
+    #    sep = lambda before_left, left, right: (
+    #        right.match.group('pfx') or left.value in pfxs)
+    #    ## TEMP: to avoid right.match being undefined
+    #    sep = lambda *args: True
+    #    add_sep('CPP_ID', 'ANYQUOTED', sep=sep)
+
+    #    #   quoted      any                 ident + right is separated and
+    #    #                                   left has UD-suffix
+    #    for right_type, id_sep in TokType.CPP_ID.sep_from.items():
+    #        sep = lambda before_left, left, right: (
+    #            id_sep(before_left, left, right)
+    #            and left.match.group('sfx')
+    #            )
+    #        ## TEMP: to avoid left.match being undefined
+    #        sep = lambda *args: True
+    #        add_sep('ANYQUOTED', right_type, sep=sep)
+
+    #    #   number                  . + - 
+    #    #   number          ident
+    #    #                   number
+    #    add_sep('ANYNUM', 'ANYNUM CPP_ID . + -')
+
+    #    #   .                       .           left preceded by . also.
+    #    sep = (lambda before_left, left, right:
+    #           before_left and before_left.type is TokType.CPP_DOT)
+    #    add_sep('.', '.', sep=sep)
+        
+    #    #   .               number  0-9
+    #    digit_re = re.compile(REs.digit)
+    #    sep = (lambda before_left, left, right:
+    #           digit_re.match(right.value[:1]))
+    #    add_sep('.', 'ANYNUM', sep=sep)
+
+    #    pairs = '&& ++ -- // << >> || ## -> /* <: <% %> %: :> #@ #%'
+    #    if prep.cplus_ver:
+    #        pairs += ' .* :: ->* '
+    #        if prep.cplus_ver > 2020:
+    #            pairs += ' <=>'
+
+    #    for pair in pairs.split():
+    #        add_sep(pair[:-1], pair[-1])
+
+    #if prep.clang:
+    #    add_seps_clang()
+    #else:
+    #    add_seps()
+
+    ## We need to have the lextab module be specific to the same parameters
+    ## that govern the content of the lexer, i.e.,
+    ## 
+    ## prep.cplus_ver selects C or C++ as the language, standard version
+    ## doesn't matter.  C++ enables the extra punctuators
+    ##
+    ## prep.emulate includes ` @ and $ as literals..
+    ##
+    ## prep.gnu enables R-strings for all languages.
+    #lextab = f"""\
+    #    lextab\
+    #    {'-c -cplusplus'.split()[bool(prep.cplus_ver)]}\
+    #    {'-gcc' * bool(prep.emulate)}\
+    #    {'-gnu' * bool(prep.gnu)}\
+    #    """
+    #lextab = lextab.replace(' ', '')
+
+    ## Build the lexer from my environment and return it.
+    #lexer = lex.lex(lextab=lextab)
+    ##lexer = PpLex(prep, lex.lex(lextab=lextab))
+    #lexer.prep = prep
+    #lexer.TokType = TokType
+        
+    #lexer.REs = REs
+    #return PpLex(from_lexer=lexer)

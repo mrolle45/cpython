@@ -3,47 +3,67 @@ Manages macro definitions and lookups for a C translation unit.
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 from enum import Enum, auto
 from dataclasses import dataclass, InitVar
+from functools import reduce
 from itertools import chain, zip_longest
-from operator import attrgetter
-import traceback
+from operator import attrgetter, and_
+from typing import Iterator
 
-from ply.lex import LexToken
-from pcpp.lexer import TokType, no_ws, merge_ws, Tokens, Hide
+from pcpp.common import *
+from pcpp.tokens import (PpTok, Tokens, TokIter, TokenSep, Hide)
 
+''' The following is modeled after David Prosser's algorithm, which can be found at
+https://www.spinellis.gr/blog/20060626/cpp.algo.pdf
+The expand() function is performed by the Macros.expand() method.
+The subst() function is performed by the TokSubstMgr.__call__() method.
+    This incorporates the hsadd() call in that method.
+'''
+
+dumpme: bool = False
 
 # ------------------------------------------------------------------
 # Macro object
 #
-# This object holds information about preprocessor macros
+# This object holds information about one preprocessor macro.
 #
-#    .name      - Macro name (string)
-#    .value     - Macro value (a list of tokens, from the #define)
-#    .is_func   - A function macro
+#    .nametok   - Macro name token in the #define
+#    .name      - Macro name string in the #define
+#    .value     - Macro value (a list of intoks, from the #define or other source)
+#    .substs    - Objects which generate replacement intoks.
+#    .is_func   - A function macro (class attribute).
 #    .source    - Source object containing the #define
 #    .lineno    - Line number containing the #define
 #
 # For function macros only:
-#    .arglist   - List of argument names, including .vararg (if present)
+#    .arglist   - List of argument names, including __VA_ARG__ and __VA_OPT__
 #    .variadic  - Boolean indicating whether or not variadic macro
-#    .vararg    - Name of the variadic parameter
 #
 # When a macro is created, the macro replacement token sequence is
-# pre-scanned and used to create patch lists that are later used
-# during macro expansion
+# pre-scanned and used to create TokSubst objects that are later used
+# during macro expansion.
 # ------------------------------------------------------------------
 
 class Macro:
-    subs: tuple[MacSubst,...]                   # The replacement list.
+    """ The definition of a preprocessor macro.
+    The definition is stored in a Tokens self.value.
+    It stores replacement generators in self.substs.
+    """
+    is_func: ClassVar[bool] = False         # True for FuncMacro class
+    is_dyn: ClassVar[bool] = False          # True for DynMacro class
+    has_paste: ClassVar[bool] = False       # Contains any π tokens
+    error: ClassVar[str] = None             # Error message if invalid.
 
-    def __init__(self, macros: Macros, nametok: PpTok, value: Tokens):
+    def __init__(self, prep: Preprocessor, nametok: PpTok, value: TokIter):
         self.nametok =  nametok
-        self.value = value
-        self.macros = macros
-        self.prescan()
-        self.makesubst()
+        self.value = Tokens(value)
+        if any(map(operator.attrgetter('type.paste'), self.value)):
+            self.has_paste = True
+        for t in self.value:
+            t.exp_from = self
+        self.macros = prep.macros
 
     @property
     def name(self) -> str:
@@ -65,817 +85,787 @@ class Macro:
     def log(self) -> _DebugLog:
         return self.macros.log
 
-    class TokInfo:
-        m: Macro
-        tok: LexToken
-        pos: int                # Where it appears in the macro replacement list.
-        arg: bool = False       # This is an argument name.  Function macro only.
-        str_op: bool = False    # This is a '#' token.  Function macro only.
-        cat_op: bool = False    # This is a '##' token.
-        opt_op: bool = False    # This is a __VA_OPT__ identifier.
-        other: bool = False     # Anything else.
-        ws: bool = False        # Whitespace
+    def set_error(self, tok: PpTok, msg: str) -> None:
+        self.prep.on_error_token(tok, msg)
+        self.error = msg
 
-        # for arg tokens...
-        argnum: int = None      # Index of the argument in macro argument list.
-        expand: bool = False    # Will be fully macro expanded.
-        string: bool = False    # Will be stringized.
-        concat: bool = False    # Will be concatenated with previous and/or next token.
-        pending: bool = False   # Waiting to determine expand/string/concat.
+    def dynamic(self) -> None:
+        """ Initialize a dynamic Macro. """
 
-        def __init__(self, m: Macro, tok: LexToken = None, pos: int = None):
-            """ Set the flags appropriate to the token. """
-            ...
-            self.m = m
-            self.tok = tok
-            self.pos = pos
-            if not tok: return
-            is_func = m.is_func
-            if is_func and tok.type is TokType.CPP_ID and tok.value in m.arglist:
-                self.arg = True
-                self.argnum = m.arglist.index(tok.value)
-                self.pending = True
-            elif is_func and tok.type is TokType.CPP_POUND:
-                self.str_op = True
-            elif tok.type is TokType.CPP_DPOUND:
-                self.cat_op = True
-                m.num_concat += 1
-            elif is_func and tok.type is TokType.CPP_ID and tok.value == '__VA_OPT__':
-                self.opt_op = True
-            elif tok.type.ws:
-                self.ws = True
+        self.substs.append(dynamic_substs_tab[self.name](self.nametok))
+
+    def sameas(self, other: Self) -> bool:
+        """ True if the two definitions are the same, per (C99 6.10.3p2). """
+        if type(self) is not type(other): return False
+        # Compare the replacement lists, treating all whitespace separation
+        # the same.
+        for x, y in zip_longest(self.value, other.value):
+            if x is None or y is None: return False
+            if x.value != y.value: return False
+            if x.spacing != y.spacing: return False
+        return True
+
+
+class ObjMacro(Macro):
+    """
+    Object-like macro.  May contain paste operators but nothing involving
+    parameter names, __VA_OPT__, or stringizing, which are only relevant to
+    function-like macros.
+    """
+
+    def subst_tokens(self, mgr: TokenSubstMgr) -> Iterator[PpTok]:
+        """
+        Do all substitution operations except for pasting.  Object macros have
+        no parameters to substitute, so this method is a pass-through of the
+        replacement intoks themselves.  Each token has its call_from set.
+        """
+        for tok in self.value:
+            yield tok.copy(call_from=mgr.call)
+
+    @TokIter.from_generator
+    def fix_paste_substs(self) -> Iterator[PpTok]:
+        for tok in self.value:
+            if tok.type.dhash:
+                yield tok.copy(type=self.prep.TokType.CPP_PASTE)
             else:
-                self.other = True
+                yield tok
 
-        def __bool__(self): return bool(self.tok)
+    def __repr__(self):
+        return f"{self.name}={self.value!r}"
 
-        def error(self, msg: str) -> None:
-            self.macro.prep.on_error(self.tok.value, self.tok.lineno, msg)
 
-        def __repr__(self) -> str:
-            return repr(self.tok)
+class FuncMacro(Macro):
+    is_func: ClassVar[bool] = True
+    substs: tuple[TokSubst, ...]            # The replacement list generators.
+    arglist: list[str]              # Names of params, plus __VA_OPT__.
+    nargs: int                      # len or arglist, without __VA_OPT__.
 
-    # ----------------------------------------------------------------------
-    # prescan()
-    #
-    # Examine the macro value (token sequence) and identify patch points
-    # This is used to speed up macro expansion later on---we'll know
-    # right away where to apply patches to the value to form the expansion
-    #
-    # Also called for object macros, though only the ## operators are involved.
-    # ----------------------------------------------------------------------
-    
-    def prescan(self):
-        """Examine the macro value (token sequence) and identify patch points
-        This is used to speed up macro expansion later on---we'll know
-        right away where to apply patches to the value to form the expansion"""
-        self.var_comma_patch = []       # Variadic macro comma patch
-        prep = self.macros.prep
-        self.num_concat = 0
-        if self.is_func:
-            self.expand_args = set()        # Arg numbers which get expanded
-            self.string_args = set()        # Arg numbers which get stringized
-            self.concat_args = set()        # Arg numbers which get concatenated
-            self.expand_points = []         # Positions for args that are expanded
-            self.concat_points = []         # Positions for args that are concatenated
-            self.opt_points = []            # Positions for __VA_OPT__ expressions
-            self.replace_points = []        # Either expand or concat or opt, in descending order.
-            self.string_points: list[TokInfo] = []  # Infos for args that are stringized
-            self.opts = {}                  # info for an opt arg at given position
-            # Information about tokens in replacement list, indexed by their position.
-            self.argnums: Mapping[int, int] = {}    # [position] -> arg number.
+    def __init__(self, prep: Preprocessor, nametok: PpTok, value: Tokens,
+                 arglist, variadic: bool):
+        self.arglist = arglist
+        self.nargs = len(arglist) - variadic
+        self.variadic = variadic
 
-        def pass1() -> Iterable[TokInfo]:
-            """ Make infos from all the tokens.
-            Remove whitespace after # and around ##.
-            Make single info for "__VA_OPT__ ( ... )".
-            """
-            hold_ws: list[TokInfo] = []            # Whitespace that might be generated.
-            toks = enumerate(self.value)
-            last_seen: TokInfo = self.TokInfo(self)    # Last non-ws token seen.
-            for i, tok in toks:
-                info = self.TokInfo(self, tok, i)
-                if info.ws:
-                    hold_ws.append(info)
-                    continue
-                if hold_ws:
-                    if last_seen.cat_op or last_seen.str_op or info.cat_op:
-                        pass
-                    else:
-                        yield from hold_ws
-                    hold_ws = []
-                if info.opt_op:
-                    # Gobble up the following replacement list.
-                    m : Macro = self.parse_opt(toks, info.tok)
-                    if not m or self.name == '__VA_OPT__':
-                        prep.on_error_token(tok, "Ill-formed __VA_OPT__ expression.")
-                        continue
-                    info.repl = m
-                if info.str_op:
-                    # Gobble up whitespace plus arg.
-                    for i, tok in toks:
-                        if tok.type.ws: continue
-                        break
-                        if tok.arg:
-                            info.argnum = tok.argnum
-                            break
-                    else:
-                        # No more tokens
-                        prep.on_error_token(tok, "# operator must be followed by parameter name.")
-                        continue
-                    arg = self.TokInfo(self, tok, i)
-                    if tok.value not in self.arglist:
-                        prep.on_error_token(tok, "# operator must be followed by parameter name.")
-                        continue
-                    info.argnum = arg.argnum
-                yield info
-                last_seen = info
+        super().__init__(prep, nametok, value)
+        self.make_substs()
 
-        infos: list[Info] = list(pass1())
+    def make_substs(self) -> None:
+        """
+        Build substitution items in self.substs.  These are immutable and
+        reused every time the macro is invoked.
 
-        # Find all the argument name tokens, and classify them.
-        tok: LexToken
-        last_seen: TokInfo = self.TokInfo(self, None)    # Last token seen, not counting whitespace.
+        A substitution item can be:
+          - StringTokSubst -- Σ + (a parameter name or __VA_OPT__).
+          - PasteTokSubst -- a π token.
+          - VaOptTokSubst -- a "VA_OPT ( ... )" expression.
+          - ParamTokSubst -- a parameter name.  Might be adjacent to a π.
+          - PlainTokSubst -- a single token, not any of the above.
+        Note, if a Param or VaOpt is adjacent to a Paste, then it is set to
+        avoid expansion.
+        """
+        repltoks: Iterator[PpTok] = iter(self.value.data)
 
-        # Enumerator for the infos, with None at the end.
-
-        iterator = enumerate(infos + [self.TokInfo(self, None)])
-        for i, info in iterator:
-            # Tokens can be any of: whitespace, arg name, #, ##, opt, and other.
-            # Arg name, #, and opt aren't part of an object macro.
-            # Ignoring all whitespace.
-            # '#' arg is legal.
-            # anything '##' anything is legal, including a # arg or another ##.
-            info.pos = i
-            if info.ws: continue
-            if info.arg:
-                # An arg name.  Might follow # or ##.
-                argnum = info.argnum
-                self.argnums[i] = argnum
-                # See what context we are in.
-                if last_seen.cat_op:
-                    # '##' + arg -> concatenate arg.
-                    info.concat = True
-                    info.pending = False
-                    self.concat_args.add(argnum)
-                    self.concat_points.append(i)
-            elif info.str_op:
-                info.tok.argnum = info.argnum
-                info.string = True
-                info.pending = False
-                self.string_args.add(info.argnum)
-                self.string_points.append(info)
-            elif info.cat_op:
-                if not last_seen:
-                    # nothing + '##' is error.
-                    tok.error("'##' operator cannot be at the start.")
-                if last_seen.pending:
-                    # not (# or ##) + arg + '##' -> concatenate arg.
-                    last_seen.concat = True
-                    last_seen.pending = False
-                    self.concat_args.add(last_seen.argnum)
-                    self.concat_points.append(last_seen.pos)
-            elif last_seen.arg:
-                if last_seen.pending:
-                    # not (# or ##) + arg + other -> expand arg.
-                    last_seen.expand = True
-                    last_seen.pending = False
-                    self.expand_args.add(last_seen.argnum)
-                    self.expand_points.append(last_seen.pos)
-            elif not info and last_seen.cat_op:
-                tok.error("'##' operator cannot be at the end.")
-            if info.opt_op:
-                self.opt_points.append(i)
-                self.opts[i] = info
-            last_seen = info
-
-        self.repl = Tokens(info.tok for info in infos)
-
-        if self.is_func:
-            self.replace_points = self.expand_points + self.concat_points + self.opt_points
-            self.replace_points.sort(reverse=True)
-
-    def makesubst(self) -> None:
-        """ Build substitution items in self.subs. """
-        tokiter: Iterator[tuple[int, PpTok]] = enumerate(self.value)
-
-        self.subs = []
-        is_func: bool = self.is_func
-        param_names: list[str]
-        if is_func:
-            param_names = self .arglist
-
-        hold_ws: list[PpTok] = []
+        self.substs = []
+        param_names: list[str] = self.arglist
 
         def skip_ws() -> PpTok | None:
-            hold_ws.clear()
-            for i, tok in tokiter:
+            for tok in repltoks:
                 if tok.type.ws:
-                    hold_ws.append(tok)
+                    pass
                 else:
                     return tok
             return None
 
-        def emit_ws() -> None:
-            self.subs += map(TokSubst, hold_ws)
-
-        def nextsub(tok: PpTok = None) -> MacSubst | None:
-            """ A substitution object from the input stream, if any.
-            Preceding whitespace is either added to the output or ignored.
-            A '##' returns just a Paste token, without finding the rest of the expression.
+        def next_subst(*, after_paste: bool = False) -> TokSubst | None:
             """
+            A substitution object from the given replacement token, if any.
+            May consume more replacement tokens.  Preceding whitespace is
+            either added to the output or ignored.  `no_ws` means that a Param
+            subst will strip leading whitespace.
+            """
+            tok = next(repltoks, None)
             if not tok:
-                tok = skip_ws()
-                if not tok:
-                    return None
+                return None
             val = tok.value
-            if val == '##':
-                hold_ws.clear()
+            keep_spacing = True
+            typ = tok.type
+            if typ.paste:
+                # '##'.  Alters previous subst, which must exist.
+                if not prev:
+                    self.set_error(
+                        tok,
+                        "'##' cannot be at the start of macro replacement." )
+                    return None
+                prev.expand = False
                 return PasteTokSubst(tok)
-            # No other cases eat preceding whitespace.
-            #emit_ws()
-            # All other special tokens apply only to function macros.
-            if is_func:
-                if val == '#':
-                    # Stringize.  Eat following whitespace and get following param name.
-                    param = skip_ws()
-                    hold_ws.clear()
+            elif typ.stringize:
+                # Stringize.  Get following param name or __VA_OPT__.
+                try:
+                    param = next(repltoks)
                     argnum = param_names.index(param.value)
-                    return StringTokSubst(tok, argnum)
-                elif val == '__VA_OPT__':
-                    m : FuncMacro = self.parse_opt(tokiter, tok)
-                    return OptTokSubst(tok, m)
-                elif val in param_names:
-                    argnum = param_names.index(val)
-                    return ParamTokSubst(tok, argnum)
-            # Anything else.
-            return TokSubst(tok)
+                    if self.variadic and argnum == self.nargs:
+                        opt = make_va_opt(tok)
+                        return StringTokSubst(tok, opt)
+                        
+                    param = ParamTokSubst(param, argnum)
+                    param.expand = False
+                    return StringTokSubst(tok, param, argnum)
+                except:
+                    # Did not find following parameter name.
+                    self.set_error(
+                        tok,
+                        "'#' must be followed by parameter name "
+                        "or __VA_OPT__." )
+                    return None
 
-        def do_paste(p: PasteTokSubst) -> TokSubst | None:
-            """ Process entire paste expression.  Given sub is the first ##.
-            First operand is at the end of self.subs, and is removed from there.
-            Returns sub for first token (if any) after the paste expression.
-            """
-            items: list[TokSubst] = []
-            ops: list[PpTok] = [p.tok]
-
-            try: items.append(self.subs.pop())
-            except IndexError:
-                # '##' at the start is illegal.
-                ...
-
-            while True:
-                item = nextsub()
-                hold_ws.clear()
-                if not item:
-                    # '##' at the end is illegal.
-                    ...
-                if item.is_paste:
-                    # Consecutive ##, make same as just one.
-                    continue
-                items.append(item)
-                sub = nextsub()
-                if not (sub and sub.is_paste):
-                    break
-                ops.append(sub.tok)
-            p.items = items
-            p.ops = ops
-            self.subs.append(p)
-            return sub
-            
-        tok = skip_ws()
-        if not tok: return                  # Entire value is whitespace.  Empty result.
-
-
-        sub: TokSubst = nextsub(tok)
-
-        # Loop over tokens to turn into subs.
-        while sub:
-            if sub.is_paste:
-                # Handle the entire paste expression and get following sub (if any).
-                sub = do_paste(sub)
-                continue
-
-            emit_ws()
-            self.subs.append(sub)
-            sub = nextsub()
-            ## Classify this token.
-            #val = tok.value
-            #if val == '##':
-            #    # Move past entire paste expression and get what follows it.
-            #    tok = do_paste()
-            #    continue
-            ## Whitespace is significant in all other cases.
-            #emit_ws()
-
-            #if is_func and val == '#':
-            #    param = skip_ws()
-            #    hold_ws.clear()
-            #    self.subs.append(StringTokSubst(tok, param, self))
-            #elif is_func and val == '__VA_OPT__':
-            #    m : Macro = self.parse_opt(tokiter, tok)
-            #    self.subs.append(OptTokSubst(tok, m))
-            #elif is_func and val in self.arglist:
-            #    self.subs.append(ParamTokSubst(tok, self))
-            #else:
-            #    self.subs.append(TokSubst(tok))
-            #tok = skip_ws()
-
-    def glue(self, op: PpTok, left: Tokens, right: Tokens) -> Tokens:
-        """ Concatenate last of left with first of right (skipping whitespace) into a PASTED token.
-        Return rest of left + pasted + rest of right.
-        """
-        i = len(left) - 1
-        while i and left[i].type.ws:
-            i -= 1
-        if i:
-            return Tokens([left[0]] + self.glue(op, left[1:], right))
-        # left is now a single token plus any whitespace.
-        # Skip right whitespace.
-        j = 0
-        while j < len(right) and right[j].type.ws:
-            j += 1
-        l = left[0]
-        r = right[j]
-        op.type = TokType.CPP_PASTED
-        op.value = l.value + r.value
-        op.hide = l.hide & r.hide
-        return Tokens([op] + right[j + 1:])
-
-        ...
-
-    def concat(self, toks: Tokens) -> None:
-        """ Do a token concatenation pass, stitching any tokens separated by ## into a single token
-        Surrounding whitespace has already been removed.
-        Tokens are altered in-place.
-        """
-        if self.num_concat:
-            i = 1
-            while i < len(toks) - 1:
-                left, right = i - 1, i + 1
-                if toks[i].type is TokType.CPP_DPOUND:
-                    # If consecutive '##'s, insert a placemarker
-                    if toks[right].type is TokType.CPP_DPOUND:
-                        pm = copy.copy(toks[right])
-                        pm.type = TokType.CPP_PLACEMARKER
-                        pm.value = ''
-                        toks.insert(right, pm)
-
-                    with self.prep.nest():
-                        self.log.concatenate(toks[left], toks[right])
-                    if toks[left].type is TokType.CPP_PLACEMARKER:
-                        del toks[left : right]
-                    elif toks[right].type is TokType.CPP_PLACEMARKER:
-                        del toks[i : right+1]
-                    else:
-                        toks[left] = copy.copy(toks[left])
-                        toks[left].type = TokType.CPP_PASTED
-                        toks[left].value += toks[right].value
-                        del toks[i : right+1]
-                    toks.changed = True
-                else:
-                    i += 1
-
-            self.fix_pastes(toks)
-
-    def fix_pastes(self, toks: Tokens) -> None:
-        """ Handle CPP_PASTED tokens.
-        If value is for a valid token, set its type.
-        Otherwise, replace with two or more tokens parsed from the value.
-        The token list is modified in-place.
-        """
-        i = 0
-        lex = self.macros.lexer.clone()
-        while i < len(toks):
-            tok = toks[i]
-            if tok.type is TokType.CPP_PASTED:
-                lex.input(tok.value)
-                toks2 = list(lex)
-
-                if len(toks2) != 1:
-                    # Insert spaces between the tokens.
-                    for j in reversed(range(1, len(toks2))):
-                        lex.input(' ')
-                        toks2[j : j] = list(lex)
-                    del toks[i]
-                    for t in reversed(toks2):
-                        newtok = copy.copy(tok)
-                        newtok.value = t.value
-                        newtok.type = t.type
-                        toks.insert(i, newtok)
-                    self.prep.on_error_token(tok,
-                        f"Pasting result {tok.value!r} is not a valid token.")
-                    continue
-                else:
-                    tok.type = toks2[0].type
-            i += 1
-
-    def sameas(self, other: Self) -> bool:
-        """ True if the two definitions are the same, as per Standard 6.10.3 paragraph 2. """
-        if type(self) is not  type(other): return False
-        # Compare the replacement lists, treating all whitespace separation the same.
-        for x, y in zip_longest(self.value, other.value):
-            if x is None or y is None: return False
-            if x.value != y.value: return False
-        return True
-
-    def show(self):
-        if self.arglist is None:
-            args = ""
-        else:
-            args = "(%s)" % ', '.join(self.arglist)
-        return "%s%s = %s" % (self.name, args, ''.join(x.value for x in self.value))
-
-class ObjMacro(Macro):
-    is_func: bool = False
-
-    def subst(self, call: MacroCall) -> Tokens:
-        """ Substitutes actual arguments (expanded) for parameter names.
-        New token list is returned.
-        Same as FuncMacro.subst(), but without args or # or __VA_OPT__.
-        """
-        out: Tokens = Tokens()
-        # Use self.repl rather than self.value because it has whitespace removed
-        #   after #.
-        toks: Tokens = Tokens(self.repl)
-
-        while toks:
-            t = toks[0]
-            val: str = t.value
-            if val == '##':
-                op = copy.copy(t)
-                t2 = (toks[1])
-                if t2.value == '##':
-                    # ## + ##.  becomes single ##.
-                    pass
-                else:
-                    # ## + other
-                    out = self.glue(op, out, [t2])
-                    del toks[1]
+            elif val == '__VA_OPT__':
+                return make_va_opt(tok)
+            elif val in param_names:
+                # Parameter name.  Check if following a paste.
+                argnum = param_names.index(val)
+                subst = ParamTokSubst(tok, argnum, after_paste=after_paste)
+                if prev and prev.is_paste:
+                    subst.expand = False
+                return subst
             else:
-                # Some other token.
-                out.append(t)
-            del toks[0]
+                # Anything else.
+                return PlainTokSubst(tok)
 
-        hsadd(call.hide, out)
-        return out
+        def make_va_opt(tok: PpTok) -> VaOptTokSubst:
+            """ Create __VA_OPT__ ( ... ) substitution. """
+            m : FuncMacro = self.parse_va_opt(repltoks, tok)
+            return VaOptTokSubst(tok, m)
 
-    def __repr__(self):
-        return f"{self.name}={self.repl}"
+        prev: TokSubst = None
 
-class FuncMacro(Macro):
-    is_func: bool = True
-    def __init__(self, macros: Macros, nametok: LexToken, value: Tokens, arglist, variadic: bool):
-        self.arglist = arglist
-        self.variadic = variadic
-        if variadic:
-            self.vararg = arglist[-1]
+        # Loop over intoks to turn into substs.
+        while True:
+            subst = next_subst()
+            if not subst:
+                return
+            self.substs.append(subst)
+            prev = subst
+        if prev and prev.is_paste:
+            self.set_error(
+                tok,
+                "'##' cannot be at the end of macro replacement." )
 
-        super().__init__(macros, nametok, value)
+    def subst_tokens(self, mgr: TokenSubstMgr) -> Iterator[PpTok]:
+        """
+        Do all substitution operations except for pasting.  Iterate resulting
+        intoks, which can include paste operators.
+        """
 
-    def parse_opt(self, toks: Iterator[Tuple[int, LexToken]], tok: LexToken) -> Tuple[int, int]:
+        return itertools.chain(
+            *map(operator.methodcaller('toks', mgr), self.substs))
+
+    def parse_va_opt(self, toks: Iterator[PpTok],
+                     name: PpTok
+                     ) -> FuncMacro | None:
         """ Finds the balanced '(' ... ')' following __VA_OPT__.
-        Consumes tokens in the iterator up to the closing ')'
-        Returns the indices of the '(' and ')' tokens, or (0, 0) if ill-formed.
+        Consumes intoks in the iterator up to the closing ')'
+        Returns a Macro for the replacement list or None if ill-formed.
         """
-        for i, tok in toks:
-            if not tok: return 0
-            if not tok.type.ws:
-                break
-        # tok is first non-whitespace token.
-        start = i
-        if tok.value != '(': return 0
-        nesting = 1
-        for i, tok in toks:
-            v = tok.value
-            if v == '(': nesting += 1
-            elif v == ')':
-                nesting -= 1
-                if not nesting:
-                    # Succeeded in grabbing all the replacement tokens.
-                    name = copy.copy(tok)
-                    name.value = '__VA_OPT__'
-                    return FuncMacro(self.macros, name, self.value[start+1: i], self.arglist, variadic=True)
-        return None
-
-    def subst(self, call: MacroCall) -> Tokens:
-        """ Substitutes actual arguments (expanded) for parameter names.
-        For now, ignoring # and ## tokens.
-        New token list is returned.
-        Not called for object macros.  Rather, hsadd() is called directly
-        """
-        out: Tokens = Tokens()
-        args = call.args
-        # Use self.repl rather than self.value because it has whitespace removed
-        #   before and after ## and after #.
-        toks: Tokens = Tokens(self.repl)
-        params: list[str] = self.arglist
-
-        expanded: Mapping[int, Tokens] = { }        # argnum -> expansion of that arg
-        str_expansion: Mapping[int, Token] = { }    # argnum -> stringize of that arg
-        with self.prep.nest():
-            for argnum, arg in enumerate(args):
-                self.log.arg(self.arglist[argnum], arg, call.tokens[call.positions[argnum]], nest=1)
-                if argnum in self.expand_args:
-                    exp = Tokens(args[argnum])
-                    exp = self.macros.expand(exp, quiet=True)
-                    expanded[argnum] = exp
-                if argnum in self.string_args:
-                    # Stringize the arg
-                    string = self.stringize(args[argnum])
-                    str_expansion[argnum] = string
-                    self.log.stringize(self.arglist[argnum], str_expansion[argnum], call.tokens[call.positions[argnum]])
-
-        # Do stringizing first, as this is more binding than other operators
-        #   and doesn't change the positions of anything else.
-        for info in self.string_points:
-            t = toks[info.pos]
-            t.value = str_expansion[t.argnum]
-            t.type = TokType.CPP_STRING
-
-        # Other replacements, in right-to-left order.
-        for i in self.replace_points:
-            # Either expansion or concatenation or __VA_OPT__.
-            if i in self.concat_points:
-                argnum = self.argnums[i]
-                if args[argnum]:
-                    toks[i:i+1] = args[argnum]
-                else:
-                    toks[i].type = TokType.CPP_PLACEMARKER
-                    toks[i].value = ''
-
-            elif i in self.opt_points:
-                # Opt expansion.  The entire "__VA_OPT__ ( toks )" is replaced by
-                # either an expansion of the replacement list, if __VA_ARGS__ is nonempty
-                # or by a placemarker.
-                var = args[-1]
-                info = self.opts[i]
-                if var:
-                    exp = info.repl.subst(call)
-                    info.repl.concat(exp)
-                    toks[i : i+1] = exp
-                else:
-                    toks[i].type = TokType.CPP_PLACEMARKER
-                    toks[i].value = ''
-
-            # Normal expansion.  Argument is macro expanded first
-            else:
-                argnum = self.argnums[i]
-                toks[i:i+1] = expanded[argnum]
-
-        while toks:
-            t = toks[0]
-            val: str = t.value
-            if val == '##':
-                op = copy.copy(t)
-                t2 = (toks[1])
-                # Remove whitespace
-                while t2.type.ws:
-                    del toks[1]
-                    t2 = toks[1]
-                if t2.value in params:
-                    # ## + param
-                    arg = args[params.index(t2.value)]
-                    if arg:
-                        # ## + non-empty param
-                        out = self.glue(op, out, arg)
-                        del toks[1]
-                    else:
-                        # ## + empty param
-                        pass
-                elif t2.value == '##':
-                    # ## + ##.  becomes single ##.
-                    pass
-                else:
-                    # ## + other
-                    out = self.glue(op, out, [t2])
-                    del toks[1]
-            elif val in params:
-                # Look for ## next.
-                if len(toks) > 1 and toks[1].value == '##':
-                    # param + ##.
-                    arg = args[params.index(t.value)]
-                    if not arg:
-                        # empty param + ##
-                        del toks[1]
-                    else:
-                        # non-empty param + ##
-                        out += arg
-                else:
-                    # plain param, not followed by ##.
-                    out += self.macros.expand(args[params.index(val)])
-            else:
-                # Some other token.
-                out.append(t)
-            del toks[0]
-
-        if self.num_concat:
-            self.fix_pastes(out)
-        hsadd(call.hide, out)
-        return out
-
-    # ----------------------------------------------------------------------
-    # expandargs()
-    #
-    # Given a function Macro and list of arguments (each a token list), this method
-    # returns an expanded version of a macro.  The return value is a token sequence
-    # representing the replacement macro tokens.
-    #
-    # It performs argument substitution according to C99 Section 6.20.3.1.
-    # It also perfoms the # operator according to C99 Section 6.20.3.1.
-    # It does NOT perform the ## operator, because this applies to object macros as well.
-    #   Any arguments involved in a ##, however, are not macro expanded before substitution.
-    # ----------------------------------------------------------------------
-
-    def expandargs(self,
-            args: Tokens,
-            tokens: Tokens,
-            positions: list[int],
-            caller: LexToken,
-            #expanding_from: list[str],
-            ):
-        """Given a Macro and list of arguments (each a token list), this method
-        returns an expanded version of a macro.  The return value is a token sequence
-        representing the replacement macro tokens"""
         prep = self.prep
+        if not self.variadic:
+            self.set_error(name,
+                           "'__VA_OPT__' only allowed in a variadic macro.")
+            return None
+        for t in toks:
+            if not t.type.ws:
+                break
+        # t is first token.
+        if not t or t.value != '(':
+            self.set_error(name, "'__VA_OPT__' requires a replacement list.")
+            return None
+        repl = Tokens()
+        def to_matching_paren() -> None:
+            """ Copy intoks to repl Tokens after '(' up to matching ')'.
+            Raise exception if ran out of input intoks first.
+            """
+            for t in toks:
+                repl.append(t)
+                v = t.value
+                if v == '(':
+                    to_matching_paren()
+                elif v == ')':
+                    return
+            raise SyntaxError("Malformed '__VA_OPT__'.")
 
-        # Make a copy of the macro token sequence
-        rep = Tokens(self.repl)
+        try: to_matching_paren()
+        except Exception as e:
+            self.set_error(name, str(e))
+            return None
 
-        # There are three ways each occurrence of a parameter name in the replacement list
-        # can be treated:
-        #   1. Stringized, if preceded by # (ignoring whitespace).
-        #   2. Left as-is, if preceded or followed by ## (ignoring whitespace).
-        #   3. Fully macro expanded, otherwise.
-        # Also, a __VA_OPT__(...) will be replaced.
-
-        # Map argument number to expansion or stringizing of that argument.
-        #   Only if the arg is used at least once.
-        #   This avoids repeated computation for an arg that is used more than once.
-        expanded: Mapping[int, Tokens] = { }
-        str_expansion: Mapping[int, PpTok] = { }
-        for argnum, arg in enumerate(args):
-            self.log.arg(self.arglist[argnum], arg, tokens[positions[argnum]], nest=1)
-            if argnum in self.expand_args:
-               with prep.nest():
-                  exp = expanded[argnum] = Tokens(args[argnum])
-                  self.macros.expand(exp, quiet=True)
-                  #self.expand(exp, expanding_from, quiet=True)
-            if argnum in self.string_args:
-                # Stringize the arg
-                string = self.stringize(args[argnum])
-                str_expansion[argnum] = string
-                with prep.nest():
-                    self.log.stringize(self.arglist[argnum], str_expansion[argnum], tokens[positions[argnum]])
-
-
-        # Make string expansion patches.  These do not alter the length of the replacement sequence.
-        # The Info reflects the location of the '#' token, and references the following parameter token.
-        # The param token and any whitespace in between have been removed from the token list.
-        for i in self.string_points:
-            rep[i] = copy.copy(rep[i])
-            rep[i].value = str_expansion[self.argnums[i]]
-            rep[i].type = TokType.CPP_STRING
-            while rep[i-1].type.ws:
-                rep[i-1].lexer.erase(rep[i-1])
-                i -= 1
-            rep[i-1].lexer.erase(rep[i-1])
-
-        # Make the variadic macro comma patch.  If the variadic macro argument is empty, we get rid
-        comma_patch = False
-        if self.variadic and not args[-1]:
-            for i in self.var_comma_patch:
-                rep[i] = None
-                comma_patch = True
-
-        # Make all other patches.   The order of these matters.  It is assumed that the patch list
-        # has been sorted in reverse order of patch location since replacements will cause the
-        # size of the replacement sequence to expand from the patch point.
-        
-        for i in self.replace_points:
-            # Either expansion or concatenation or __VA_OPT__.
-            if i in self.concat_points:
-                argnum = self.argnums[i]
-                if args[argnum]:
-                    rep[i:i+1] = args[argnum]
-                else:
-                    rep[i].type = TokType.CPP_PLACEMARKER
-                    rep[i].value = ''
-
-            elif i in self.opt_points:
-                # Opt expansion.  The entire "__VA_OPT__ ( toks )" is replaced by
-                # either an expansion of the replacement list, if __VA_ARGS__ is nonempty
-                # or by a placemarker.
-                var = args[-1]
-                info = self.opts[i]
-                if var:
-                    exp = info.repl.expandargs(args, tokens, positions, caller)
-                    info.repl.concat(exp)
-                    rep[i : i+1] = exp
-                else:
-                    rep[i].type = TokType.CPP_PLACEMARKER
-                    rep[i].value = ''
-
-            # Normal expansion.  Argument is macro expanded first
-            else:
-                argnum = self.argnums[i]
-                rep[i:i+1] = expanded[argnum]
-
-        # Get rid of removed comma if necessary
-        ### TODO: Check this out.
-        if comma_patch:
-            rep = [_i for _i in rep if _i]
-
-        return rep
+        return FuncMacro(
+            prep, name, repl[:-1], self.arglist[:-1], variadic=True
+            )
 
     @staticmethod
     def stringize(toks: Tokens) -> str:
-        strtokens: Tokens = Tokens()
-        has_ws = None
+        """ Implement the '#' operator in a function macro (C99 6.3.10.2). """
+        parts: list[str] = []
+        has_ws = False
+        prev: PpTok = None
         for tok in toks:
-            if tok.type.ws:
-                if not strtokens: continue     # Skip initial whitespace.
-                has_ws = tok                # Start or continue a string
+            if not tok.value:
+                continue
+            typ: TokType = tok.type
+            if typ.ws:
+                if not parts: continue      # Skip initial whitespace.
+                has_ws = True               # Start or continue a run of ws.
             else:
-                if has_ws:
-                    has_ws = copy.copy(has_ws)
-                    has_ws.value = ' '
-                    strtokens.append(has_ws)
-                    has_ws = None
-                strtokens.append(copy.copy(tok))
+                if prev and not tok.hide and tok.lineno != prev.lineno:
+                    has_ws = True
+                prev = tok
+                if has_ws or (parts and tok.spacing):
+                    parts.append(' ')
+                    has_ws = False
+                if tok.repls:
+                    # Revert to original spelling of UCNs.
+                    orig = tok.reverted_from
+                    if orig:
+                        tok = orig.revert(unicode=True, orig_spelling=True)
+                    else:
+                        tok = tok.revert(unicode=True)
+                if typ.str:
+                    # Escape every " and \.
+                    tok.value = tok.value.replace("\\","\\\\").replace('"', '\\"')
+                elif typ.chr:
+                    # Escape every \.`
+                    tok.value = tok.value.replace("\\","\\\\")
+                elif tok.value.startswith('//'):
+                    tok.value = f"/*{tok.value[2:]}*/"
+                parts.append(tok.value)
 
-        string = str(Tokens(strtokens))
-        string = string.replace("\\","\\\\").replace('"', '\\"')
-        string = f'"{string}"'
-        return string
+        # Don't end with a backslash.
+        if parts and parts[-1] == '\\':
+            parts.append ('\\')
+        string = ''.join(parts)
+        return f'"{string}"'
 
     def sameas(self, other: FuncMacro) -> bool:
-        """ True if the two definitions are the same, as per Standard 6.10.3 paragraph 2. """
+        """ True if the two definitions are the same (C99 6.10.3p2). """
         if not super().sameas(other): return False
         return self.arglist == other.arglist
 
     def __repr__(self):
-        return f"{self.name}({self.arglist})={self.value}"
+        args = self.arglist
+        if self.variadic:
+            args = args[:-2] + ['...']
+        return f"{self.name}({args})={self.value!r}"
 
-class Macros(dict[LexToken, 'Macro']):
-    """ All the macro definitions in a transltion unit --
+
+class DynMacro(Macro):
+    """ Special macro, such as __LINE__. """
+    is_dyn: ClassVar[bool] = True
+
+    def __init__(self, prep: Preprocessor, name: str):
+        nametok = next(prep.lexer.parse_tokens(name))
+        super().__init__(prep, nametok, Tokens())
+        self.subst = dynamic_substs_tab[self.name](self.nametok)
+
+    def subst_tokens(self, mgr: TokenSubstMgr) -> Iterator[PpTok]:
+        """
+        Do all substitution operations except for pasting.  Dynamic macros
+        have no parameters to substitute.  However, they do generate a single
+        result token based dynamically on the context in which the macro was
+        called.
+        """
+        yield from self.subst.toks(mgr)
+
+    def __repr__(self) -> str:
+        return self.name
+
+
+class MacroExp:
+    """ Handles a single call to Macros.expand() using its __call__(). """
+
+    # The preprocessor.
+    prep: Preprocessor
+
+    # Current definitions of macro names.
+    macros: Macros
+
+    # Input tokens to consume during the expansion.  Includes macro
+    # replacement tokens awaiting rescan.  Empty when expansion is complete.
+    intoks: TokIter
+
+    # Token in source file which is being expanded.  Used to evaluate __LINE__
+    # and __FILE__.  At the top level, it is the macro name token currently
+    # being considered for expansion.  In a directive, it is the directive '#'
+    # token.  For a function argument, it is the origin in the MacroExp which
+    # is expanding the function.
+    origin: PpTok
+
+    # Enclosing MacroCall, if any.
+    call_from: MacroCall = None
+
+    # The source where intoks are located, if they are the file's contents.
+    # This is called only once for any Source file, and intoks = all tokens
+    # generated by that Source by lexing its contents, including from included
+    # files (which have already been expanded and are protected from expansion
+    # at this level).  None if expanding something else.  
+    top: Source = None
+
+    # This is a control expression.  Handle 'defined' expressions and
+    # undefined identifiers.
+    ctrlexpr: bool = False
+
+    def __init__(self, macros: Macros, intoks: TokIter, *,
+        top: Source = None, ctrlexpr: bool = False, origin: TokLoc = None,
+        call_from: MacroCall = None,
+        ):
+        self.macros = macros
+        self.prep = macros.prep
+        self.intoks = intoks
+        self.top = top
+        self.origin = origin
+        self.call_from = call_from
+        self.ctrlexpr = ctrlexpr
+
+    @TokIter.from_generator
+    def __call__(self) -> TokIter:
+        """
+        Expands iterable of intoks, expanding macro names.  After each
+        expansion, rescan that expansion plus all following intoks.  Generates
+        result iterable of tokens.
+
+        Note: this is recursive.  Replacing a function macro will expand any
+        arguments that are used in the replacement, using a nested MacroExp
+        call.  self.macros.depth is the current recursion level.
+
+        This is equivalent of expand() in Prosser's algorithm.
+            See https://www.spinellis.gr/blog/20060626/cpp.algo.pdf.
+        """
+        prep = self.prep
+
+        top = self.top
+        if top:
+            if top.parent:
+                prep.log.write(f"Preprocessing source file", source=top)
+            else:
+                prep.log.write(f"Preprocessing startup")
+        with self.macros.nest(top):
+
+            intoks: TokIter = self.intoks
+            orig = None
+            # Flag to change C++ comment to C comment in some cases.
+            # 1. Tok was produced by a macro replacement.  Will have tok.hide.
+            # 2. Follows an unexpanded macro and possibly some newlines.
+            # This is only for GCC mode.
+            fix_comment: bool = False
+
+            intok: PpTok            # Current token, None after empty expansion.
+
+            #for intok in intoks:
+
+            #    typ: TokType = intok.type
+            #    if not typ.norm:
+            #        yield intok
+            #        continue
+            #    if not orig or intok.indent: orig = intok
+
+            #    if not intok.hide:
+            #        loc = intok.loc
+            #    #if intok.indent:
+            #    #    loc = intok.indent
+
+            while True:
+                for intok in intoks:
+                    #if intok.brk():
+                    #    toks = Tokens.join(intok, *intoks.copy_tokens())
+                    #    print(f"-- {str(toks)!r}")
+                    #    res = Prosser(prep.macros, toks)
+                    #    print(f"---- {str(res)!r}")
+                    if not orig or intok.indent: orig = intok
+                    break
+                else:
+                    return
+                # replace_and_rescan replaces intok possibly, and generates
+                # any passthru intoks from the input, followed first
+                # unexpanded token (if any).
+                for intok in self.replace_and_rescan(intok):
+                    global dumpme
+                    #if intok.brk(): dumpme = True
+                    if not intok.type.norm:
+                        yield intok
+                        continue
+                    # intok = the next token
+                    break
+                else:
+                    # Go back and do the next token, keeping same orig.
+                    #orig = None
+                    continue
+                # intok = the next token
+
+                if intok is not orig:
+                    self.macros.log.msg(f"End replace.  New token {intok!r}", orig)
+                    # orig got replaced with something else.  Source token got
+                    # replaced with another token.  Pick up original spacing
+                    # and indent.
+                    if top and orig.indent and not intok.indent:
+                        if intok.hide:
+                            indent = orig.indent
+                            # gcc and clang add a space at the start of the
+                            # line if orig is at the start and intok has spacing.
+                            if (prep.emulate
+                                and indent.colno == 1
+                                and (intok.spacing
+                                        #or (indent.lineno == intok.lineno
+                                        #    and indent.source is intok.source)
+                                        )
+                                ):
+                                indent = indent.copy(colno=2)
+                        else:
+                            # Use orig line for intok.indent, keep
+                            # intok.colno.
+                            indent = intok.loc.copy(lineno=orig.lineno,
+                                                phys_offset=0)
+                        intok = intok.with_sep(TokenSep.create(indent=indent))
+                    elif orig.spacing:
+                        intok = intok.with_sep(TokenSep.create(spacing=True))
+
+                elif self.ctrlexpr and intok.type.id:
+                    # In control expression, all unreplaced identifiers become
+                    # 0 and defined-macro expressions are evaluated.
+                    intok = self.repl_undefined(intok)
+                #repr(intok.sep)
+                orig = None
+                yield intok
+
+    def repl_undefined(self, intok: PpTok) -> PpTok:
+        """
+        Replace an undefined identifier with
+        '0', with special treatment for 'defined' expressions.
+        """
+        prep = self.prep
+        prep.log.eval_ctrl(intok)
+        if intok.value == 'defined':
+
+            # Undefined behavior (C99 6.10.1).
+            if prep.clang:
+                # clang evaluates the expression in the usual way.
+                # Replace 'defined' in intok + rest of intoks, then get
+                # the first result token, which should be 0 or 1.
+                intok = self._replace_defined_expr(intok)
+                return intok
+            else:
+                # pcpp will issue a warning and treat it as any
+                # other undefined identifier.
+                prep.on_warn_token(
+                    intok,
+                    "Macro expansion of control expression "
+                    "contains 'defined'.  "
+                    "This is being interpreted as '0'.",
+                    )
+
+        return intok.copy(value='0', type=prep.t_INTEGER)
+        # end of repl_undefined()
+
+
+    @TokIter.from_generator
+    def replace_and_rescan(self, intok: PpTok) -> Iterator[PpTok]:
+        """
+        Do macro replacement with rescan for given input token `intok`.
+        Generates the next token (if any) to be processed, possibly the same
+        token.  May modify intoks if a macro replacement occurs.
+
+        If any passthru intoks are seen while consuming a function argument
+        list, these are generated in turn.
+
+        This method _could_ just keep working through the entire input.
+        However, the caller will want to add some output positioning
+        information and lines that became blank as a result of expansion.
+
+        When intok is a macro subject to replacement:
+
+            Any function argument list is consumed from intoks.
+
+            Any passthru intoks found while consuming the argument list are
+            generated in turn.
+
+            Its replacement intoks are put back in the front of intoks.
+
+            If there were any replacement tokens, the first of these is
+            consumed from intoks and becomes the new intok.  Then the entire
+            process is repeated.
+
+            If there were no replacement tokens, the method ends, without
+            generating a result token.
+
+        Otherwise, intok is generated.
+
+        A macro is NOT subject to replacement if:
+
+            It is already being expanded at an outer level.
+
+            A function macro has no argument list, or there's a problem with
+            it.
+
+            It is part of a defined-macro expression, which is looking for a
+            'defined name' or 'defined ( name )' sequence of tokens.
+
+        """
+        m: Macro | None     # Macro for name in intok.value.
+
+        log = self.macros.log
+        intoks = self.intoks
+ 
+        while intok:
+            # Examine intok, the current token just removed from intoks.  
+
+            # Log this pass.
+            log.msg(f"Next token {intok!r}", intok)
+            # End the loop if intok is not a macro which is to be expanded.
+            if not intok.type.id:
+                if intok.type.null:
+                    intok = None
+                # Not an identifier.  Don't expand.
+                break
+            name = intok.value
+            m = self.macros.get(name)
+            if not m:
+                # Not a defined macro.  Don't expand.
+                break
+            # Token is a macro.
+            hide = intok.hide
+            if hide and name in hide:
+                # Hidden.  Don't expand.
+                log.expand(intok, m, False, hide)
+                break
+            if intoks.in_defined_expr:
+                # In 'defined...', don't expand.
+                break
+
+            if self.top and not intok.hide:
+                self.origin = intok
+            call = MacroCall(m, intok, intoks, hide, self, self.call_from)
+            with self.expanding(call):
+                yield from Tokens(call.getargs())
+
+                if call.expanding:
+                    try:
+                        log.expand(intok, m, True, hide, call=call)
+                        if dumpme:
+                            call.dump("  " * self.macros.depth)
+                        new = call.subst()
+                        if new is None:
+                            break
+                        if __debug__:
+                            # Useful for debugging.
+                            newtokens: Tokens = new.copy_tokens()
+                            if dumpme:
+                                leader = "  " * self.macros.depth
+                                print(f"{leader}Expansion =")
+                                for tok in newtokens:
+                                    print(f"{leader}  {tok!r}")
+
+                            newtokens
+                        # If there are no replacement intoks, then
+                        # quit, with intok = the first token in the
+                        # remaining input (if any) or None.  This
+                        # allows intok (possibly expanded) to be placed on
+                        # a new output line.
+                        intok = next(new, None)
+                        if not intok:
+                            if self.top:
+                                # No more replacements, at top level
+                                # expansion.  Don't expand.
+                                break
+                            # Get next remaining input token
+                            intok = next(intoks, None)
+                            if not intok:
+                                # Nothing remaining at all.
+                                break
+                        else:
+                            # Effectively put the replacement intoks
+                            # in front of the remaining input intoks.
+                            # intok is already the first replacement token
+                            # and any remaining replacement intoks are
+                            # put in front of the remaining input
+                            # intoks.
+
+                            intoks.prepend(new)
+
+                    except:
+                        traceback.print_exc()
+                        print("Ignoring the exception.\a")
+                        break
+                elif call.error:
+                    # Something wrong with the function call syntax.
+                    # Don't expand.
+                    self.prep.on_error_token(intok, call.error)
+                    intok = None
+                    break
+                else:
+                    # No argument list.  Don't expand.
+                    log.expand(intok, m, True, hide)
+                    fix_comment = True
+                    break
+                log.msg(f"Rescanning.", intok)
+
+        yield intok
+
+    def expanding(self, call: MacroCall) -> contextlib.contextmgr:
+        if self.top:
+            return self.top.expanding(call)
+        else:
+            return contextlib.nullcontext()
+
+    def _replace_defined_expr(self, deftok: PpTok) -> PpTok:
+        """
+        Replace 'defined X' or 'defined (X)' with integer 0 or 1, or a string
+        to be passed through to the output file.  The 'defined' token is
+        given, and the rest of the expression is in self.intoks.
+
+        The token `defined` can come from the original expression, or from a
+        macro replcement.  In the latter case, it is undefined behavior and is
+        implemented according to prep attributes.
+        """
+
+        prep = self.prep
+
+        # Already have "defined".  Look for X or ( X ).
+
+        # In a macro expansion, check prep options.  May emit a warning.
+        # May treat as just 0, or may evaluate the expression.
+        if prep.emulate and deftok.hide:
+            prep.on_warn_token(
+                deftok,
+                "Macro expansion of control expression "
+                "contains 'defined'.  "
+                "This is being interpreted as '0'.",
+                )
+
+        intoks = self.intoks
+
+        # Trap anything that wants another token from an empty iterator.
+        try:
+            name = None
+            tok = next(intoks)
+            # Looking for "name" or "(name)".
+            if tok.type.id:
+                # Found "name".
+                name = tok.value
+            elif tok.value == "(":
+                tok = next(intoks)
+                if tok.type.id:
+                    tok2 = next(intoks)
+                    if tok2.value == ")":
+                        # Found "(name)".
+                        name = tok.value
+        except StopIteration:
+            # The "defined" ... was incomplete.
+            pass
+
+        if name:
+            # Found the name.
+            if name in self.macros:
+                result = 1
+            else:
+                repl = prep.on_unknown_macro_in_defined_expr(tok)
+                if repl is None:
+                    partial_expansion = True
+                    result = f'defined({tok.value}'
+                else:
+                    result = int(repl)
+            if isinstance(result, int):
+                tok = tok.copy(value=str(result), type=prep.t_INTEGER)
+            else:
+                tok = tok.copy(value=result, type=prep.t_ID)
+            return tok
+        else:
+            # Malformed.
+            prep.on_error_token(
+                deftok, "Malformed 'defined' in control expression")
+            return deftok.copy(type=prep.TokType.error)
+
+
+class Macros(dict[PpTok, 'Macro']):
+    """ All the macro definitions in a translation unit --
     top level source file, all included headers, and predefined stuff.
 
-    Definitions are in the form of a token iterator (which will be consumed).
-    Expansion generates a token sequence from an input token iterator
-        (which will be consumed).
+    Definitions are in the form of a token list.
+    Expansion generates a token sequence from an input token list.
     """
 
     def __init__(self, prep: Preprocessor):
         self.prep = prep
-        self.lexer = prep.lexer.clone()
+        self.lexer = prep.lexer
         self.log = prep.log
+        self.TokType = prep.TokType
+        self.depth = 0
+        self.countermacro = 0
+        self.top = None
 
-    def define (self, defn: Iterable[LexToken], src: str = '') -> None:
-        """Define a new macro from tokens following #define in a directive."""
-
-        linetok: Iterator[LexToken] = iter(defn)
+    def define(self, defn: TokIter,
+                **kwds) -> Macro:
+        """Define a new macro from intoks following #define
+        in a directive."""
+        TokIter.check_type(defn, "Macros.define()")
+        prep = self.prep
         try:
             # Name is first token, skipping whitespace.
-            name = next(no_ws(linetok))
-            if name.type is TokType.CPP_OBJ_MACRO:
-                # A normal macro
-                m = ObjMacro(self, name, self.prep.tokenstrip(list(linetok)))
-            elif name.type is TokType.CPP_FUNC_MACRO:
+            #x = next(defn)
+            defn = defn.strip()
+            name = next(defn)
+            # Validate the macro name.
+            if not name.type.id:
+                self.prep.on_error_token(
+                    name,
+                    f"Macro definition {name.value!r} requires an identifier")
+                return None
+            if name.value == 'defined':
+                self.prep.on_error_token(
+                    name, "'defined' is not a valid macro name")
+                return None
+
+            defn = defn.strip()
+            if name.type is self.TokType.CPP_OBJ_MACRO:
+                m = ObjMacro(prep, name, defn, **kwds)
+            elif name.type is self.TokType.CPP_FUNC_MACRO:
                 # A macro with arguments
-                prep = self.prep
-                arglist = no_ws(linetok)
                 variadic = False
-                # Get the argument names.  Gets tokens through the closing ')'.
-                def argtokens() -> Iterator[LexToken]:
-                    for tok in arglist:
-                        if tok.type is TokType.CPP_RPAREN:
+                # Get the argument names.  Gets intoks through the closing ')'.
+                def argtokens() -> Iterator[PpTok]:
+                    for tok in defn:
+                        if tok.value == ')':
                             return
                         yield tok
 
                 def iter_argnames() -> Iterator[str]:
+                    """
+                    Generate names of arguments.  For variadic, the ...
+                    generates both __VA_ARGS__ and __VA_OPT__.
+                    """
                     nonlocal variadic
-                    seen_comma: LexToken = None
-                    tokens: Iterator[LexToken] = argtokens()
-                    next(tokens)                # Opening '('.
-                    for tok in tokens:
+                    seen_comma: PpTok = None
+                    intoks: Iterator[PpTok] = argtokens()
+                    next(intoks)                # Opening '('.
+                    for tok in intoks:
                         # The arg name -- ID or ELLIPSIS.
                         seen_comma = None
-                        if tok.type is TokType.CPP_ID:
+                        if tok.type is self.TokType.CPP_ID:
                             if variadic:
                                 prep.on_error_token(
-                                    tok, "No more arguments may follow a variadic argument")
+                                    tok,
+                                    "No more arguments may follow "
+                                    "a variadic argument")
                                 return
                             yield tok.value
-                        elif tok.type is TokType.CPP_ELLIPSIS:
+                        elif tok.type is self.TokType.CPP_ELLIPSIS:
                             yield '__VA_ARGS__'
+                            yield '__VA_OPT__'
                             variadic = True
                         else:
-                            prep.on_error_token(tok, f"Invalid macro argument {tok.value!r}")
+                            prep.on_error_token(
+                                tok, f"Invalid macro argument {tok.value!r}"
+                                )
                             break
                         # Expect a comma or end of list.
-                        for tok in tokens:
-                            if tok.type is TokType.CPP_COMMA:
+                        for tok in intoks:
+                            if tok.type is self.TokType.CPP_COMMA:
                                 seen_comma = tok
                             else:
                                 prep.on_error_token(tok, "Expected ',' or ')'.")
@@ -883,30 +873,33 @@ class Macros(dict[LexToken, 'Macro']):
                             break
                     if seen_comma:
                         prep.on_error_token(seen_comma, "Missing name after comma.")
-                        prep.on_error()
 
                 argnames = list(iter_argnames())
-                m = FuncMacro(self, name, self.prep.tokenstrip(Tokens(linetok)), argnames, variadic)
+                m = FuncMacro(prep, name, defn.strip(), argnames, variadic)
 
             else:
                 prep.on_error_token(name,"Bad macro definition")
-                return
+                return None
             # OK.  Either an object or a function macro.
-            # Check for redefinition
+            # Check for redefinition -> error message but use new definition.
             name = m.name
             if name in self:
                 older = self[name]
                 if not m.sameas(older):
                     self.prep.on_error_token(m.nametok, f"Macro {name} redefined with different meaning.")
             self[name] = m
+            return m
 
         except:
+            traceback.print_exc()
+            print('\a')
             raise
 
-    def define_from_text(self, text: str, lexer: Lexer):
-        lexer.begin('DEFINE')
-        lexer.input(text.strip())
-        self.define(iter(lexer))
+    def define_dynamic(self, name: str) -> Macro:
+        """ Define a dynamic macro, such as __LINE__. """
+        m = DynMacro(self.prep, name)
+        self[name] = m
+        return m
 
     def defined(self, name: str) -> bool:
         return name in self
@@ -915,623 +908,1407 @@ class Macros(dict[LexToken, 'Macro']):
         if name in self:
             del self[name]
 
-    def expand(self, toks: Tokens,
-               evalexpr: bool = False,              # This is a control expression.  Handle 'defined'.
-               **kwds) -> Tokens:
-        """ Expands sequence of tokens, replacing macro names with expansions thereof.
-        Returns result sequence of tokens.
+    def expand(self, intoks: TokIter,  **kwds) -> TokIter:
         """
-        # Make a copy, so as not to alter the input.
-        toks = Tokens(toks)
-
-        i: int = 0                      # Current position in toks to examine
-        j: int                          # Position after tokens to replace
-
-        if evalexpr:
-            self._replace_defined(toks)
-
-        while i < len(toks):
-            t = toks[i]
-            # Possible actions:
-            #   1.  Move to next position.
-            #   2.  Replace several tokens with new tokens.
-            name = t.value
-            m = self.get(name)
-            new = None
-            if m:
-                hide = t.hide
-                call = MacroCall(m, toks, i, hide)
-                if name in hide:
-                    # Hidden.  Don't expand.
-                    self.log.expand(m, False, t, hide, args=call.args)
-                else:
-                    if call.expanding:
-                        try:
-                            new = Tokens(call.subst())
-                            #subster = MacSubst(call)
-                            #new = list(subster())
-                            print(Tokens(new))
-                            j = call.endpos
-                        except:
-                            pass
-                    #self.log.expand(m, True, t, hide, args=call.args)
-                    #if call.m.is_func:
-                    #    # Special adjustment for hide set.
-                    #    hide = hide & toks[call.endpos - 1].hide
-                    #if call.expanding:
-                    #    hide = hide & toks[call.endpos - 1].hide | {name}
-                    #    with self.prep.nest():
-                    #        new = m.subst(call)
-                    #        print('--', new)
-                        j = call.endpos
-            elif self.prep.expand_linemacro and name == '__LINE__':
-                self.log.expand(t.value, True, t, [])
-                t.type = self.prep.t_INTEGER
-                t.value = self.prep.t_INTEGER_TYPE(t.lineno)
-                new = [t]
-                j = i + 1
-                
-            elif self.prep.expand_countermacro and name == '__COUNTER__':
-                self.log.expand(t.value, True, t, [])
-                t.type = self.prep.t_INTEGER
-                t.value = self.prep.t_INTEGER_TYPE(self.prep.countermacro)
-                self.prep.countermacro += 1
-                new = [t]
-                j = i + 1
-
-            if new is None:
-                # Not replacing the token.
-                i += 1
-            else:
-                # Replacing initial token(s)
-                toks[i : j] = new
-                if evalexpr:
-                    if self._replace_defined(toks):
-                        self.prep.on_warn_token(
-                            toks[0],
-                            "Macro expansion of control expression contains 'defined'"
-                            )
-                self.log.write(f"-> {new}", token=t, nest=1)
-
-        return toks
-
-    def _replace_defined(self, tokens: Tokens) -> bool:
-        """ Replace any 'defined X' or 'defined (X)' with integer 0 or 1.
-        The token list is altered in-place.  Return True if anything replaced.
+        Completely macro expands a token iterator, and generates expanded
+        tokens.  See the MacroExp() constructor for explanation of arguments.
         """
-        i = 0
-        replaced = False
-        while i < len(tokens):
-            if tokens[i].type is TokType.CPP_ID and tokens[i].value == 'defined':
-                needparen = False
-                result = "0L"
-                name = None
-                # Look for either name or (name), skipping whitespace.
-                j = i + 1
-                while j < len(tokens):
-                    if tokens[j].type.ws:
-                        j += 1
-                        continue
-                    elif tokens[j].type is TokType.CPP_ID and not name:
-                        name = tokens[j].value
-                        if name in self:
-                            result = "1L"
-                        else:
-                            repl = self.prep.on_unknown_macro_in_defined_expr(tokens[j])
-                            if repl is None:
-                                partial_expansion = True
-                                result = 'defined(' + tokens[j].value + ')'
-                            else:
-                                result = "1L" if repl else "0L"
-                        if not needparen: break
-                    elif tokens[j].value == '(' and not needparen:
-                        needparen = True
-                    elif tokens[j].value == ')' and needparen:
-                        break
-                    else:
-                        self.prep.on_error_token(tokens[i], "Malformed 'defined' in control expression")
-                    j += 1
-                if result.startswith('defined'):
-                    tokens[i].type = TokType.CPP_ID
-                    tokens[i].value = result
-                else:
-                    tokens[i].type = self.prep.t_INTEGER
-                    tokens[i].value = self.prep.t_INTEGER_TYPE(result)
-                replaced = True
-                del tokens[i+1:j+1]
-            i += 1
-        return replaced
+        return MacroExp(self, intoks, **kwds)()
+
+    # For debugging or debug logging.
+    @contextlib.contextmanager
+    def nest(self, top: Source):
+        """
+        Run the context with higher self.depth and prep.nesting.  self.depth =
+        1 at the top level.
+        """
+        self.depth += 1
+        oldtop = self.top
+        self.top = top
+        with self.prep.nest():
+            try:
+                yield
+            finally:
+                self.depth -= 1
+                self.top = oldtop
+    @property
+    def nested(self) -> bool:
+        """ If in expand() called within another expand(). """
+        return self.depth > 1
+
+    # Break only if self.depth == or in this, or if is empty container.
+    break_depth: Container[int] = ()
+    # Break only if self.top
+    break_top: bool = True
+
+    # Method to use as a breakpoint condition.
+    def brk(self, obj: Any = None) -> bool:
+        """ True if debugger should break.
+        Test given object, if any, and self.depth.
+        """
+        return ((obj is None or obj.brk())
+                and break_in_values(self.break_depth, self.depth)
+                and (not self.break_top or self.top)
+                )
+    def __repr__(self) -> str:
+        return f"{'*' * (self.depth - 1)} len={len(self)}"
+
 
 class MacroCall:
-    """ An invocation of a macro.
-    Can produce the replacement tokens with the subst() method.
     """
+    An invocation of a macro.  Consumes all intoks in the argument list with
+    the getargs() method, which also generates intoks it doesn't use.  Can
+    produce the replacement intoks with the subst() method.
+    """
+    # The macro being called
     m: Macro
-    args: list[Tokens] = None
-    tokens: Tokens                  # Where the invocation is located.
-    pos: int                        # Index for the macro name.
-    endpos: int = 0                 # Index after the invocation.
-    positions: list[int]            # Index of start of each argument.
-    error: str = ''                 # Message if there was an error.
-    expanding: bool = True          # The Macro will be expanded.
-    hide: Hide                      # Hidden names to be applied to all result tokens.
 
-    def __init__(self, m: macro, tokens: Tokens, pos: int, hide: Hide):
+    # Argument intoks for each argnum, if there is an argument list.
+    args: list[Tokens] = None
+
+    # ')' token which ends an argument list.  Used by Prosser's algorithm in
+    # computing hide sets.
+    rparen: ClassVar[PpTok] = None
+
+    nametok: PpTok                  # The macro name in the invocation.
+    error: str = ''                 # Message if there was an error.
+
+    # The expansion manager that created this MacroCall.
+    exp: MacroExp
+
+    # Enclosing MacroCall, if any.
+    call_from: MacroCall = None
+
+    # True if the macro will be expanded.  False for a function macro without
+    # (), or if already expanding the macro, or any error.
+    expanding: ClassVar[bool] = True
+
+    # Hidden names to be applied to all tokens in resulting expansion.
+    hide: Hide = None                    
+
+    def __init__(self, m: macro, nametok: PpTok, intoks: TokIter,
+                 hide: Hide, exp: MacroExp, call_from: MacroCall):
+        self.m = m
+        self.intoks = intoks
+        self.nametok = nametok
+        if hide: self.hide = hide
+        self.exp = exp
+        if call_from: self.call_from = call_from
+
+    @TokIter.from_generator
+    def getargs(self) -> Iterator[PpTok]:
+        """
+        Parse argument list from input intoks.  Generate any passthru intoks.
+        Does nothing if an object macro.
+        """
         try:
-            self.m = m
-            positions = self.positions = []
-            self.tokens = tokens
-            self.pos = pos
-            endpos = pos + 1            # Will become larger with an argument list.
-            self.nametok: PpTok = tokens[pos]
+            m: Macro = self.m
+            hide = self.hide
             if not m.is_func:
                 return                  # An object macro
-            args = []
-            nesting = 0
-            argpos = 0
-            nparams = len(m.arglist)
+            # A function macro.  Go collect the arguments.
+
+            args: list[Tokens] = []
+            nparams = len(m.arglist) - m.variadic
             varnum = m.variadic and nparams - 1
-            nargs = 0
 
-            def argtoken() -> bool:
-                """ Handle token that is part of an arg.
-                Return False if there is no arg list.
+            def argtoken(tok: PpTok, arg: Tokens) -> None:
                 """
-                nonlocal argpos, argend
-                if not argpos:
-                    if not nesting:
-                        # Missing argument list.
-                        self.expanding = False
-                        return False
-                    argpos = i
-                argend = i + 1
-                return True
+                Handle token that is part of an arg.  Spacing and indent may
+                be modified.
+                """
+                if tok.indent:
+                    # Remove indent and add spacing.
+                    tok = tok.with_sep(TokenSep.create(
+                        spacing=tok.colno > 1))
+                if not arg:
+                    # First token.  Remove spacing
+                    tok = tok.without_spacing()
+                arg.append(tok)
 
-            def endarg() -> int:
-                nonlocal argpos, argend
-                if not argpos:
-                    argpos = argend = i
-                args.append(Tokens(tokens[argpos : argend]))
-                positions.append(argpos)
-                argpos = 0
-                return nargs + 1
+            tok: PpTok
 
             # Looking for argument list.
-            for i, tok in enumerate(tokens[pos+1:], pos + 1):
-                if tok.type.ws:
-                    continue
-                val = tok.value
-                if val == '(':
-                    nesting += 1
-                    if nesting == 2:
-                        # Start of first arg.
-                        argtoken()
-                elif not nesting:
-                    # No argument list.
+            # Directives are handled specially, but differently after the
+            # opening '('.
+            with self.nametok.source.inmacro(self):
+
+                for tok in self.gen_to_normal():
+                    if not tok.type.norm:
+                        yield tok
+                        continue
+
+                    # tok is next normal token, if any.
+                    if tok.value != '(':
+                        # Func macro without arg list doesn't expand.
+                        self.intoks.putback(tok)
+                        self.expanding = False
+                        return
+                    # Got opening '('.
+                    break
+                else:
+                    # No normal tokens
                     self.expanding = False
                     return
-                elif val == ')':
-                    nesting -= 1
-                    if not nesting:
-                        # Ends the last arg
-                        nargs = endarg()
-                        endpos = i + 1
-                        # Validate arg count.
-                        if nargs != nparams:
-                            if m.variadic:
-                                # Variadic args allowed to be one short.  Supply trailing arg.
-                                if nargs == nparams - 1:
-                                    endarg()
-                                else:
-                                     self.error = (
-                                         f"Macro {m.name} requires at least {nparams - 1}"
-                                         f" argument(s) but was passed {nargs}")
-                            elif nargs == 1 and not args[0] and nparams == 0:
-                                # Empty only arg is OK if no params.
-                                del args[:]
-                                del positions[:]
-                            else:
-                                self.error = (
-                                    f"Macro {m.name} requires exactly {nparams}"
-                                    f" argument(s) but was passed {nargs}")
-                        self.args = args
-                        return
-                    else:
-                        argtoken()
-                elif val == ',':
-                    if nesting > 1:
-                        argtoken()
-                    elif m.variadic and len(args) == varnum:
-                        if not argtoken():
-                            return
-                    else:
-                        # Ends an arg and starts a new one.
-                        nargs = endarg()
-                        argpos = 0
-                elif not argtoken():
-                    return                  # No arg list found.
 
-            # Missing argument list or end of one.
-            self.expanding = False
-            if nesting:
-                self.error = f"Macro {m.name} missing ')' in argument list."
-            return
-            argend = 0                      # Make argend a local variable.
+                # Now within the arg list, so do special lexing
+                # differently.
+                self.args = args = []
+                nargs = 0
+
+                # Loop for each argument.
+                while not self.rparen and not self.error:
+                    arg = Tokens()
+                    args.append(arg)
+                    nargs += 1
+                    for tok in self.gen_arg():
+                        if not tok.type.norm:
+                            yield tok
+                            continue
+                        argtoken(tok, arg)
+
+                # Close of argument list.
+
+                # Special adjustment for hide set in function macro.
+                if self.rparen:
+                    hide = hide and hide & self.rparen.hide
+                # Validate arg count.
+                if nargs != nparams:
+                    if m.variadic:
+                        # Variadic args allowed to be one short.
+                        #   Supply trailing arg.
+                        if nargs == nparams - 1:
+                            args.append(Tokens())
+                            nargs += 1
+                        else:
+                            self.set_error(
+                                f"Macro {m.name!r} requires at least "
+                                f"{nparams - 1} argument(s) "
+                                f"but was passed {nargs}.")
+                    elif nargs == 1 and not args[0] and nparams == 0:
+                        # Empty only arg is OK if no params.
+                        del args[:]
+                    else:
+                        self.set_error(f"Macro {m.name!r} requires exactly "
+                                f"{nparams} argument(s) "
+                                f"but was passed {nargs}.")
+                # Done.  We have all the args.
+                return
+
         finally:
-            self.endpos = endpos
-            self.m.macros.log.write(
-                f"{Tokens(tokens[pos:endpos])}", token=tokens[pos])
-            if m.is_func:
-                # Special adjustment for hide set in function macto.
-                hide = hide & tokens[endpos - 1].hide
-            self.hide = hide | {m.name}
+            if hide:
+                self.hide = hide.add(m.name)
+                if m.name in hide:
+                    self.expanding = False
+            else:
+                self.hide = Hide(m.prep, m.name)
 
-    def subst(self, m: Macro = None) -> Iterator[PpTok]:
-        """ Result of substituting the macro replacement list using call arguments.
-        All tokens are new copies.
+    def gen_arglist(self) -> Iterator[PpTok]:
         """
-        s = MacSubst(self)
-        yield from s(m)
-        #result = expand(self.tokens[self.pos : self.endpos], self.m.macros)
+        Generate all tokens after opening '(' up to and including matching
+        ')'.  self.nesting tracks '(' not yet matched.
+        """
+        self.nesting = 0
+        for intok in self.intoks:
+            yield intok
+            if intok.value == ')':
+                if not self.nesting: return
+                self.nesting -= 1
+            elif intok.value == '(':
+                self.nesting += 1
 
-        #if not self.expanding or self.error: return None
-        #hide = self.nametok.hide | {self.nametok.value}
-        #if self.m.is_func:
-        #    rep = self.m.expandargs(self.args, self.tokens, self.positions, self.m)
-        #    hide &= self.tokens[self.endpos - 1].hide
-        #else:
-        #    rep = Tokens(self.m.repl)
+    def gen_arg(self) -> Iterator[PpTok]:
+        """
+        Generates intoks for next argument.  Consumes, without generating, the
+        following comma or matching rparen.  Includes all balanced parens.  Set
+        self.rparen if ending with a matching rparen.  Set self.error if ran
+        out of intoks.
+        """
+        # Parse as far as matching ')', maybe stop at comma.
+        self.nesting = 0
 
-        #hide |= {self.nametok.value}
+        for tok in self.gen_arglist():
+            if not self.nesting:
+                # Looking for separating ',' at top nesting level.
+                if tok.value == ',':
+                    # Comma is not part of the arg if it is within the
+                    # __VA_ARGS__.
+                    if not (self.m.variadic
+                            and len(self.args) == len(self.m.arglist) - 1
+                            ):
+                        # The comma is not part of the arg
+                        return
+                elif tok.value == ')':
+                    self.rparen = tok
+                    # The rparen is not part of the arg
+                    return
+            # Part of the arg.
+            yield tok
+        # End of tokens before end of the arg list
+        self.set_error(
+            f"Macro {self.m.name!r} missing ')' in argument list.")
 
-        #for tok in rep:
-        #    if tok.type is TokType.CPP_ID:
-        #        tok.hide |= hide
+    def gen_to_normal(self) -> Iterator[PpTok]:
+        """
+        Generates input intoks up to the first normal token (if any).
+        """
+        for tok in self.intoks:
+            yield tok
+            typ = tok.type
+            if not typ.norm:
+                continue
+            break
 
-        #return rep
+    @property
+    def end_tok(self) -> PpTok:
+        """ Last token in the macro call. """
+        return self.rparen or self.nametok
 
-''' The following is modeled after David Prosser's algorithm, which can be found at
-https://www.spinellis.gr/blog/20060626/cpp.algo.pdf
-'''
+    def orig_loc(self) -> TokLoc:
+        """
+        Where this call ultimately came from.  If directly in a source data, it's just
+        the location in the source.  If it is a macro expansion, it's the
+        location of the enclosing macro call.
+        """
+        c: MacroCall = self.nametok.call_from
+        if c:
+            return c.orig_loc()
+        else:
+            return self.nametok.loc
 
-class TokSubst:
-    """ Performs substitution for a single token, or sequence of tokens,
-    in the replacement list of a Macro.
-    These objects form a syntax tree.
-    When called with the details of a macro invocation, it iterates over the tokens
-    resulting.  These are newly created tokens.
+    def orig_call(self) -> MacroCall:
+        """
+        Where this call ultimately came from.  If directly in a source data, it's just
+        this call.  If it is a macro expansion, it's the
+        call of the enclosing macro call.
+        """
+        c: MacroCall = self.nametok.call_from
+        if c:
+            return c.orig_call()
+        else:
+            return self
+
+    def set_error(self, msg: str) -> None:
+        if not self.error:
+            self.error = msg
+            self.expanding = False
+
+    @functools.cached_property
+    def first_nonempty_argnum(self) -> int | None:
+        for i, arg in enumerate(self.args):
+            if arg: return i
+        return None
+
+    def subst(self, opt: Macro = None) -> Iterator[PpTok]:
+        """
+        Result of substituting the macro replacement list using call
+        arguments.  Use the macro in self.call, unless a __VA_OPT__(...) macro
+        is provided instead.  All result tokens are new copies.
+        """
+        s = TokSubstMgr(self)
+        return s(opt or self.m)
+
+    def dump(self, leader:str = '') -> None:
+        """ Prints details. """
+        print(f"{leader}MacroCall {self!r}")
+        leader += "  "
+        print(f"{leader}name = {self.nametok!r}")
+        print(f"{leader}hide = {self.hide!r}")
+        if self.m.is_func:
+            if self.nametok.value in self.nametok.hide:
+                print(f"{leader}Already expanding")
+            elif self.args is not None:
+                for param, arg in zip(self.m.arglist, self.args):
+                    print(f"{leader}{param} =")
+                    for tok in arg:
+                        print(f"{leader}  {tok!r}")
+            else:
+                print(f"{leader}No arg list")
+        if self.m.is_func: print(f"{leader}{self.rparen!r}")
+
+    def __repr__(self) -> str:
+        rep = self.m.name
+        if self.args is None:
+            if self.m.is_func:
+                rep += " <no arg list>"
+        else:
+            rep = f"{rep} ({', '.join(map(str, self.args))})"
+        return rep
+
+
+class TokSubst(abc.ABC):
+    """ Performs substitution for a single token, or sequence of intoks,
+    in the replacement list of a Macro.  When called with the details of a
+    macro invocation, it iterates over the intoks resulting.  These are newly
+    created intoks.
+
+    This base class is used for a single token, including a paste operator,
+    and generates just that token.
+
     """
-    tok: PpToken                        # A token in the macro's replacement list.
-                                        # It will be copied to produce the result.
+    # A token in the macro's replacement list, or the first of a sequence.
+    tok: PpToken
+
     is_paste: ClassVar[bool] = False    # True for PasteTokSubst.
+    is_param: ClassVar[bool] = False    # True for ParamTokSubst.
 
     def __init__(self, tok: PpTok):
         self.tok = tok
 
-    def toks(self, sub: MacSubst) -> Iterator[PpTok]:
-        """ Generates new token(s) for the given sub. """
-        yield copy.copy(self.tok)
+    @abc.abstractmethod
+    def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
+        ...
 
     def __repr__(self) -> str:
         return repr(self.tok)
 
+
+class PlainTokSubst(TokSubst):
+    """ An ordinary token.  Generated token will set its call_from. """
+
+    @TokIter.from_generator
+    def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
+        """ Generates new token(s) for this subst. """
+        yield self.tok.copy(call_from=mgr.call)
+
+
+
 class ParamTokSubst(TokSubst):
     """ Substitutes for a parameter name token.
-    Generates the expansion of the corresponding argument.
-    Can also stringify the argument (unexpanded).
+    Generates the expansion of the corresponding argument, or possibly just
+    the argument unexpanded.  If there are no intoks, generate a φ token,
+    which is significant if later being pasted or stringized.  With preceding
+    whitespace from either the expansion or the name token.
     """
-    argnum: int                         # The index of the parameter in macro parameter list.
+    is_param: ClassVar[bool] = True     # True for ParamTokSubst.
+    # Should be expanded.  False if adjacent to a paste or stringize.
+    expand: bool = True
 
-    def __init__(self, tok: PpToken, argnum: int):
+    argnum: int         # The index of the parameter in macro parameter list.
+
+    # This follows a π subst.  If the argnum is the first non-empty argument
+    #   (which may be different each time this macro is called), the spacing
+    #   is dropped.  This mimics GCC's behavior.  
+    # If not, then the spacing is always dropped.  
+    # 
+    # Note, 'spacing' refers only to the first token.
+    after_paste: bool
+
+    def __init__(self, tok: PpToken, argnum: int, after_paste: bool = True):
         super().__init__(tok)
         self.argnum = argnum
+        self.after_paste = after_paste
 
-    def toks(self, sub: MacSubst) -> Iterator[PpTok]:
-        yield from sub.expansion(self.argnum)
+    @TokIter.from_generator
+    def toks(self, mgr: TokSubstMgr, **kwds,
+             ) -> Iterator[PpTok]:
+        """
+        Generates new token(s) for this subst.  A non-expanding empty
+        parameter generates a single placemarker.
+        """
+        res: TokIter
+        argnum = self.argnum
+        arg: Tokens = mgr.call.args[argnum]
+        if self.expand:
+            res = mgr.expansion(
+                argnum, arg, with_spacing=self.after_paste)
+        else:
+            # Preceded and/or followed by π.  May supply a placemarker.
+            if not arg:
+                arg = Tokens.join(self.tok.make_null())
+            res = TokIter(arg)
 
-    def string(self, sub: MacSubst) -> Iterator[PpTok]:
-        return sub.string(self.argnum)
+        # The first token's spacing may need adjustment.  This is handled by
+        # the mgr.
+        #  
+        # If after_paste: Get spacing from the parameter value, but none if
+        # the arg num is the first nonempty argument.  
+        # 
+        # Otherwise: no spacing.
+
+        for tok in res:
+            # First token.
+            if not self.after_paste:
+                tok = tok.with_spacing(self.tok.spacing)
+            yield tok
+            break
+        # Everything else verbatim.
+        yield from res
+
 
 class StringTokSubst(TokSubst):
-    """ Substitutes for a '#' token plus any whitespace plus a parameter name. """
-    argnum: int
+    """
+    Substitutes for a '#' token plus a parameter name or __VA_OPT__ (...)
+    expression.
+    """
+    arg: ParamTokSubst | VaOptTokSubst
+    argnum: int | None              # None is for a VA OPT.
 
-    def __init__(self, tok: PpToken, argnum: int):
+    def __init__(self, tok: PpToken, arg: TokSubst, argnum: int = None):
         super().__init__(tok)
+        self.arg = arg
         self.argnum = argnum
 
-    def toks(self, sub: MacSubst) -> Iterator[PpTok]:
-        """ Generates new token(s) for the given sub. """
-        tok = copy.copy(self.tok)
-        tok.value = sub.string(self.argnum)
-        tok.type = TokType.CPP_STRING
-        yield tok
+    @TokIter.from_generator
+    def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
+        """ Generates new token(s) for this subst. """
+        m = mgr.call.m
+        argnum = self.argnum
+        toks = self.arg.toks(mgr)
+        value = mgr.string(toks, argnum)
+        prep = mgr.prep
+
+        string = self.tok.copy(value = value, type = prep.TokType.CPP_STRING)
+        name = m.arglist[argnum or -1]
+        prep.log.stringize(name, string, self.tok, nest=1)
+        yield string
+
 
 class PasteTokSubst(TokSubst):
-    """ Substitutes for one or more '##' tokens plus the tokens on either side
-    and in between.  Whitespace next to each '##' is ignored.
+    """ Substitutes for one or more π intoks plus the intoks on either side
+    and in between.  Whitespace next to each π is ignored.
     """
-    is_paste: ClassVar[bool] = True             # True for PasteTokSubst.
-    items: Sequence[TokSubst]                   # Two or more elements being pasted.
-    ops: Sequence[PpTok]                        # One or more '##' tokens, between the items.
+    is_paste: ClassVar[bool] = True     # True for PasteTokSubst.
+    # All the π and other substs (called S), in the order found in the macro
+    # replacement list.  Each S expands to 1 or more normal intoks, or a φ for
+    # an empty parameter.  Consecutive π's are possible, but consecutive S's
+    # are not.  First and last elements are always S's.
 
-    def __init__(self, tok: PpToken, *items: TokSubst):
+    items: Sequence[TokSubst]           # Two or more elements being pasted.
+    # One or more '##' intoks, between the items.
+    ops: Sequence[PpTok]
+
+    def __init__(self, tok: PpToken):
         super().__init__(tok)
-        self.items = items
 
-    def toks(self, sub: MacSubst) -> Iterator[PpTok]:
-        """ Generates new token(s) for the given sub. """
-        yield from sub.glue(self)
+    @TokIter.from_generator
+    def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
+        """ Generates new token(s) for this subst.
+        Pastes two or more S substitutions together.  These each represent a
+        token sequence or φ, and these intoks are used.  Last token of one S
+        is pasted to the first token of the next S.  Either or both intoks can
+        be φ placemarkers.  If the rhs has only one token, then the paste
+        result becomes the lhs token to paste to the next item.  If a middle S
+        has only one token, then multiple intoks are pasted.  Special cases if
+        any item is empty.
+        """
 
-class OptTokSubst(TokSubst):
-    """ Substitutes for entire "__VA_OPT__ ( repl list )".  Whitespace is ignored.
+        yield self.tok.copy(call_from=mgr.call)
+        return
+
+        ## State of processing:  o* t? I0 I*
+        ## o* = operands found so far to be pasted together.
+        ## t? = last token, if any, iterated from I0.
+        ## I0 = current item, maybe partially iterated.
+        ## I* = any subsequent items, not iterated.
+
+        ##items: list[TokSubst] = self.items[:]
+        #items: list[TokIter] = [item.toks(mgr)
+        #                        for item in self.items]
+
+        #opnds: list[PpTok] = []         # o*
+        #t: PpTok                        # current token
+        #i: int                          # current item index
+        #i = 0
+        #item: TokSubst                  # I0
+        #item = None
+        #n = len(items)
+        ## The '##' intoks between the items.
+        #ops: list[PpTok] = [*self.ops]
+        ## The '##' token before current item, if any.
+        #op: PpTok = None
+        #lex: PpLex = self.tok.lexer
+        #first_result: bool
+        #first_result = True
+
+        #def next_tok() -> PpTok | None:
+        #    """ Move to next non-empty item and return its first token.
+        #    Set item = the item, with first token iterated.
+        #    Return the token, or None if all items are empty.
+        #    """
+        #    nonlocal item, i
+        #    while items:
+        #        item = items[0]
+        #        t = next(item, None)
+        #        if t: return t
+        #        # Item is empty.
+        #        del items[0]
+        #        i += 1
+        #    # Every item is empty.
+        #    return None
+
+        #def paste() -> Iterator[PpTok]:
+        #    """ Paste together the operands, then clear the operand list.
+        #    Paste first two, then paste the result to the next, and so on.
+        #    """
+        #    if not opnds:
+        #        return
+        #    lhs: PpTok = opnds.pop(0)
+        #    rhs: PpTok
+        #    while opnds:
+        #        rhs = opnds.pop(0)
+        #        both = lhs, rhs
+        #        pasted = ''.join(map(attrgetter('value'), both))
+        #        # Prosser's algorithm says to take the intersection of the
+        #        #   hide sets of the pasted intoks.
+        #        hide = reduce(and_, map(attrgetter('hide'), both))
+        #        t: PpTok | None = lhs.copy(
+        #            value=pasted, type=None, hide=hide,
+        #            )
+        #        t = lex.fix_paste(t)
+        #        prep.log.concatenate(t, *both, nest=1)
+        #        if t:
+        #            # The paste succeeded.
+        #            lhs = t
+        #        else:
+        #            # Paste failed.  Generate the lhs operand and keep the rhs.
+        #            # Also may need to generate a space.
+        #            yield lhs
+        #            if 0: pass
+        #            #elif rhs.type in lhs.type.sep_from_paste:
+        #            #    rhs = rhs.with_spacing()
+        #            # G++ drops the space between quoted string and ID.
+        #            #   But not GCC.
+        #            elif prep.gplus_mode and lhs.type.quoted and rhs.type.id:
+        #                rhs = rhs.without_spacing()
+        #            #elif prep.clang:
+        #            #    rhs = rhs.without_spacing()
+        #            lhs = rhs
+
+        #    # Only one item remaining
+
+        #    yield lhs
+        #    return
+        #    self                # Make visible for breakpoint
+
+        ## o* is empty.  State = I*
+        ## Find first non-empty item (if any) and its first token
+        #t = next_tok()
+        #if not t: return
+        #ws = self.tok.spacing
+        ##ws = self.items[0].tok.spacing
+        #if ws: t = t.with_spacing()
+
+        ## Loop for each paste operation performed.
+        #while True:
+        #    # No operands yet, at least one token in current item.
+        #    # Produce intoks up to last token in current item,
+        #    # then paste last token with some intoks from remaining items.
+        #    # (1) State = t I0 I*
+        #    # Treat I0 as t*, state as t* o I*.  Emit the t*.
+        #    for t2 in item:
+        #        # State = t t2 I0 I*.  Emit t.
+        #        yield t
+        #        t = t2
+        #    # State = t I*.
+
+        #    opnds.append(t)
+
+        #    # At least one operand, possibly some non-empty items.
+        #    # State = o+ I*
+        #    while True:
+        #        # At least one operand plus some items.
+        #        # Get next non-empty item and its first token.
+        #        # (2) State = o+ I*
+        #        # Check if I* all empty
+        #        t = next_tok()
+        #        if not t:
+        #            # I* all empty.  State = o*
+        #            yield from paste()
+        #            return
+
+        #        # State = o+ t I0 I*.  Move t to o+.
+        #        opnds.append(t)
+
+        #        # State = o+ I0 I*.
+        #        t = next(item, None)
+        #        if not t:
+        #            # State = o+ I*
+        #            continue
+
+        #        # State = o+ t I0 I*
+        #        break
+        #    yield from paste()
+        #    # State = t I0 I*.  Go to state (1).
+        #    pass
+
+
+class VaOptTokSubst(TokSubst):
     """
-    # Expands the replacement list from __VA_OPT__, if __VA_ARGS__ is non-empty.
-    repl: FuncMacro                     
+    Substitutes for entire "__VA_OPT__ ( repl list )".  Whitespace around the
+    repl list is ignored.  Expands the replacement list from __VA_OPT__, if
+    __VA_ARGS__ is non-empty, otherwise a single φ token.
+    """
+    repl: FuncMacro                 # Macro created from the repl list.                
 
     def __init__(self, tok: PpToken, repl: FuncMacro):
         super().__init__(tok)
         self.repl = repl
 
-    def toks(self, sub: MacSubst) -> Iterator[PpTok]:
-        """ Generates new token(s) for the given sub. """
-        return sub.expand_opt(self.repl)
+    @TokIter.from_generator
+    def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
+        """ Generates new token(s) for this subst. """
+        return mgr.expand_va_opt(self.repl)
 
-class MacSubst:
-    """ Performs the equivalent of Prosser's subst() function.
-    It handles a specific invocation of a Macro in a list of tokens being expanded.
-    When called, it generates newly copied PpTok's.
-    Expands and stringizes parameter names, but does each only once.
+# The following classes are for dynamic macros, like __LINE__, 
+#   whose replacement varies with where and when they are called ...
+
+class CounterTokSubst(TokSubst):
+    @TokIter.from_generator
+    def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
+        """
+        Generates new token(s) for __COUNTER__ macro.  Increments each time it
+        is expanded.
+        """
+        prep = mgr.prep
+        t = mgr.call.nametok.copy(
+            type = prep.t_INTEGER,
+            value = prep.t_INTEGER_TYPE(prep.macros.countermacro),
+            patt = re.compile(prep.lexer.REs.int),
+            )
+        prep.macros.countermacro += 1
+        yield t
+
+
+class FileTokSubst(TokSubst):
+    @TokIter.from_generator
+    def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
+        """
+        Generates new token(s) for __FILE__ macro.  This changes with the
+        current source file or a #line directive.
+        """
+        t = mgr.call.nametok
+        prep = mgr.prep 
+        filename = mgr.call.orig_call().nametok.loc.output_filename
+        t = t.copy(
+            type=mgr.prep.t_STRING,
+            value=f'"{prep.fix_path_sep(filename)}"',
+            )
+        yield t
+
+
+class LineTokSubst(TokSubst):
+    @TokIter.from_generator
+    def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
+        """ Generates new token(s) for __LINE__ macro. """
+        t = mgr.call.nametok
+        prep = mgr.prep
+        #line = t.linemacro()
+        line = mgr.call.orig_call().end_tok.loc.output_lineno
+        t = t.copy(
+            type=prep.t_INTEGER,
+            value=prep.t_INTEGER_TYPE(line),
+            patt=re.compile(prep.lexer.REs.int),
+            )
+        yield t
+
+# Maps the class of the token substitutor for each dynamic macro name.
+dynamic_substs_tab: Mapping[str, TokSubst] = dict(
+    __COUNTER__=CounterTokSubst,
+    __FILE__=FileTokSubst,
+    __LINE__=LineTokSubst,
+    )
+
+
+class TokSubstMgr:
     """
-    call: MacroCall                     # The macro and its invocation.
-    expanded: Mapping[int, Tokens]      # The expansion for a parameter number, if needed.
-    strings: Mapping[int, PpTok]        # The stringization for a parameter number, if needed.
+    Performs the equivalent of Prosser's subst() function.
+
+    It takes a MacroCall and the call operator generates PpTok's.
+
+    For function macros, it substitutes for parameter names and
+    __VA_OPT__(...) expressions.  Expands and stringizes these on demand, but
+    does each parameter only once.  Result is iteration of intoks.
+
+    For object macros, the intoks in the replacement list itself are used.
+
+    Then in either case, it performs paste operations, for both object and
+    function macros.
+    """
+
+    # Set by the constructor...
+    prep: Preprocessor
+    m: Macro
+    call: MacroCall
+
+    # Set during call to self()...
+    expanded: Mapping[int, Tokens]      # The expansion for a parameter
+                                        #   number, if needed.
+    strings: Mapping[int, PpTok]        # The stringization for a parameter
+                                        #   number, if needed.
 
     def __init__(self, call: MacroCall):
+
+        self.m = m = call.m
+        self.prep = m.prep
         self.call = call
 
-    def __call__(self, m: Macro = None) -> Iterator[PpTok]:
-        if not m: m = self.call.m
-        subs = m.subs
-        toks: Iterable[PpTok] = chain(*(sub.toks(self) for sub in subs))
+    @TokIter.from_generator
+    def __call__(self, m: Macro) -> Iterator[PpTok]:
+        """ Equivalent of subst() in Prosser's algorithm.
+        Generates the replacement intoks for the macro call.
+        If substituting the __VA_OPT__(replacement list) for this macro,
+        then the `m` argument is made from that replacement list.
+        """
+        """
+        Two-pass substitution.
+
+        First pass generates tokens for all the m.substs objects.  However, a
+        paste in the original replacement list becomes simply a π token.  An
+        object macro has no subst objects, and the original replacement tokens
+        are used.  Parameter names are expanded or stringized, when required.
+
+        This pass varies with the type of macro being called.  The result is a
+        sequence of tokens with some paste operators.
+
+        Second pass performs the pasting by finding π tokens and replacing
+        them and their adjacent tokens with the concatenation tokens.  Also
+        adds to the hide sets of all generated tokens.
+        """
+
+        # First pass.
+        intoks = TokIter(m.subst_tokens(self))
+
         hide = self.call.hide
+        # Second pass
+
+        prev: PpTok
+
+        toks: TokIter
+        if not self.m.has_paste:
+            toks = intoks
+        else:
+            if self.prep.clang:
+                toks = self.filt_pastes_clang(intoks)
+            if self.call.nametok.brk():
+                print(*toks.copy_tokens())
+            toks = self.do_pastes(toks)
         for tok in toks:
-            tok.hide |= hide
+            # Filter out φ token and any following π token.
+            #try:
+            #    while tok.type.null or tok.value == 'φ':
+            #        tok = next(toks)
+            #        #if tok.type.paste:
+            #        #    tok = next(toks)
+            #except StopIteration:
+            #    break
+            tok = tok.copy()
+            tok.add_hide(hide)
+            if self.call.nametok.brk():
+                print(f"-> {str(tok)!r}")
             yield tok
+
+    @TokIter.from_generator
+    def filt_pastes_clang(self, toks: TokIter) -> Iterator[PpTok]:
+        """
+        Changes the token stream as clang does before doing the actual pastes.
+        Removes any π φ or φ π, then changes (π π)+ π? to (π ##)+ π?.
+        """
+        lhs: PpTok
+        rhs: PpTok
+        prep: PPreprocessor = self.m.prep
+        npastes: int = 0        # How many π just generated.
+        for lhs in toks:
+            # - π 
+            # - φ
+            # - lhs -> lhs.  npastes = 0.
+            #  
+            if lhs.type.paste:
+                for rhs in toks:
+                    # π rhs
+                    if rhs.type.null:
+                        # π φ.
+                        # Remove π φ.
+                        lhs = None
+                    else:
+                        toks.putback(rhs)
+                    break
+            elif lhs.type.null:
+                for rhs in toks:
+                    # φ rhs
+                    if rhs.type.paste:
+                        # φ π.
+                        # Remove φ π.
+                        lhs = None
+                    else:
+                        toks.putback(rhs)
+                    break
+            if lhs:
+                if lhs.type.paste:
+                    if npastes & 1:
+                        lhs = lhs.copy(type=prep.TokType.CPP_DPOUND)
+                    npastes += 1
+                else:
+                    npastes = 0
+                yield lhs
+
+    @TokIter.from_generator
+    def do_pastes(self, toks: TokIter) -> Iterator[PpTok]:
+        """
+        Perform any π pastes contained within the tokens and generate new
+        tokens, otherwise pass on the tokens unchanged.  Any sequence of (lhs,
+        π, rhs) pastes lhs with rhs (neither of which is π) and the result
+        will be next lhs.  If the paste fails, generate lhs and use rhs as the
+        next lhs.
+
+        Each token is either an ordinary token, π, or φ.  π will not be either
+        the first or the last token.  φ will be preceded and/or followed by π.
+        """
+        prep: PPreprocessor = self.m.prep
+
+        '''
+        State of iteration is denoted by O • (tokens being processed) • I.
+
+        O = tokens already generated.  I = input tokens not yet received.
+        Either of these can be {} if known to be empty.
+
+        Initial state = {} • • I.  Final state = O • • {}.
+        '''
+
+        '''
+        Transitions implemented:
+
+        L and R can be φ.  Pasting equivalent to ordinary token with '' value.
+        Not generated.
+
+        Empty.  {} • • {} -> ends the function with no tokens generated.
+
+        Initial.
+          - {} • • L I -> {} • L • I.  {} • • φ π I -> {} • • I.
+
+        Middle.
+          - O • L • R   I -> O L • R • I.
+          - O • L • π R I -> O • LR • I if paste LR is valid.
+          - O • L • π R I -> O L • R • I if paste LR is not valid.
+
+        Final.
+          - O • L • {} -> O L • • {}, ends the function.
+
+        '''
+        # Initial state, {} • • O.
+
+        # Get first token, if any.
+        lhs = next(toks, None)
+        if lhs is None:
+            # {} • • {}.  No tokens at all.
+            return
+
+        # Handle remaining tokens one at a time.  lhs gets updated sometimes.
+
+        # O • lhs • I
+
+        for rhs in toks:
+            # O • lhs rhs • I
+
+            if rhs.type.paste:
+                # O • lhs π • rhs I
+                op = rhs
+                rhs = next(toks)
+                # O • lhs π rhs • I
+
+                # Try pasting lhs and rhs.  If OK, update lhs and generate
+                # nothing.
+                if lhs.type.id and rhs.type.id:
+                    # Fast track for a common use case.
+                    #lhs = lhs.copy(value=lhs.value + rhs.value,
+                    #               hide=lhs.hide and rhs.hide
+                    #               and lhs.hide & rhs.hide)
+                    lhs = op.copy(value=lhs.value + rhs.value,
+                                  type=lhs.type,
+                                  hide=lhs.hide and rhs.hide
+                                  and lhs.hide & rhs.hide)
+                    continue
+
+                t: PpTok | None = lhs.lexer.try_paste(lhs, rhs)
+                prep.log.concatenate(t, lhs, rhs, nest=1)
+                if t:
+                    # The paste succeeded.
+                    lhs = t
+                    continue
+                # Paste failed.
+            # Either lhs rhs or failed lhs π rhs.
+            if not lhs.type.null:
+                yield lhs
+            lhs = rhs
+
+        # End of rhs in toks loop.
+
+        # O • lhs • {}
+
+        if not lhs.type.null:
+            # O lhs • • {}
+            yield lhs
+
+        return
+
+        def getrhs() -> PpTok | None:
+            """
+            Find the rhs token, which is usually the next one.  Current state
+            is O • lhs • I.
+            """
+
+            intoks = Tokens([lhs])
+
+            rhs = next(toks, None)
+            if rhs is None:
+                # O • lhs • {}
+                return None
+
+            intoks.append(rhs)
+            # O • lhs rhs • I
+            if rhs.type.null:
+                # O • lhs φ • π I
+                # φ is not preceded by π, so it must be
+                # followed by π.  We skip the φ and move to the following
+                # π.
+                #
+                # clang skips the π as well and moves to the next token
+                # (if any) after that, and then processes (lhs, rhs).  
+                # 
+                # Get the following π.
+                rhs = next(toks)
+                intoks.append(rhs)
+                # O • lhs φ π • I
+                if prep.clang:
+                    rhs = next(toks, None)
+                    if rhs is None:
+                        # O • lhs φ π • {}
+                        # Ran out of tokens, so end the loop.  We still
+                        # have lhs.
+                        return None
+                    intoks.append(rhs)
+                    # O • lhs φ π rhs • I
+            if self.call.nametok.brk():
+                print(*intoks)
+            return rhs
+        # End of getrhs().
+
+        while True:
+            # lhs can be φ, which is followed, but not preceded, by π.  lhs is
+            # never a π; it could be a π replaced with '##', an ordinary
+            # token, however.
+            rhs = getrhs()
+            if rhs is None:
+                yield lhs
+                return
+
+            if lhs.type.null:
+                # O • φ • π I.
+                next(toks)
+            if not rhs.type.paste:
+                # O • lhs rhs • I.  rhs is not .
+                yield lhs
+                lhs = rhs
+                continue
+            # O • lhs π • rhs I.  π is always followed by π.
+            rhs = next(toks)
+            # O • lhs π rhs • I.
+            if rhs.type.paste:
+                if prep.clang:
+                    # clang treats π as ordinary token.  Change to '##'.
+                    rhs = rhs.copy(type=prep.TokType.CPP_DPOUND)
+
+            # Try pasting lhs and rhs.  If OK, update lhs and generate
+            # nothing.
+            if lhs.type.id and rhs.type.id:
+                # Fast track for a common use case.
+                lhs = lhs.copy(value=lhs.value + rhs.value)
+                continue
+
+            assert not lhs.type.null
+            if rhs.type.null:
+                # O • lhs π φ • I.
+                continue
+            t: PpTok | None = lhs.lexer.try_paste(lhs, rhs)
+            prep.log.concatenate(t, lhs, rhs, nest=1)
+            if t:
+                # The paste succeeded.
+                lhs = t
+            else:
+                # Paste failed.
+                yield lhs
+                rhs = lhs
+
+        # O • lhs • {}
+        yield lhs
+        return
+
 
     # Helper methods used by the TokSubst's ...
 
-    def expansion(self, argnum: int) -> Tokens:
-        """ The expansion (calculated only once) for the given argument.
-        Caller cannot modify the return result.
+    def expansion(
+            self, argnum: int, arg: list[PpTok],
+            with_spacing: bool = True
+            ) -> Tokens:
+        """ The expansion (calculated only once) for the given argument #.
+        Caller must not modify the return result, but can make a copy.
+        If not `with_spacing`, OR argnum is the first nonempty arg,
+            then spacing is removed from the first token of the return value,
+            although the stored arg value still has it.
         """
+        # Resulting expansion.  May have initial whitespace removed.
+        exp: Tokens
+        prep = self.prep
         try:
-            expanded = self.expanded
-            return expanded[argnum]
-        except AttributeError:
-            expanded = self.expanded = dict()
-        except KeyError:
-            pass
-        exp: Tokens = Tokens(self.call.args[argnum])
-        exp = self.call.m.macros.expand(exp, quiet=True)
-        expanded[argnum] = exp
-        return exp
+            try:
+                exp = self.expanded[argnum]
+                # self.expanded exists, and [argnum] does also.
+                return
+            except AttributeError:
+                # self.expanded does not exist.  Create one now.
+                self.expanded = dict()
+            except KeyError:
+                # self.expanded exists, but [argnum] does not.
+                pass
+            # First time for this argnum.
+            # Create the expansion and add it to self.expanded.
+            toks = TokIter(arg)
+            toks = self.call.m.macros.expand(toks,
+                                             origin=self.call.exp.origin)
+            with prep.nest():
+                prep.log.write(f"Expanding arg {self.call.m.arglist[argnum]}",
+                               token=self.call.nametok)
+                exp = self.expanded[argnum] = toks.get_tokens()
+        finally:
+            toks = TokIter(exp)
+            if (not with_spacing
+                or self.call.first_nonempty_argnum == argnum
+                ):
+                # Remove spacing for the first token (if any).
+                for tok in toks:
+                    # This is first token.
+                    yield tok.without_spacing()
+                    break
+            # Get the remaining intoks verbatim.
+            yield from toks
 
-    def string(self, argnum: int) -> PpTok:
-        """ The stringization (calculated only once) for the given argument.
-        Caller cannot modify the return result.
+    def string(self, arg: TokIter, argnum: int) -> PpTok:
+        """
+        The stringization (calculated only once if argnum is provided) for the
+        given argument tokens.  Caller must not modify the return result, but
+        can make a copy.
         """
         try:
-            strings = self.strings
-            return strings[argnum]
+            return self.strings[argnum]
         except AttributeError:
-            strings = self.strings = dict()
+            # self.strings does not exist.  Create it now.
+            self.strings = dict()
         except KeyError:
+            # self.strings exists, but [argnum] does not.
             pass
-        string: PpTok = FuncMacro.stringize(self.call.args[argnum])
-        strings[argnum] = string
+        # First time for this argnum.
+        # Create the string token and maybe add it to self.strings.
+        string: PpTok = FuncMacro.stringize(arg)
+        if argnum is not None:
+            self.strings[argnum] = string
         return string
 
-    def glue(self, paster: PasteTokSubst) -> Iterator[PpTok]:
-        """ Pastes two or more token generators together.
-        Last token of one item is pasted to the first token of the next item.
-        If a middle item has only one token, then multiple tokens are pasted.
-        Special cases if any item is empty.
+    def expand_va_opt(self, repl: FuncMacro
+                      ) -> Iterator[PpTok]:
+        """ Generates intoks from a __VA_OPT__ (toks) expression,
+        Expands the toks as if it were the replacement for calling the same
+        macro, except if the __VA_ARGS__ parameter is empty, a single φ token
+        is generated.
         """
+        varargs = self.call.args[-1]
+        # Check for a placemarker
+        if varargs:
+            yield from self.call.subst(repl)
+        else:
+            yield repl.nametok.make_null()
 
-        # State of processing:  o* t? I0 I*
-        # o* = operands found so far to be pasted together.
-        # t? = token iterated from I0.
-        # I0 = current item, maybe partially iterated.
-        # I* = any subsequent items, not iterated.
+    if __debug__:
+        def brk(self) -> bool: return self.call.nametok.brk()
 
-        items: list[TokSubst] = [item.toks(self) for item in paster.items]
-        opnds: list[PpTok] = []         # o*
-        t: PpTok | None = None          # t?
-        i: int                          # current item index
-        i = 0
-        item: TokSubst = items[i]       # I0
-        n = len(items)
-        ops: list[PpTok] = paster.ops   # The '##' tokens between the items.
-        op: PpTok
-        lex: PpLex = paster.tok.lexer.clone()
-
-        def nexttok() -> PpTok | None:
-            """ Get next token from item, or None if item is empty. """
-            for t in item:
-                return t
-            return None
-
-        def nextitem() -> TokSubst | None:
-            nonlocal i, op
-            if i < n:
-                item = items[i]
-                if i: op = ops[i - 1]
-
-                i += 1
-                return item
-            return None
-
-        def paste() -> Iterator[PpTok]:
-            """ Paste together the operand, then clear the operand list. """
-            t: PpTok = copy.copy(op)
-            t.value = ''.join(map(attrgetter('value'), opnds))
-            t.type = TokType.CPP_PASTED
-            opnds.clear()
-            yield from lex.fix_paste(t)
-
-        item = nextitem()
-        if not item: return
-
-        # o* is empty.  State = I0 I*
-        while True:
-            # Check if I0 is empty.
-            t = nexttok()
-            if t:
-                break
-
-            item = nextitem()
-            if not item:
-                # No more items.
-                return
-
-        while True:
-            # (1) State = t I0 I*
-            # Treat I0 as t*, state as t* o I*.  Emit the t*.
-            for t2 in item:
-                # State = t t2 I0 I*.  Emit t.
-                yield t
-                t = t2
-            # State = t I*.
-
-            opnds.append(t)
-
-            # State = o+ I*
-            item = nextitem()
-            if not item:
-                # State = o*
-                yield from paste()
-                return
-
-            while True:
-                # (2) State = o+ I0 I*
-                # Check if I0 is empty
-                while True:
-                    t = nexttok()
-                    if not t:
-                        # State o+ I*
-                        item = nextitem()
-                        if not item:
-                            # State = o+
-                            yield from paste()
-                            return
-                        # State = o+ I0 I*.
-                        continue
-                    break
-
-                # State = o+ t I0 I*.  Move t to o+.
-                opnds.append(t)
-
-                # State = o+ I0 I*.
-                t = nexttok()
-                if not t:
-                    # State = o+ I*
-                    item = nextitem()
-                    if item:
-                        # State = o+ I0 I*.  Go to (2).
-                        continue
-                    else:
-                        # State = o+
-                        yield from paste()
-                        return
-
-                # State = o+ t I0 I*
-                yield from paste()
-                break
-            # State = t I0 I*.  Go to state (1).
-            continue
-
-
-    def expand_opt(self, repl: FuncMacro) -> Iterator[PpTok]:
-        """ Generates tokens from a __VA_OPT__ (toks) expression,
-        Expands the toks as if it were the replacement for calling the
-        same macro, except if __VA_ARGS__ is empty, no tokens are generated.
-        """
-        var: Tokens = self.call.args[-1]
-        if not var:
-            return                      # Generate nothing.
-        exp: Tokens = self.call.subst(m=repl)
-        #exp: Tokens = repl.subst(self.call)
-        yield from exp
-
-
-#def expand(toks: Tokens, macros: Macros) -> Tokens:
-#    """ Expands sequence of tokens, replacing macro names with expansions thereof.
-#    Returns result sequence of tokens.
-#    """
-#    # Make a copy, so as not to alter the input.
-#    toks = Tokens(toks)
-
-#    i: int = 0                      # Current position in toks to examine
-#    while i < len(toks):
-#        t = toks[i]
-#        # Possible actions:
-#        #   1.  Move to next position.
-#        #   2.  Replace several tokens with new tokens.
-#        name = t.value
-#        m = macros.get(name)
-#        new = None
-#        if m:
-#            call = MacroCall(m, toks, i)
-#            hide = t.hide
-#            if name in hide:
-#                # Hidden.  Don't expand.
-#                pass
-#            elif call.m.is_func:
-#                # A function macro to expand (if there are arguments)
-#                if call.args is None:
-#                    # No arg list.  Don't expand.
-#                    pass
-#                else:
-#                    # With argument list (may be empty).
-#                    hide = hide & toks[call.endpos - 1].hide | {name}
-#                    new = subst(m.value, m.arglist, call.args, hide)
-#            else:
-#                # An object macro to expand.
-#                new = subst(call.m.value, {}, {}, hide | {name})
-#        if new:
-#            # Replacing initial token(s)
-#            toks[i : call.endpos] = new
-#        else:
-#            # Not replacing the token.
-#            i += 1
-
-#    return toks
-
-#def subst(toks: Tokens, params: list[str], args: list[Tokens], hide: Hide, ) -> Tokens:
-#    """ Substitutes actual arguments (expanded) for parameter names.
-#    For now, ignoring # and ## tokens.
-#    This also works for object macros; there the params and args are empty.
-#    New token list is returned.
-#    """
-#    out: Tokens = Tokens()
-#    toks: Tokens = Tokens(toks)
-
-#    while toks:
-#        t = toks[0]
-#        if t.value in params:
-#            out += args[params.index(t.value)]
-#        else:
-#            out.append(t)
-#        del toks[0]
-
-#    hsadd(hide, out)
-#    return out
-
-def hsadd(hide: Hide, toks: Tokens) -> None:
-    """ Adds given hide names to every one of given tokens.
-    The tokens are modified in place.
+def Prosser(macros: Macros, TS: Tokens, debug: bool = False) -> Tokens:
     """
-    for tok in toks:
-        tok.hide |= hide
+    Python versions of Prosser's algorithm.  Implements the outermost
+    expand(TS) call and returns the resulting OS list.  Returned tokens are
+    copies of tokens taken from either the input TS or the replacement list of
+    some macro.
+
+    This is here just for demonstration and debugging purposes.  You can call
+    this function with a Tokens to expand, to see if it is the same result as
+    macros.expand() produces.  debug=True will print some information.
+
+    Comments with '##' are taken verbatim from the Prosser document.
+
+    Added code to handle __VA_OPT__, which did not exist at the time of the
+    document.  The C++23 Standard says to take the body of the (...) following
+    __VA_OPT__ as an alternate replacement list for the same macro called with
+    the same arguments, or a placemarker if __VA_ARGS__ has no tokens.
+    """
+
+    # Here are various functions called during the body of Prosser()...
+
+    ## expand(TS) /* recur, substitute, pushback, rescan */
+    ## {
+    def expand(TS: Tokens, top: bool = False) -> Tokens:
+        TS_: Tokens
+        TS__: Tokens
+        T: PpTok
+        HS: Hide
+        HS_: Hide
+        OS: Tokens          # From call to subst()
+        m: Macro = None
+
+        ## if TS is {} then
+        if not TS:
+        ## return {};
+            return Tokens()
+        try:
+            ## else if TS is T ↑ HS • TS’ and T is in HS then
+            T = TS[0]
+            HS = T.HS
+            TS1 = TS[1:]
+            if TS1:
+                T1 = TS[1]
+                TS2 = TS[2:]
+            msg(f"expand TS = {T.value!r} {HS} • {str(TS1)!r}")
+            if T.value in HS:
+                ## return T ↑ HS • expand(TS’);
+                with indent(): print(f"not expanded ")
+                exp = Tokens.join(T, *expand(TS1))
+                return exp
+
+            ## else if TS is T ↑ HS • TS’ and T is a "()-less macro" then
+            if T.value in macros:
+                m = macros.get(T.value)
+                repl: Tokens = Tokens(tok.copy(HS=Hide()) for tok in m.value)
+                with indent(): msg(f"replacement = {str(repl)!r}")
+            if m and not m.is_func:
+                # TS is macro • TS1
+                ## return expand(subst(ts(T),{},{},HS∪{T},{}) • TS’);
+                with indent():
+                    OS = subst(repl, [], [], HS.add(T.value), Tokens(),
+                               top=True)
+                    exp = Tokens.join(*expand(OS), *TS1)
+                    with indent(): msg(f"expansion = {exp}")
+                return exp
+
+            ## else if TS is T ↑ HS • ( • TS’ and T is a "()’d macro" then
+            ## check TS’ is actuals • ) ↑ HS’ • TS’’ and actuals are "correct for T"
+            if m and m.is_func and TS1 and T1.value == '(':
+                # TS is macro • ( • actuals • ) ↑ HS2 • TS2
+                ## return expand(subst(ts(T),fp(T),actuals,(HS∩HS’)∪{T},{}) • TS’’);
+                TI = TokIter(TS1)
+                call = MacroCall(m, T, TI, Hide(), None)
+                list(call.getargs())
+                TS2 = Tokens(TI)
+                HS2 = call.rparen.HS
+                with indent(): OS = subst(
+                    repl, m.arglist, call.args,
+                    (HS & HS2).add(T.value), Tokens(), top=True
+                    )
+                exp = expand(Tokens.join(*OS, *TS2))
+                with indent(): msg(f"expansion = {exp}")
+                return exp
+        
+            ## note TS must be T ↑ HS • TS’
+            ## return T ↑ HS • expand(TS’);
+            exp = Tokens.join(T, *expand(TS1))
+            return exp
+            ## }
+        finally:
+            if top:
+                msg(f"expansion = {str(exp)!r}")
+
+    ## subst(IS,FP,AP,HS,OS) /* substitute args, handle stringize and paste */
+    ## {
+    def subst(
+        IS: Tokens,
+        FP: list[str],
+        AP: list[Tokens],
+        HS: Hide,
+        OS: Tokens,
+        top: bool = False,
+        ) -> Tokens:
+
+        T: PpTok
+        IS1: Tokens
+        IS2: Tokens
+
+        msg(f"subst IS = {str(IS)!r}")
+        if top:
+            with indent():
+                msg(f"FP = {FP}")
+                msg(f"AP = {AP}")
+                msg(f"HS = {HS}")
+
+        ## if IS is {} then
+        if not IS:
+            ## return hsadd(HS,OS);
+            result = hsadd(HS, OS)
+            msg(f"result = {str(result)!r}")
+            return result
+
+        T = IS[0]
+        IS1 = IS[1:]
+        if IS1:
+            T1 = IS[1]
+            IS2 = IS[2:]
+            if IS2:
+                T2 = IS[2]
+                IS3 = IS[3:]
+
+        ## else if IS is # • T • IS’ and T is FP[i] then
+        if T.value == '#' and IS2 and T1.value in FP:
+            ## return subst(IS’,FP,AP,HS,OS • stringize(select(i,AP)));
+            # IS = # • param1 • IS2
+            actual: Tokens = getactual(T1)
+            return subst(IS2, FP, AP, HS,
+                         Tokens.join(*OS, stringize(actual)))
+
+        ## else if IS is ## • T • IS’ and T is FP[i] then
+        if T.value == '##' and IS1 and T1.value in FP:
+        ## {
+            actual: Tokens = getactual(T1)
+            ## if select(i,AP) is {} then /* only if actuals can be empty */
+            # IS = ## • param1 • IS2
+            if not actual:
+                ## return subst(IS’,FP,AP,HS,OS);
+                return subst(IS2, FP, AP, HS, OS)
+
+            ## else
+            else:
+                ## return subst(IS’,FP,AP,HS,glue(OS,select(i,AP)));
+                return subst(IS2, FP, AP, HS, glue(OS, actual))
+        ## }
+
+        ## else if IS is ## • T ↑ HS’ • IS’ then
+        if T.value == '##' and IS1:
+            # IS = ## • T1 • IS2
+            ## return subst(IS’,FP,AP,HS,glue(OS,T ↑ HS’ ));
+            return subst(IS2, FP, AP, HS, glue(OS, [T1]))
+
+        ## else if IS is T • ## ↑ HS’ • IS’ and T is FP[i] then
+        ## {
+        if IS1 and T1.value == '##' and T.value in FP:
+            # IS = param • ## • IS2
+            actual: Tokens = getactual(T)
+            ## if select(i,AP) is {} then /* only if actuals can be empty */
+            if not actual:
+            ## {
+                if IS2 and T2 in FP:
+                ## if IS’ is T’ • IS’’ and T’ is FP[j] then
+                    # IS = empty param • ## • param2 • IS3
+                    ## return subst(IS’’,FP,AP,HS,OS • select(j,AP));
+                    return subst(IS3, FP, AP, HS,
+                                 Tokens.join(*OS, getactual(T2))
+                                 )
+                ## else
+                else:
+                    ## return subst(IS’,FP,AP,HS,OS);
+                    # IS = empty param • ## • IS2
+                    return subst(IS2, FP, AP, HS, OS)
+            ## }
+            ## else
+            else:
+                # IS = nonempty param • ## • IS2
+                ## return subst(## ↑ HS’ • IS’,FP,AP,HS,OS • select(i,AP));
+                return subst(Tokens.join(T1, *IS2), FP, AP, HS,
+                             Tokens.join(*OS, *actual)
+                             )
+        ## }
+
+        ## else if IS is T • IS’ and T is FP[i] then
+        if T.value in FP:
+            # IS = param • IS1
+            ## return subst(IS’,FP,AP,HS,OS • expand(select(i,AP)));
+            actual: Tokens = getactual(T)
+            with indent(): exp = expand(actual, top=True)
+            return subst(IS1, FP, AP, HS, Tokens.join(*OS, *exp)
+                         )
+        ## note IS must be T ↑ HS’ • IS’
+        #IS = T • IS1
+        ## return subst(IS’,FP,AP,HS,OS • T ↑ HS’ )
+        return subst(IS1, FP, AP, HS, Tokens.join(*OS, T))
+        ## }
+
+    # paste last of left side with first of right side
+    def glue(LS: Tokens, RS: Tokens) -> Tokens:
+        ## if LS is L ↑ HS and RS is ↑ R HS’ • RS’ then
+            ## return L&R ↑ HS∩HS’ • RS’; /* undefined if L&R is invalid */
+        if not LS1 and RS:
+            RS1: Tokens = RS[1:]            # RS’ in document
+            L: PpTok = LS[0]
+            R: PpTok = RS[0]
+            # Make a PpTok from concatenated value.
+            cat: str = L.value + R.value
+            tok: PpTok | None = L.copy(
+                value=cat, type=None,
+                )
+            tok = L.lexer.fix_paste(tok)
+            if tok:
+                tok.HS = L.HS & R.HS
+                return Tokens.join(tok, *RS1)
+            else:
+                # Paste failed.  We'll just leave L and R as they are.
+                return Tokens.join(L, *RS)
+        else:
+            LS1: Tokens = LS[1:]                # LS’ in document
+            ## note LS must be L ↑ HS • LS’
+            ## return L ↑ HS • glue(LS’,RS);
+            return Tokens.join(L, self.glue(LS1, RS))
+
+    # add to token sequence’s hide sets
+    def hsadd(HS: Hide, TS: Tokens) -> Tokens:
+        if not TS:
+            return Tokens()
+        T: PpTok = TS[0]
+        TS1: Tokens = TS[1:]            # TS' in document
+        return Tokens.join(
+            T.copy(HS=HS | T.HS), *hsadd(HS, TS1))
+
+    def getactual(T: PpTok, IS1: Tokens) -> Tokens | None:
+        """
+        The actual argument for the parameter name in given token.  Can be
+        '__VA_OPT__', which will expand the (...) expression contained in
+        IS1.  Returns None if it is not a parameter name.
+
+        This is equivalent of select(i, TS) in the document.
+        """
+        try:
+            return AP[FP.index(T.value)]
+        except ValueError:
+            # Not a parameter
+            return None
+        except IndexError:
+            # Parameter is __VA_OPT__.  It is followed by ( replacement list )
+            # for a function macro TODO: get and expand the opt expression.
+            m: FuncMacro = T.exp_from
+            toks = TokIter(IS1)
+            mopt : FuncMacro = m.parse_va_opt(toks, m.nametok)
+            IS1 = Tokens(toks)
+            if not AP[-1]:
+                # No __VA_OPT__ tokens results in placemarker.
+                return Tokens()
+            with indent():
+                # Do same substitution with mopt as we have been doing
+                # with m.
+                OS = subst(mopt.value, FP, AP, HS, Tokens())
+
+            return OS
+
+    def stringize(TS: Tokens) -> PpTok:
+        """ Make a single string token from values of given tokens. """
+        s: PpTok = FuncMacro.stringize(TokIter(TS))
+        return s
+
+    @contextlib.contextmanager
+    def indent() -> Iterator:
+        nonlocal nesting
+        nesting += 1
+        try: yield
+        finally: nesting -= 1
+
+    def msg(text: str) -> None:
+        if debug: print(f"{'  ' * nesting}{text}")
+
+    # This is the code for Prosser().
+    nesting: int
+    nesting = 0
+
+    TS_copy = Tokens(tok.copy(HS=Hide()) for tok in TS)
+    return expand(TS_copy, top=True)
 

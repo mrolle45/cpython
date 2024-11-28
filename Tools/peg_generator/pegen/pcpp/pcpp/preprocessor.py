@@ -15,136 +15,748 @@ from __future__ import generators, print_function, absolute_import, division
 import sys, os, re, codecs, time, copy, traceback
 import contextlib
 from dataclasses import dataclass, field
+import textwrap
 from typing import Iterator
 if __name__ == '__main__' and __package__ is None:
-    sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
-from pcpp.directive import (Directive, Action, OutputDirective)
-from pcpp.parser import (STRING_TYPES, PreprocessorHooks)
-from pcpp.lexer import (default_lexer, PpLex, TokType, Tokens, reduce_ws, )
-#from pcpp.parser import STRING_TYPES, default_lexer, trigraph, Macro, Action, OutputDirective, PreprocessorHooks
+    sys.path.append(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+
+from pcpp.common import *
+from pcpp.parser import (PreprocessorHooks)
+from pcpp.lexer import (default_lexer, PpLex, OutPosFlag)
+from pcpp.tokens import PpTok, Tokens, TokIter, Hide, HideNames, HideDict
 from pcpp.evaluator import Evaluator
-from pcpp.ply.lex import LexToken
 from pcpp.macros import Macro, Macros
+from pcpp.position import (PosMgr, PosRange, PosTab, PosLineTab)
+from pcpp.source import Source, SourceFile
+from pcpp.writer import OutPosFlag, OutPosEnter, OutPosLeave
 from pcpp.debug_log import DebugLog
-import io
 FILE_TYPES = io.IOBase
-clock = time.process_time
 
-__all__ = ['Preprocessor', 'PreprocessorHooks', 'OutputDirective', 'Action', 'Evaluator']
+__all__ = ['Preprocessor', 'PreprocessorHooks', 'Evaluator']
 
-# ------------------------------------------------------------------
-# File inclusion timings
-#
-# Useful for figuring out how long a sequence of preprocessor inclusions actually is
-# ------------------------------------------------------------------
+''' Overall plan:
 
-class FileInclusionTime(object):
-    """The seconds taken to #include another file"""
-    def __init__(self,including_path,included_path,included_abspath,depth):
-        self.including_path = including_path
-        self.included_path = included_path
-        self.included_abspath = included_abspath
-        self.depth = depth
-        self.elapsed = 0.0
+The Preprocessor class specifies a single object (often called `prep` in the
+code) which reads one source file and any other files #include'd by them, and
+writes an output file.  This output file can then be compiled to produce the
+same final result as if the original source file were compiled normally.
+Typically, it has the same name as the input file but with a ".i" extension,
+and so is called the ".i file".
+
+It is analogous to running the command "gcc <input> -E > <output>".  In fact,
+PCPP can be tested by running with a "-gcc" command line switch and comparing
+the .i file with the <output> produced by gcc.
+
+PCPP follows the ISO C or C++ Standard for preprocessing, which consists of
+translation phases 1 through 4.  The result is a sequence of
+`preprocessing-token`s .  The PpTok class is used for all such tokens.
+
+The standards are written with the idea of being the first part of a complete
+compiler, which processes the output of phase 4.  A standalone preprocessor,
+instead, takes the PpTok's of phase 4 and writes a file which, when later
+compiled, produces the same PpTok's from phase 4.
+
+PCCP employs a series of iterators, each one being an input to a generator
+function for the next one.  The objects generated are of class PpTok.
+
+Locations.
+
+    A Position object specifies where some text in the source file comes from.
+
+    * source = Source object.
+    * colno = the column where the text appears in the source file.  The column
+      number starts at 1 in the line, but resets back to 1 after a line splice.
+    * lineno = line number of the logical line.
+    * phys_lineno = line number of the text.  Will be greater if line splices
+      are involved.
+    * pos = a special OutPosFlag object used to write line directives in GCC
+      emulation.  None if being used for a token.
+
+    It is also used to specify a presumed line number and file name, when
+    writing a line directive.  In this case, colno and phys_lineno are None.
+
+Tokens.
+
+    A token is a PpTok object representing a preprocessing-token.  It has this
+    information:
+
+    * token.value.  The text in the data.
+    * Position information.  These are properties delegated to token.pos, a
+      Position object (see above):
+        * token.lineno.
+        * token.colno.
+        * token.phys_lineno.
+        * token.source.
+    * token.type.  A TokType object.  It has several interesting properties
+        which can be tested.
+    * token.spacing.  Indicator of space characters, other than newlines,
+        preceding the text in the data.  A true value if there are such
+        characters, and a false value otherwise.  Note that whitespace at the
+        end of a line is never used, so there is no need to indicate following
+        spacing.  This value can be altered later in preprocessing.
+    * token.hide.  This a set of macro names which were expanded to produce
+        the token.  This is empty when coming directly from the lexer, but can
+        be set during macro expansion.  If this is non-empty, then the location
+        information won't refer to the present source file, but rather to a
+        macro definition.
+
+    Other tokens are used to convey special information.
+
+    * Position token.  This has a token.pos member which is a OutLoc object.
+      It indicates a change in presumed line number and file name.
+
+1. Lexing.
+    For each main or included source file, a Source object reads that file.  It
+    has a PpLex (a.k.a. lexer).  It provides an Iterator[PpTok] which generates
+    tokens as they are found in the data.
+
+    It implements translation phases 1, 2 and 3 and generates the tokens
+    described by phase 3.
+
+    Translation phase 1: trigraphs and non-basic characters.
+
+        The nine trigraphs are replaced by their equivalent characters in the
+        data.  Trigraphs were removed from C++14 and onward, but still
+        implemented by the lexer in certain cases.
+
+        Characters that are not in the basic character set are replaced by
+        universal character names, which have the form of escape sequences.
+        The characters "$", "@", and "`" are left as-is in certain cases.
+
+    Translation phase 2: line splices.
+
+        Any "\\"-"\n" pair is removed.  Note that a "\\" could result from a
+        "??/" trigraph, so that "??/\n" is entirely removed from the data.
+
+    The lexer keeps track of these changes, and it can reconstruct the original
+    spelling and location of a token.  It then parses the resulting data to
+    generate tokens.
+
+    Whitespace.
+
+        Whitespace is generally not significant to the preprocessor.  But it
+        does matter in these cases:
+
+        * Delimiting preprocessor directives.
+        * Distinguishing object-like and function-like macro definitions.
+        * Within a function macro argument which is stringified with the '#'
+          operator.
+
+        Whitespace consists of whitespace characters and comments, but not
+        within quoted strings.  In GCC emulation, comments are not whitespace
+        but rather tokens in their own right.  An unmatched quoting character
+        before reaching a newline is treated as an error up that point.
+        However, a raw string, beginning with an "R" prefix, may include
+        multiple lines.
+
+    Translation phase 3: tokenizing.
+
+        The lexer takes the data, as modified above, and parses it into tokens
+        and whitespace.  Each token is a PpTok object and corresponds to the
+        entity "preprocessing-token" in the ISO Standard.  Any character that
+        cannot be one of the other specified types of token is a token by
+        itself.
+
+Lines.
+
+    In the data, a line, sometimes called a logical line, is the result of
+    splitting the data by newline characters, including the terminating
+    newline.  According to the Standards, a newline is required at the end of a
+    non-empty source file, and the Source object supplies a missing newline,
+    with a warning.
+
+    It can come from multiple physical source lines when line splices are
+    involved.
+
+    The line number is the line number of the first physical source line.
+
+2. Translation phase 4: preprocessing.
+
+    This is performed by the Source object in two stages, each producing an
+    Iterator[PpTok].
+
+    1. Directives.
+
+        The Source takes tokens from its lexer and uses groupby() to break it
+        up into groups of tokens with a common token.lineno.
+
+        If the first token in a group is a "#", then the entire group is
+        processed as a directive.  Then the group is replaced by the iterator
+        (if any) resulting from the directive.
+
+        In either case, the contents of the group are passed on to the output
+        iterator.
+
+        A directive is processed according to the directive name (the next
+        token after the "#").  If there is no name, then the directive is
+        ignored.
+
+        * #include.  The result of preprocessing the entire included source
+          file (translation phases 1 through 4) is the result of the directive.
+          If the file contains a "#pragma once" directive anywhere, or some
+          obvious #include guard, then any subsequent #include of the same
+          file, even recursively within other includes, will be completely
+          ignored.
+
+          The tokens are preceded and followed by location tokens.  The first
+          denotes the Source for the included file and line number 1.  The
+          second denotes the present Source and the line number following the
+          #include directive.
+
+        * #define and #undef.  These modify the prep.macros dictionary.  The
+          change will be seen during the macro expansion pass, starting with
+          the remaining tokens given to the output iterator.
+
+        * #if and other conditional-inclusion directives.  They divide the
+          source into sections (corresponding to the entity "if-section" in the
+          Standard).  A section is contains one or more groups (corresponding
+          to "group" in the Standard), each preceded by one of the conditional
+          directives.
+
+          A group contains text lines and directives other than
+          conditional-inclusions.  Recursively, any group may contain nested
+          sections.
+
+          A group has a "skip" status.  When this is true, the entire group is
+          ignored, other than to find the end of the group.  When this status
+          is false, text and directive lines are processed normally.
+
+        * Certain other directives, like an unrecognized #pragma, can produce
+          lines, which will generally be part of the text and not macro
+          replaced.  Certain "passthru" options to PCPP can generate these.
+
+        * Certain directives will perform macro replacement using a new and
+          separate replacement iterator from the one being used by the present
+          Source.  It is given only the specified tokens.  In the case of a #if
+          or #elseif, it also handles "defined" according to the Standard.
+        
+    2. Macro replacement.
+
+        This an iterator which takes the output of the Directives pass, above,
+        and creates an output iterator.
+
+        It uses the prep.macros dictionary to identify any tokens which are
+        identifiers with a value in the dictionary.  Any tokens which are not
+        such are passed on to the output iterator without any more action.
+
+        The macros dict changes if the Directives pass processes a #define or
+        #undef directive.  The sequence of events is:
+
+        1. Directive pass produces token `t1`.
+        2. Replacement pass receives `t1` and uses the current dict.
+        3. Directive pass changes the macros dict.
+        4. Directive pass produces token `t2`.
+        5. Replacement pass receives `t2` and uses the updated dict.
+
+        The macro name (token.value), and its definition, are examined.
+
+        In any of the following cases, if the macro is not replaced, then it is
+        passed on to the output iterator without any more action.
+
+        If the macro name is in token.hide, then the macro is not replaced.
+        This is because the token was produced while replacing the same macro,
+        even if this occurred in an included file.
+
+        If the macro is function-like, then:
+            The input tokens are scanned, looking for an argument list,
+            starting with a "(" token.  If there is no "(", then the macro is
+            not replaced.
+
+            The Standards say it is undefined behavior if a directive is seen
+            in the source file before the end of the argument list is reached.
+            GCC will treat any further tokens as normal.  So the closing
+            parenthesis could be contained within an included file or a
+            conditional group.
+
+            But if the end of the source file is reached, then this is an error
+            argument list is incomplete.  The macro is not expanded in this
+            case, and the incomplete argument list is ignored.
+
+            The macro's replacement list undergoes argument substitution,
+            stringizing, and concatenation, according to the Standards.  In
+            most cases, an argument is macro replaced, using a new and separate
+            macro replacement iterator.
+
+        If the macro is object-like, then the replacement list undergoes
+        concatenation.
+
+        In either case, the macro token (and argument list, if any) are
+        replaced by the macro's replacement list as modified above.  The new
+        sequence of tokens, along with remaining tokens to the end of the
+        source file, is rescanned for replacements.
+
+        With the PCCP implementation, the Replacement pass now takes its input
+        from the new replacement, followed by the remaining tokens provided by
+        its input.  The itertools.chain() function is used for this purpose.
+        
+
+3. Output .i file writing.
+    The Writer object, belonging to the prep, has the job of taking the tokens
+    from the top level Source's token iterator and translating them to text
+    output.  Keep in mind that this iterator contains tokens from #include'd
+    files, too.
+
+    The current input location, known by the variable `inloc`, has a line
+    number and source.  It is set by any location token (while emitting a #line
+    directive).  It is the presumed location.
+
+    The current output location, known by `outloc`, has a line number and the
+    same source.   Its meaning is whatever a compiler will take as the current
+    line, based on whatever has been written so far, including line directives.
+    It is set by the same location token that sets inloc.
+
+    Input tokens have line numbers which are not affected by any change in
+    presumed location.  When the Writer sees a location token, this token bears
+    the current actual location that caused the location token to be generated,
+    as well as the presumed location stored in token.pos.  The writer will
+    compute the difference in line numbers as a presumed line offset.
+    Thereafter, whenever a source line number is seen, it is changed to the
+    presumed line number by adding this offset.
+
+    When the Writer gets a token to be written out, it sets inloc.lineno to the
+    presumed input line (the source input line plus the offset).  Before
+    writing the value, it forces outloc to match inloc.  If it's an increase of
+    up to 7 lines (as GCC does), it writes that many newline characters.
+    Otherwise if the change is nonzero (even negative), it writes a line
+    directive.
+
+    When writing data that contains some newlines, outloc is increased by that
+    number.
+
+    If an input token is the first one after changing outloc.lineno, it first
+    writes space characters to match tok.colno.  Otherwise, if token.spacing is
+    true, it writes a single space character.  After that, it writes the
+    token.value string.
+
+    The Source object generates no tokens for a blank line (only whitespace).
+    However, macro replacement can cause a non-empty line to become empty.  In
+    this case, the macro replacement will insert a "null" token (one with "" as
+    value), so that the Writer write something.  This only applies to GCC
+    emulation.
+'''
 
 # ------------------------------------------------------------------
 # Preprocessor object
 #
-# Object representing a preprocessor.  Contains macro definitions,
-# include directories, and other information
+# Object representing a preprocessor.  Contains macro definitions, include
+# directories, and other information
 # ------------------------------------------------------------------
 
 class Preprocessor(PreprocessorHooks):
+    """
+    Generic preprocessor object, which accepts various arguments, and
+    generates preprocessed tokens.
+
+    It interacts with a subclass as follows:
+        1. Subclass __init__() sets some attributes to non-default values,
+           then calls self.__init__().  These attributes are listed below.
+        2. Subclass calls __init__().  Produces self.startup, a top-level
+           source file containing various standard #define directives.
+        3. Subclass may modify various members, including self.startup.
+        4. self.startup may be extended by adding more text.  Input files are
+           specified by #include directives.
+        5. Subclass calls self.parse(), which is a generator of PpTok objects
+           to parse self.startup.  This executes directives such as #define,
+           and processes input files named in #include directives.  For legacy
+           subclasses, the generator is also stored in self.parser.
+        6. Iterate on this generator.  During the parsing, various hooks are
+           called, which can be overridden in the subclass, to customize the
+           behavior.
+        7. Subclass does something with the tokens, such as formatting the
+           tokens and writing to an output file.  Another possibility is to
+           feed the tokens to a downstream compiler.
+    """
+
+    # These class attributes can be overridden on self as instance attributes
+    # by the subclass constructor.  This should be done BEFORE calling
+    # self.__init__, unless otherwise indicated. ...
+
+    # Don't generate tokens of these types.  Legacy parse() method can also
+    # set this.
+    ignore: Collection[TokType] = {}
+
+    # Version (4-digit year) of either C or C++ Standard being followed.
+    # Set one but not both of them.
+    c_ver: int = 0          # 1999, 2011, 2017, or 2023
+    cplus_ver: int = 0      # 2011, 2014, 2017, 2020, or 2023
+
+    # Handle trigraph sequences.  If None, then it will depend on whether the
+    # C or C++ standard specifies them.
+    trigraphs: bool | None = None
+
+    # Expand leading tabs to this many spaces.  This will align the output
+    # line to match the input line for readability.
+    tabstop: int = 0
+
+    # Form of a generated #line directive.  What's generated is
+    # f'{self.line_directive} {line} {file}`.  None means don't generate any.
+    line_directive: str = "#"
+
+    # Startup source.  Write directives or other text, as well as #include
+    # directives for input file(s) to be parsed.  For convenience,
+    # self.startup_define() and self.startup_include() can be used.
+    startup: io.StringIO = io.StringIO()
+
+    # Tool emulation (gcc or clang), if any.  Value is the MAJOR.MINOR.
+    # version string.  Don't set both of them.
+    gcc: str = None
+    clang: str = None
+    @property
+    def emulate(self) -> bool: return self.gcc or self.clang
+
+    # Use GNU extensions.  Doesn't require gcc or clang.
+    gnu: bool = False
+
+    # Pass comments to the generated output.  With emulation, these are
+    # ordinary tokens.  A comment before a directive causes the leading '#' to
+    # be a regular token, not a directive.
+    comments: bool = False
+
+    # Reduce size of generated output.  If >= 2, all blank lines are suppressed.
+    compress: int = 0
+
+    # Only #include a file once if an #include guard is found.
+    auto_pragma_once_enabled: bool = True
+
+    # Pass through to the generated output any #include whose file name
+    # matches this compiled regular expression.  Directives within the file
+    # are still executed, but other generated tokens are ignored.
+    passthru_includes: re.Pattern = None
+
+    # Pass through magic macros (__COUNTER__, __LINE__, __FILE__, __DATE__ and
+    # __TIME__) to the generated output without interpretation.  Set this
+    # BEFORE calling __init__().
+    passthru_magic_macros: bool = False
+
+    # Pass through #include directives to generated output when the named file
+    # is not found.
+    passthru_unfound_includes: bool = False
+
+    # Pass through conditional directives to generated output when they
+    # contain an undefined macro.  If this is false, macro is evaluated as 0,
+    # except that the subclass hooks can specify a different result.
+    passthru_unknown_exprs: bool = False
+
+    # Execute and pass through to the generated output all #define and #undef
+    # directives.
+    passthru_defines: bool = False
+
+    # Ignore #define and #undef for these macro names, but pass them through
+    # to the generated output.
+    nevers: frozenset[str] = frozenset()
+
+    # Write a diagnostic log file.
+    debug: bool = False
+
+    # Encoding for input files.  If None, then use UTF-8, but subclass hook
+    # can override this.
+    input_encoding: str = 'utf-8'
+
+    # Encoding for output files.
+    output_encoding: str = 'utf-8'
+
+    # Write error and warning messages to this file.  Constructor will change
+    # None to sys.stderr.
+    diag: TextIO = None
+
+    # These attributes vary during preprocessing...
+
+    # Name of a macro which might be an #include guard for a source file if it
+    # ever gets defined.
+    potential_include_guard: str = None
+
+    # Files currently being translated or already translated.  Indexed by
+    # abspath.
+    files: Mapping[str, SourceFile]
+
+    # Files currently being translated.  The top file comes from an #include
+    # in the startup script.  Its directory is a search location for #include
+    # "..." but not <...>.
+    files_active: Stack[SourceFile]
+
+    # Source objects being translated, or already translated.
+    sources: Stack[Source]
+
+    # Manages all global Position values
+    positions: PosMgr
+
+    # Mapping of global positions to the sources.
+    source_pos_tab: PosTab[Source]
+
+    # All unique Hide objects.
+    hides: HideDict = {}
+
+    # Source objects currently being lexed, each one #include-ing the next.
+    sources_active: Stack[Source]
+
+    # Next global position to be allocated to a new Source.
+    next_source_pos: Pos = 0
+
+    # Count of error and warning messages issued.
+    return_code: int = 0
+    warnings: int = 0
+
     def __init__(self, lexer=None):
-        super(Preprocessor, self).__init__()
-        self.include_times = []  # list of FileInclusionTime
+        super().__init__()
+        self.diag = self.diag or sys.stderr
+        if self.trigraphs is None:
+            if self.emulate:
+                self.trigraphs = (
+                    (   self.c_ver
+                        or (self.cplus_ver and self.cplus_ver < 2017)
+                    )
+                    and not self.gnu
+                    )
+            else:
+                self.trigraphs = (
+                    (   (self.c_ver and self.c_ver < 2023)
+                        or (self.cplus_ver and self.cplus_ver < 2014)
+                    )
+                )
+        self.rewrite_paths = [
+            (re.escape(os.path.abspath('') + os.sep) + '(.*)', '\\1')]
+        self.source_pos_tab = PosTab()
+        self.sources_active = Stack[Source](lead=': ')
+        self.files = {}
+        self.positions = PosMgr(self)
+
         self.log = DebugLog(self)
-        self.currsource = None
-        self.topsource = Source(self, '< top level >')
         if lexer is None:
-            lexer = PpLex(self, default_lexer())
+            lexer = default_lexer(self)
         self.lexer = lexer
-        lexer.current_line = []     # All tokens found since start of current line.
-        self.evaluator = Evaluator(self.lexer)
         self.macros = Macros(self)
-        self.path = []           # list of -I formal search paths for includes
-        self.temp_path = []      # list of temporary search paths for includes
-        self.rewrite_paths = [(re.escape(os.path.abspath('') + os.sep) + '(.*)', '\\1')]
+
+        # Script with text to parse.  #define's and #include's.
+        self.startup = io.StringIO()
+        self.startup.name = '< top level >'
+        startup_define = lambda macro: self.startup_define(macro)
+        # Put these defines in front of what's already in the file.
+        self.startup.seek(0)
+        # Magic macros
+        if not self.passthru_magic_macros:
+            self.macros.define_dynamic('__COUNTER__')
+            self.macros.define_dynamic('__FILE__')
+            self.macros.define_dynamic('__LINE__')
+            tm = time.localtime()
+            startup_define(f"__DATE__ \"{time.strftime('%b %e %Y', tm)}\"")
+            startup_define(f"__TIME__ \"{time.strftime('%H:%M:%S', tm)}\"")
+
+        if self.gcc:
+            startup_define(f"__GNUC__ {self.gcc}")
+        if self.clang:
+            parts = self.clang.split('.')
+            if len(parts) != 2:
+                raise Exception("--clang option requires a MAJOR.MINOR value.")
+            startup_define(f"__clang__ 1")
+            startup_define(f"__clang_major__ {parts[0]}")
+            startup_define(f"__clang_minor__ {parts[1]}")
+            startup_define(f"__GNUC__ {parts[0]}")
+        self.gnu_ext: bool = bool(self.gnu)
+        if not self.gnu_ext:
+            startup_define('__STRICT_ANSI__ 1')
+
+        self.gplus_mode: bool = bool(self.emulate and self.cplus_ver)
+        if self.trigraphs:
+            startup_define('__PCPP_TRIGRAPHS__ 1')
+
+
+        self.include_times = []  # list of FileInclusionTime
+        self.TokType = lexer.TokType
+        lexer.current_line = []     # All tokens found since start of current line.
+        self.evaluator = Evaluator(self)
+        self.path = ['.']           # list of -I formal search paths for includes
+        self.files_active = Stack[SourceFile]()
         self.passthru_includes = None
-        self.include_once = {}
-        self.include_depth = 0
-        self.return_code = 0
+        # A file is skipped if its name is in this dict and the object has a
+        # true value.
         self.debugout = None
         self.auto_pragma_once_enabled = True
-        self.line_directive = '#line'
-        self.compress = False
-        self.assume_encoding = None
 
         # Probe the lexer for selected tokens
         self.__lexprobe()
 
-        tm = time.localtime()
-        self.define("__DATE__ \"%s\"" % time.strftime("%b %e %Y",tm))
-        self.define("__TIME__ \"%s\"" % time.strftime("%H:%M:%S",tm))
-        self.define("__PCPP__ 1")
-        self.expand_linemacro = True
-        self.expand_filemacro = True
-        self.expand_countermacro = True
-        self.countermacro = 0
+        startup_define("__PCPP__ 1")
+        if not self.gnu: startup_define("__STDC__ 1")
+        if self.cplus_ver:
+            # Standard value of __cplusplus.  Note, GCC gets C++20 wrong!
+            modes = {
+                    2011 : '201103L',
+                    2014 : '201402L',
+                    2017 : '201703L',
+                    2020 : self.emulate and '201709L' or '202002L',
+                    2023 : '202302L',
+                }
+            startup_define(f"__cplusplus {modes[self.cplus_ver]}")
+        if self.c_ver:
+            # Standard value of __STDC_VERSION__.
+            modes = {
+                    1999 : '199901L',
+                    2011 : '201112L',
+                    2017 : '201710L',
+                    2023 : self.emulate and '202000L' or '202311L',
+                }
+            startup_define(f"__STDC_VERSION__ {modes[self.c_ver]}")
+        # Go to the end, so that subclass can add more stuff.
+        self.startup.seek(0, os.SEEK_END)
+
         self.parser = None
-        self.nesting = 0
-        self.loglines = []      # List of (left, right), so that all rights get aligned.
+
+    def startup_define(self, defn: str) -> None:
+        """
+        Add a #define to the startup script.  Given the macro name and
+        possibly the definition after some whitespace.
+        """
+        print(f"#define {defn}", file=self.startup)
+
+    def startup_include(self, filename: str) -> None:
+        """ Add a #include to the startup script. """
+        print(f"#include \"{filename}\", file=self.startup")
+
+    def startup_line(self, line: str, **kwds) -> None:
+        """ Add a line to the startup script, like print(). """
+        print(line, file=self.startup, **kwds)
 
     # ----------------------------------------------------------------------
     # parse()
     #
-    # Parse input text.
+    # Method to parse a startup script or a top level input file.
+    #   Store TokIter for the tokens in self.parser.
     # ----------------------------------------------------------------------
-    def parse(self, input: str, source=None, ignore={}):
-        """Parse input text."""
-        if isinstance(input, FILE_TYPES):
-            if source is None:
-                source = input.name
+    def parse(self, input: str | io.IOBase = None, source: str = None,
+              ignore: set[str] = {}) -> None:
+        """
+        Parse startup script or input file or plain data.
+        """
+        if isinstance(input, io.IOBase):
             input = input.read()
-        self.ignore = ignore
-        self.parser = self.parsegen(input,source,os.path.abspath(source) if source else None)
-        if source is not None:
-            dname = os.path.dirname(source)
-            self.temp_path.insert(0,dname)
-        
+            if isinstance(input, bytes):
+                input = input.decode()
+        elif input:
+            input = self.string_file(input, '<string>')
+        else:
+            input = self.startup
+            input.seek(0)
+
+        # Create SourceFile for the input file.
+        top : SourceFile = SourceFile.openfile(input, self)
+        #top = SourceFile.openfile(input, self, dirname='.')
+        self.files_active.append(top)
+        self.parser = self.parsegen(top)
+
+    @staticmethod
+    def string_file(name: str, data: str = '') -> StringIO:
+        str = io.StringIO(data)
+        str.name = name
+        return str
+
+    # ----------------------------------------------------------------------
+    # token()
+    #
+    # Legacy method to return individual tokens.  These are set up by the call
+    # to self.parse().  Returns next token each time, and None at the end.
+    #
+    # skips any token whose type (that is, 'CPP_XXX') was given in ignore
+    # argument to self.parse().
+    # ----------------------------------------------------------------------
+    def token(self) -> PpTok | None:
+        """
+        Legacy method to return individual tokens, except if the name of the
+        type is in self.ignore.
+        """
+        for tok in self.parser:
+            if self.ignore and tok.type.name in self.ignore:
+                continue
+            return tok
+        return None
+
+    def alloc_source_pos_block(self, source: Source, span: Pos
+                               ) -> PosRange:
+        """
+        Allocate next block of global positions to given Source.  Add to
+        sources and source_pos_tab.  Returns (start pos, stop pos)
+        """
+        pos: Pos = self.next_source_pos
+        end: Pos = pos + span
+        self.next_source_pos = end
+        self.source_pos_tab.add(PosRange(pos, end), source)
+        return PosRange(pos, end)
+
+    def find_source(self, pos: Position) -> Source:
+        """
+        Get the Source whose block of global positions include given pos.
+        """
+        return self.source_pos_tab.find(pos)
+
+    def hide(self, *names: str) -> Hide:
+        """ The unique Hide for these names, possibly creating a new one. """
+        h = frozenset(names)
+        try: return self.hides[h]
+        except IndexError:
+            h = self.hides[h] = Hide(self, h)
+            return h
+
     # ----------------------------------------------------------------------
     # parsegen()
     #
-    # Parse an input string from a top level source file.
+    # Parse an input string from a main or included SourceFile.  Returns
+    # TokIter for resulting tokens.  Creates and nests a Source object in
+    # self.sources_active while doing the iteration.  Generates start and end locator
+    # tokens in the parent (i.e., before and after nesting the Source).
     # ----------------------------------------------------------------------
 
-    def parsegen(self, input: str, source: str=None, abssource: str=None) -> Iterator[LexToken]:
-        """Parse an input string.  Generate LexToken objects. """
-        rewritten_source = source
-        if abssource:
-            rewritten_source = abssource
-            for rewrite in self.rewrite_paths:
-                temp = re.sub(rewrite[0], rewrite[1], rewritten_source)
-                if temp != abssource:
-                    rewritten_source = temp
-                    if os.sep != '/':
-                        rewritten_source = rewritten_source.replace(os.sep, '/')
-                    break
+    @TokIter.from_generator
+    def parsegen(
+            self,
+            #input: str, # Contents of the file
+            #*,
+            file: SourceFile,
+            dir: PpTok = None,         # Start of the #include directive
+            #filename: str,
+            #source: str = None,
+            #abssource: str = None,
+            #hdr_name: str = None,
+            #path: str = None,
+            #once: IncludeOnce = None,
+            #parentlineno: int = 1,
+            ) -> TokIter:
+        """ Parse an input string.  Generate PpTok objects. """
+        self.file = file
+        source = file.filename
+        #rewritten_source = source
+        abspath = file.abspath
+        #if abspath:
+        #    rewritten_source = abspath
+        #    for rewrite in self.rewrite_paths:
+        #        temp = re.sub(rewrite[0], rewrite[1], rewritten_source)
+        #        if temp != abspath:
+        #            # rewrite[0] was found.
+        #            rewritten_source = temp
+        #            break
 
-        if not source:
-            source = ""
-        if not rewritten_source:
-            rewritten_source = ""
-            
-        self.include_depth += 1
+        #if not source:
+        #    source = ""
+        #if not rewritten_source:
+        #    rewritten_source = ""
         if self.verbose < 2:
             source = os.path.basename(source)
-        src = Source(self, source)
-        if self.expand_filemacro:
-            self.undef("__FILE__")
-            self.define("__FILE__ \"%s\"" % rewritten_source)
+        src = Source(file)
+        #src = Source(self, source, abspath, hdr_name, rewritten_source,
+        #             once=file.once)
 
-        yield from src.parsegen(input)
+        if dir:
+            yield dir.make_pos(OutPosEnter, source=src)
+        with self.sources_active.nest(src):
+            yield from src.parsegen(dir=dir)
+        if dir and dir.source.parent:
+            tok = dir.make_pos(OutPosLeave)
+            yield tok
+
+
+    @property
+    def currsource(self) -> Source | None:
+        """ Currently parsing Source, if any. """
+        return self.sources_active.top()
 
     # ----------------------------------------------------------------------
     # __lexprobe()
@@ -157,16 +769,16 @@ class Preprocessor(PreprocessorHooks):
 
     def __lexprobe(self):
         def probe(data: str, message: str) -> TokType | None:
-            lexer = self.lexer.clone()
-            lexer.input(data)
-            lexer.begin('INITIAL')
-
-            tok = lexer.token()
+            toks = self.lexer.parse(data)
+            tok = next(toks, None)
             if not tok or tok.value != data:
                 raise TypeError(f"Couldn't determine type for {message}.")
                 return None
             return tok.type
 
+        probe("(", "left paren")
+        probe("##", "paste")
+        probe("#", "stringize")
         # Determine the token type for identifiers
         self.t_ID = probe("identifier", "identifier")
 
@@ -184,12 +796,12 @@ class Preprocessor(PreprocessorHooks):
         self.t_SPACE = probe("  ", "space")
 
         # Determine the token type for newlines
-        self.t_NEWLINE = probe("\n", "newline")
+        #self.t_NEWLINE = probe("\n", "newline")
 
         # Determine the token type for token pasting.
         self.t_DPOUND = probe("##", "token pasting operator")
 
-        # Determine the token type for elipsis.
+        # Determine the token type for ellipsis.
         self.t_ELLIPSIS = probe("...", "elipsis")
 
         # Determine the token types for ternary operator.
@@ -202,10 +814,11 @@ class Preprocessor(PreprocessorHooks):
         self.t_COMMENT = (self.t_COMMENT1, self.t_COMMENT2)
 
         # Determine the token types for any whitespace.
-        self.t_WS = (self.t_SPACE, self.t_NEWLINE) + self.t_COMMENT
+        self.t_WS = (self.t_SPACE, ) + self.t_COMMENT
+        #self.t_WS = (self.t_SPACE, self.t_NEWLINE) + self.t_COMMENT
 
         # Check for other characters used by the preprocessor
-        chars = [ '<','>','#','##','\\','(',')',',','.']
+        chars = [ '<','>','#','##','(',')',',','.']
         for c in chars:
             probe(c, f"{c!r} required for preprocessor")
 
@@ -228,21 +841,28 @@ class Preprocessor(PreprocessorHooks):
         if relpath is not None:
             self.rewrite_paths += [(re.escape(os.path.abspath(path) + os.sep) + '(.*)', os.path.join(relpath, '\\1'))]
 
+    def fix_path_sep(self, path: str, sep: str = '/') -> str:
+        """ Changes the path separators in given path. """
+        if self.emulate:
+            # GCC preserves the separators, but doubles single backslashes.
+            if os.sep == '\\':
+                path = re.sub(r'\\',r'\\\\', path)
+                #path = re.sub(r'\\\\?',r'\\\\', path)
+                #path = path.replace(os.sep, '\\\\')
+        elif os.sep != sep:
+            path = path.replace(os.sep, sep)
+        return path
+
     # ----------------------------------------------------------------------
     # define()
     #
     # Define a new macro
-    # Called with either the string following '#define '
-    #   or the tokens following '#define' and any whitespace.
+    # Called with the tokens following '#define' and any whitespace.
     # ----------------------------------------------------------------------
 
-    def define(self,tokens):
+    def define(self, tokens: TokIter, **kwds):
         """Define a new macro"""
-        if isinstance(tokens,STRING_TYPES):
-            self.macros.define_from_text(tokens, self.lexer)
-        else:
-            self.macros.define(tokens)
-
+        self.macros.define(tokens)
 
     # ----------------------------------------------------------------------
     # undef()
@@ -267,129 +887,107 @@ class Preprocessor(PreprocessorHooks):
     # Implementation of file-inclusion
     # ----------------------------------------------------------------------
 
-    def include(self,tokens,original_line):
-        """Implementation of file-inclusion"""
-        # TODO: Some things are undefined behavior if part of the file name:
-        #   "'" "\\".  They do NOT introduce character constants or string.
-        #   "//", or "/*".  They do NOT introduce comments.
-        #   '"' in a <filename>, but can't occur in a "filename>".
-        #   See C99 Section 6.4.7.
+    def include(self, tokens: Tokens, original_line: str) -> Iterator[PpTok]:
+        """ Implementation of file-inclusion.
+        Given Tokens is what follows the '#include', or perhaps a macro expansion
+        of same.
+        The lexer has parsed either a <name> or a "name" into a single token.
+        See (C99 6.4.7).
+        """
         # Try to extract the filename and then process an include file
-        if not tokens:
-            return
-        with self.nest():
-            if tokens[0].value != '<' and tokens[0].type != self.t_STRING:
-                tokens = self.tokenstrip(prep.macros.expand(tokens))
 
+        if tokens[0].type.hhdr:
+            is_system_include = True
+            # Include <...>
+            filename = tokens[0].value[1:-1]
+            # Search only formally specified paths
+            qfile = None
+            path = self.path
+        elif tokens[0].type.qhdr:
             is_system_include = False
-            if tokens[0].value == '<':
-                is_system_include = True
-                # Include <...>
-                i = 1
-                while i < len(tokens):
-                    if tokens[i].value == '>':
-                        break
-                    i += 1
-                else:
-                    self.on_error(tokens[0].source,tokens[0].lineno,"Malformed #include <...>")
-                    return
-                filename = "".join([x.value for x in tokens[1:i]])
-                # Search only formally specified paths
-                path = self.path
-            elif tokens[0].type == self.t_STRING:
-                filename = tokens[0].value[1:-1]
-                # Search from each nested include file, as well as formally specified paths
-                path = self.temp_path + self.path
+            filename = tokens[0].value[1:-1]
+            # Search from last enclosing include file, as well as formally
+            # specified paths
+            qfile = self.files_active.top()
+            #path = [self.files_active.top().dirname] + self.path
+        else:
+            # Malformed filename.  Treat this similar to a missing file.
+            p = self.on_include_not_found(
+                is_malformed=True, is_system_include=False,
+                curdir=self.files_active.top(''),
+                includepath=tokens[0].value)
+            assert p is None
+            return
+        path = self.path or ['']
+
+        # Create a SourceFile object.
+        file = SourceFile.open(filename, qfile, path, self)
+
+        # Decide whether to translate this file.
+        if file.pathdir is None:
+            # File was not found.
+            filename = self.on_include_not_found(
+                is_malformed=False, is_system_include=is_system_include,
+                curdir=self.files_active.top().dirname,
+                includepath=filename)
+            # Did not raise OutputDirective, so returns a replacement filename.
+            assert filename is not None
+            file = SourceFile.open(filename, path, self)
+        if file.once:
+            self.log.write(f"File \"{file.filename}\" skipped as already seen.",
+                           token=tokens[0])
+            if (self.passthru_includes is not None
+                and self.passthru_includes.match(
+                    ''.join([x.value for x in tokens]))
+                ):
+                yield from original_line
+            return
+        # Go ahead and translate.
+        with self.files_active.nest(file):
+
+            if (self.passthru_includes is not None
+                and self.passthru_includes.match(
+                    ''.join([x.value for x in tokens]))
+                ):
+                yield from original_line
+                for tok in self.parsegen(data, filename, fulliname):
+                    pass
             else:
-                p = self.on_include_not_found(True,False,self.temp_path[0] if self.temp_path else '',tokens[0].value)
-                assert p is None
-                return
-            if not path:
-                path = ['']
-            while True:
-                #print path
-                for p in path:
-                    iname = os.path.join(p,filename)
-                    fulliname = os.path.abspath(iname)
-                    if fulliname in self.include_once:
-                        self.log.write("#include \"%s\" skipped as already seen" % (fulliname))
-                        if self.passthru_includes is not None and self.passthru_includes.match(''.join([x.value for x in tokens])):
-                            for tok in original_line:
-                                yield tok
-                        return
-                    try:
-                        ih = self.on_file_open(is_system_include,fulliname)
-                        data = ih.read()
-                        ih.close()
-                        dname = os.path.dirname(fulliname)
-                        if dname:
-                            self.temp_path.insert(0,dname)
-                        if self.passthru_includes is not None and self.passthru_includes.match(''.join([x.value for x in tokens])):
-                            for tok in original_line:
-                                yield tok
-                            for tok in self.parsegen(data,filename,fulliname):
-                                pass
-                        else:
-                            # Notify the output write() of changes to the source, both before and after.
-                            #self.changed_source = True
-                            #yield None
-                            for tok in self.parsegen(data,filename,fulliname):
-                                yield tok
-                            #self.changed_source = True
-                            #yield None
-                        if dname:
-                            del self.temp_path[0]
-                        return
-                    except IOError:
-                        pass
-                else:
-                    p = self.on_include_not_found(False,is_system_include,self.temp_path[0] if self.temp_path else '',filename)
-                    assert p is not None
-                    path.append(p)
+                dir = original_line[0]
+                # Tell prep.write() to begin a new source file.
 
-    # ----------------------------------------------------------------------
-    # tokenstrip()
-    # 
-    # Remove leading/trailing whitespace tokens from a token list
-    # ----------------------------------------------------------------------
+                yield from self.parsegen(file, dir)
 
-    def tokenstrip(self, tokens: Tokens) -> Tokens:
-        """Remove leading/trailing whitespace tokens from a token list"""
-        i = 0
-        while i < len(tokens) and tokens[i].type.ws:
-            i += 1
-        del tokens[:i]
-        i = len(tokens)-1
-        while i >= 0 and tokens[i].type.ws:
-            i -= 1
-        del tokens[i+1:]
-        return tokens
+        return
 
-    # ----------------------------------------------------------------------
-    # token()
-    #
-    # Method to return individual tokens
-    # ----------------------------------------------------------------------
-    def token(self):
+    @TokIter.from_generator
+    def tokens(self) -> TokIter:
         """Method to return individual tokens"""
         try:
             while True:
                 tok = next(self.parser)
                 if (tok and tok.type not in self.ignore):
-                    return tok
+                    yield tok
         except StopIteration:
             self.parser = None
-            return None
 
     @staticmethod
-    def showtok(tok: LexToken) -> str:
+    def showtok(tok: PpTok) -> str:
         return tok.value
 
-    def showtoks(self, toks: Iterable[LexToken]) -> str:
+    def showtoks(self, toks: Iterable[PpTok]) -> str:
         return ''.join(map(self.showtok, toks))
 
-    # Keeping track of levels of nesting, using self.nesting.
+    # Keeping track of levels of nesting, using current source nesting.
     # This is available to log.write() to indent the output.
+
+    @property
+    def nesting(self) -> int:
+        return self.currsource.nesting
+
+    @nesting.setter
+    def nesting(self, n) -> None:
+        self.currsource.nesting = n
 
     @contextlib.contextmanager
     def nest(self, n: int = 1):
@@ -399,785 +997,52 @@ class Preprocessor(PreprocessorHooks):
         finally:
             self.nesting -= n
 
-    #def writedebug(self, text: str, indent = 0, nest: int = 0,
-    #               token = None,
-    #               source: Source = None, lineno = None, colno = None,
-    #               contlocs: bool = True,       # Show location for continued lines.
-    #               ):
-    #    if self.debugout is None: return
-    #    if not self.verbose and not enable: return
-    #    if token:
-    #        source = token.source
-    #        lineno = lineno or token.lineno
-    #    if source:
-    #        filename = source.filename
-    #    else:
-    #        filename = __file__
-    #    if self.verbose < 2:
-    #        filename = os.path.basename(filename)
-    #    try: ifstate = source.ifstate
-    #    except: pass
-    #    #ifstate = source.ifstate
-    #    leader = (self.verbose
-    #              and f"{ifstate.enable:d}:{ifstate.iftrigger:d}:{ifstate.ifpassthru:d} "
-    #              or "")
-    #    for i, line in enumerate(text.splitlines(), lineno):
-    #        if not line.strip(): continue
-    #        if colno is None and token: colno = token.colno
-    #        col = f":{colno}" if colno and i == lineno else ""
-    #        left: str = f"{leader}{filename}:{i}{col}"
-    #        if not contlocs and i > lineno:
-    #            left = ''
-    #        self.loglines.append((
-    #            left,
-    #            f"{'| ' * (self.nesting + nest)}{' ' * indent}"
-    #            f"{i > lineno and '... ' or ''}{line}")
-    #            )
 
-    #def writedebuglog(self):
-    #    if self.loglines:
-    #        lefts, _ = zip(*self.loglines)
-    #        leftwidth = max(len(s) for s in lefts)
-    #        for left, right in self.loglines:
-    #            print("%-*s %s" % (leftwidth, left, right), file = self.debugout)
-
-    def write(self, oh=sys.stdout):
-        """Calls token() repeatedly, expanding tokens to their text and writing to the file like stream oh"""
-
-        # Overall strategy:
-        #   1. Get a logical line.  Keep track of line numbers.
-        #       The line may have a smaller starting line number than an ending one.
-        #       It's the starting line number that determines where it lies in the output.
-        #   2. See if the line is all whitespace.  Comments don't count.
-        #       If so, it won't be written out.
-        #   3. See if the line is actually a change of source file marker.
-        #       This changes the source file name and forces a line directive.
-        #   4. Compress the line by combining consecutive whitespace into a single space,
-        #       except at the start of the line.
-        #   5. Account for any jumps in the line number.  Either write some blank lines
-        #       or write a line directive.
-        #   6. Write the line itself, one token at a time.
-
-        line: Tokens = Tokens()
-        outlineno: int                  # Current line number for output
-        inlineno: int                   # Current line number for input
-        lineno: int                     # Line number for current logical line.
-        source: Source                  # Current file being parsed.
-        all_ws: bool = True             # Current line is all space characters.
-        write = oh.write
-
-        def getline() -> Iterator:
-            """ Generates next logical line, ignoring blank lines.
-            """
-            nonlocal lineno, inlineno, outlineno, source, all_ws
-            # Loop over lines
-            while True:
-                # Loop over tokens
-                while True:
-                    tok: PpTok = self.token()
-                    if not tok: return
-                    if not tok.value:
-                        if self.changed_source:
-                            self.changed_source = False
-                            source = tok.source
-                            inlineno = outlineno = tok.lineno
-                            linedirective()
-                        continue
-                    line.append(tok)
-                    if tok.type.nl:
-                        if not all_ws:
-                            # We have a result line.
-                            lineno = inlineno
-                            yield
-                            all_ws = True
-                        inlineno = tok.lineno + 1
-                        break
-                    if not tok.type.space:
-                        all_ws = False
-                line.clear()
-
-        def linedirective() -> None:
-            # Writes a #line directive using the source and lineno variables.
-            if source:
-                filename = f" {source.filename}"
-            else:
-                filename = ""
-            write(f"{self.line_directive} {outlineno}\"{filename}\"\n")
-
-        def movetoline(lineno: int) -> None:
-            """ Writes whatever necessary to set the current output line position.
-            Either write blank lines or write a #line directive.
-            """
-            nonlocal outlineno
-            skip = lineno - outlineno
-            outlineno = lineno
-            if skip:
-                if skip > 6 and self.line_directive is not None:
-                    linedirective()
-                else:
-                    write('\n' * skip)
-
-        for _ in getline():
-            # `line` holds the next line, which is not blank.
-            movetoline(lineno)
-            outlineno = lineno + 1
-            for tok in line:
-                write(tok.value)
-            ...
-
-        return
-        # Establish these names as local variables, to keep the editor happy.
-        del source, lineno, inlineno, outlineno
-
-        lastlineno = 0
-        lastsource = None
-        done = False
-        blanklines = 0
-        while not done:
-            emitlinedirective = False
-            toks = []
-            all_ws = True
-            # Accumulate a line
-            while not done:
-                tok = self.token()
-                if not tok:
-                    done = True
-                    break
-                toks.append(tok)
-                if tok.value:
-                    if tok.value[0] == '\n':
-                        break
-                elif self.changed_source:
-                    emitlinedirective = True
-                    self.changed_source = False
-                    lastsource = tok.source
-                    blanklines = 0
-                    break
-                if not tok.type.ws:
-                    all_ws = False
-            if toks:
-                linetok = toks[-1]
-                if all_ws:
-                    # Remove preceding whitespace so it becomes just a LF
-                    if len(toks) > 1:
-                        tok = linetok
-                        toks = [ linetok ]
-                    blanklines += linetok.value.count('\n')
-                    continue
-            # The line in toks is not all whitespace
-            emitlinedirective |= (blanklines > 6) and self.line_directive is not None
-            if not emitlinedirective and hasattr(linetok, 'source'):
-                if lastsource is not linetok.source:
-                    emitlinedirective = True
-                    lastsource = linetok.source
-                    blanklines = 0
-            # Replace consecutive whitespace in output with a single space except at any indent
-            first_ws = None
-            #print(toks)
-            for n in range(len(toks)-1, -1, -1):
-                tok = toks[n]
-                if first_ws is None:
-                    if tok.type.ws and tok.value:
-                        first_ws = n
-                else:
-                    if not tok.type.ws and len(tok.value) > 0:
-                        m = n + 1
-                        while m != first_ws:
-                            del toks[m]
-                            first_ws -= 1
-                        first_ws = None
-                        if self.compress > 0:
-                            # Collapse a token of many whitespace into single
-                            if toks[m].value and toks[m].value[0] == ' ':
-                                toks[m].value = ' '
-            if not self.compress > 1 and not emitlinedirective:
-                newlinesneeded = linetok.lineno - lastlineno - 1
-                if newlinesneeded > 6 and self.line_directive is not None:
-                    emitlinedirective = True
-                else:
-                    while newlinesneeded > 0:
-                        write('\n')
-                        newlinesneeded -= 1
-            lastlineno = linetok.lineno
-            if not self.compress and blanklines >= 2:
-                lastlineno -= blanklines
-            if emitlinedirective and self.line_directive is not None:
-                write(self.line_directive + ' ' + str(lastlineno) + ('' if lastsource is None else (' "' + lastsource.filename + '"' )) + '\n')
-            if not self.compress and blanklines >= 2:
-                write('\n' * blanklines)
-                lastlineno += blanklines
-            for tok in toks:
-                if tok.type == self.t_COMMENT1:
-                    lastlineno += tok.value.count('\n')
-            blanklines = 0
-            for tok in toks:
-                write(tok.value)
-
-class Source:
-    """ Performs preprocessing on a single source file.
-    Generates tokens, including from #include'ed files.
-    """
-
-    def __init__(self, prep: PreProcessor, filename: str) -> None:
-        self.prep = prep
-        self.filename = filename
-        self.parent = prep.currsource
-
-    # ----------------------------------------------------------------------
-    # group_lines()
-    #
-    # Given an input string, this function splits it into lines.  Trailing whitespace
-    # is removed. This function forms the lowest level of the preprocessor---grouping
-    # text into a line-by-line format.
-    # ----------------------------------------------------------------------
-
-    def group_lines(self, input: str) -> Iterator[Tokens]:
-        r"""Given an input string, this function splits it into lines.  Trailing whitespace
-        is removed. This function forms the lowest level of the preprocessor---grouping
-        text into a line-by-line format.
+    def _error_msg(self, source: Source, msg: str, line: int = 0, col: int = 0,
+                    warn: bool = False):
+        """ Prints error or warning message to diagnostic output
+        and increments the return code or warning count.
         """
-        prep = self.prep
-        lex = self.lexer = prep.lexer.clone()
-        lines = [x.rstrip() for x in input.splitlines()]
+        if not source: return
+        file = source.filename
+        if self.verbose < 2:
+            file = os.path.basename(file)
+        if line:
+            file = f"{file}:{line}"
+            if col:
+                file = f"{file}:{col}"
 
-        input = "\n".join(lines) + "\n"
-        lex.input(input, self)
+        type = warn and 'warning' or 'ERROR'
+        self.log.write(f"{type}: {msg}", source=source, lineno=line, colno=col)
+        msg = f"{file} {type}: {msg}"
+        print(msg, file = self.diag)
+        if warn:
+            self.warnings += 1
+        else:
+            self.return_code += 1
 
-        current_line = []
-        while True:
-            tok = lex.token()
-            if not tok:
-                break
-            current_line.append(tok)
-            if tok.type.nl:
-                current_line = list(reduce_ws(current_line, prep))
-                yield current_line
-                current_line = []
-
-        if current_line:
-            nltok = copy.copy(current_line[-1])
-            nltok.type = prep.t_NEWLINE
-            nltok.value = '\n'
-            current_line.append(nltok)
-            current_line = reduce_ws(current_line)
-            yield current_line
-
-    # ----------------------------------------------------------------------    
-    # evalexpr()
-    # 
-    # Evaluate an expression token sequence for the purposes of evaluating
-    # integral expressions.
-    # ----------------------------------------------------------------------
-
-    def evalexpr(self, tokens: Tokens) -> Tuple[bool, Tokens | None]:
-        """Evaluate an expression token sequence for the purposes of evaluating
-        integral expressions.  Result is either true or false.
-        If false, there could be something to be passed through.
+    def on_error_token(self, token: PpTok, msg: str, warn: bool = False
+                       ) -> None:
         """
-        prep = self.prep
-        if not tokens:
-            prep.on_error_token(self.directive[0], "Empty control expression in directive")
-            return (0, None)
-        # tokens = tokenize(line)
-        # Search for defined macros
-        partial_expansion = False
-
-        def replace_defined(tokens, again: bool = False) -> bool:
-            """ Replace any 'defined X' or 'defined (X)' with integer 0 or 1.
-            The token list is altered in-place.  Return True if anything replaced.
-            """
-            i = 0
-            replaced = False
-            while i < len(tokens):
-                if tokens[i].type == prep.t_ID and tokens[i].value == 'defined':
-                    j = i + 1
-                    needparen = False
-                    result = "0L"
-                    while j < len(tokens):
-                        if tokens[j].type.ws:
-                            j += 1
-                            continue
-                        elif tokens[j].type is TokType.CPP_ID:
-                            if tokens[j].value in self:
-                                result = "1L"
-                            else:
-                                repl = prep.on_unknown_macro_in_defined_expr(tokens[j])
-                                if repl is None:
-                                    partial_expansion = True
-                                    result = 'defined('+tokens[j].value+')'
-                                else:
-                                    result = "1L" if repl else "0L"
-                            if not needparen: break
-                        elif tokens[j].value == '(' and not needparen:
-                            needparen = True
-                        elif tokens[j].value == ')' and needparen:
-                            break
-                        else:
-                            prep.on_error(tokens[i].source,tokens[i].lineno,"Malformed defined()")
-                        j += 1
-                    if result.startswith('defined'):
-                        tokens[i].type = TokType.CPP_ID
-                        tokens[i].value = result
-                    else:
-                        tokens[i].type = prep.t_INTEGER
-                        tokens[i].value = prep.t_INTEGER_TYPE(result)
-                    replaced = True
-                    del tokens[i+1:j+1]
-                i += 1
-            return replaced
-
-        # Replace any defined(macro) before macro expansion
-        #replace_defined(tokens)
-        tokens = prep.macros.expand(tokens, evalexpr=True)
-        # Replace any defined(macro) after macro expansion
-        #if replace_defined(tokens):
-        #    # This is undefined behavior (C99 Section 6.10.1 para 4).
-        #    prep.on_warn_token(tokens[0], "Macro expansion of control expression contains 'defined'")
-        if not tokens:
-            return (0, None)
-
-        class IndirectToMacroHook(object):
-            def __init__(self, p):
-                self.__preprocessor = p.prep
-                self.partial_expansion = False
-            def __contains__(self, key):
-                return True
-            def __getitem__(self, key):
-                if key.startswith('defined('):
-                    self.partial_expansion = True
-                    return 0
-                repl = self.__preprocessor.on_unknown_macro_in_expr(key)
-                #print("*** IndirectToMacroHook[", key, "] returns", repl, file = sys.stderr)
-                if repl is None:
-                    self.partial_expansion = True
-                    return key
-                return repl
-        evalvars = IndirectToMacroHook(self)
-
-        class IndirectToMacroFunctionHook(object):
-            def __init__(self, p):
-                self.__preprocessor = p.prep
-                self.partial_expansion = False
-            def __contains__(self, key):
-                return True
-            def __getitem__(self, key):
-                repl = self.__preprocessor.on_unknown_macro_function_in_expr(key)
-                #print("*** IndirectToMacroFunctionHook[", key, "] returns", repl, file = sys.stderr)
-                if repl is None:
-                    self.partial_expansion = True
-                    return key
-                return repl
-        evalfuncts = IndirectToMacroFunctionHook(self)
-
-        try:
-            result = prep.evaluator(tokens, functions = evalfuncts, identifiers = evalvars).value()
-            partial_expansion = partial_expansion or evalvars.partial_expansion or evalfuncts.partial_expansion
-        except OutputDirective:
-            raise
-        except Exception as e:
-            partial_expansion = partial_expansion or evalvars.partial_expansion or evalfuncts.partial_expansion
-            if not partial_expansion:
-                self.prep.on_error(tokens[0].source,tokens[0].lineno,"Could not evaluate expression due to %s (passed to evaluator: '%s')" % (repr(e), ''.join([tok.value for tok in tokens])))
-                #import traceback; traceback.print_exc()
-            result = 0
-        return (result, tokens) if partial_expansion else (result, None)
-
-    @dataclass
-    class IfState:
-        """ State of a control group controlled by any conditional inclusion
-        directive other than #endif.  See C99/C23 Standard 6.10.1.
-        Also #elifdef and #elifndef, new to C23.
-        The entire source file itself is not a control group, but has an IfState.
+        Called when the preprocessor has encountered an error or warning
+        associated with a token.
         """
-        enable: bool                # Preprocessing is active.
-                                    # If not, directives are still examined.
-        iftrigger: bool             # This or an earlier controlling directive is true.
-                                    # This means that all following groups are skipped.
-        ifpassthru: bool            # Enables certain things to be passed through to output.
-        startlinetoks: List[LexToken] = field(default_factory=list)
-                                    # The controlling directive.  [] if entire file.
-        rewritten: bool = False
-        top: bool = False           # This is the entire source file.
+        # The token might not yet have turned into a PpTok.
+        if isinstance(token, PpTok):
+            obj = token
+        else:
+            obj = token.lexer.owner
+        self._error_msg(obj.source, msg, obj.lineno, obj.colno, warn=warn)
 
-        @property
-        def may_enable(self) -> bool:
-            """ True if the next group can be enabled by a true condition. """
-            return not self.iftrigger
-
-        def advance(self, cond: bool) -> None:
-            if cond:
-                if self.enable: self.enable = False
-                else: self.enable = self.iftrigger = True
-            else:
-                self.enable = False
-
-    class IfStack(list[IfState]):
-        """ Nested control groups in the current source file, starting from the outermost.
-            The entry for the entire file is NOT on the list.
+    def on_warn_token(self, token: PpTok, msg: str):
         """
-        # Source.ifstate starts out with a state for the entire file, which is not on the stack.
-        # Opening a new group pushes the current state onto the stack and creates a new state,
-        #   which, again, is not on the stack.
-        # Closing the group pops the top of the stack onto the Soutce.
+        Called when the preprocessor has encountered a warning associated with
+        a Token.
+        """
+        self.on_error_token(token, msg, warn=True)
 
-        def __init__(self, source: Source):
-            self.source = source
 
-        def push(self, enable: bool, iftrigger: bool, ifpassthru: bool,
-                    startlinetoks: Tokens) -> None:
-            self.append(self.source.ifstate)
-            self.source.ifstate = Source.IfState(enable, iftrigger, ifpassthru, startlinetoks)
-
-        def pop(self) -> None:
-            state = self.source.ifstate = super().pop()
-            return state
-
-    # ----------------------------------------------------------------------
-    # parsegen()
-    #
-    # Parse an input string from top level or included source file.
-    # ----------------------------------------------------------------------
-
-    def parsegen(self, input: str = '', source=None,abssource=None) -> Iterator[LexToken]:
-    #def parsegen(self, lines: Iterable[list[LexToken]] = None, source=None,abssource=None) -> Iterator[LexToken]:
-        """Parse an input string.  Generate LexToken objects. """
-
-        prep: PreProcessor = self.prep
-        prep.currsource = self
-
-        lex = self.lexer = prep.lexer.clone()
-        lex.input(input, source=self)
-        lex.lineno = 1
-        # Tell prep.write() to begin a new source file.
-        prep.changed_source = True
-        yield lex.null()
-
-        self.ifstack = self.IfStack(self)
-        self.ifstate = self.IfState(True, True, False, top=True)
-        if not input:
-            return
-        my_include_time_begin = clock()
-        prep.include_times.append(FileInclusionTime(prep.macros['__FILE__'] if '__FILE__' in prep.macros else None, source, abssource, prep.include_depth))
-        my_include_times_idx = len(prep.include_times) - 1
-            
-
-        # True until any non-whitespace output or anything with effects happens.
-        self.at_front_of_file = True
-        # True if auto pragma once still a possibility for this #include
-        # (it may have been disabled by the subclass constructor).
-        auto_pragma_once_possible = self.prep.auto_pragma_once_enabled
-        # =(MACRO, 0) means #ifndef MACRO or #if !defined(MACRO) seen, =(MACRO,1) means #define MACRO seen
-        self.include_guard = None
-        self.prep.on_potential_include_guard(None)
-
-        chunk: Tokens = Tokens()          # List of token to be scanned for macro replacement.
-        lines = self.group_lines(input)
-        for x in lines:
-            all_whitespace = True
-            skip_auto_pragma_once_possible_check = False
-            # Handle comments
-            for i,tok in enumerate(x):
-                if tok.type in prep.t_COMMENT:
-                    if not prep.on_comment(tok):
-                        tok.value = ' '
-                        tok.type = TokType.CPP_WS
-            # Skip over whitespace
-            for i,tok in enumerate(x):
-                if not tok.type.ws:
-                    all_whitespace = False
-                    break
-            output_and_expand_line = True
-            output_unexpanded_line = False
-            if tok.type is TokType.CPP_DIRECTIVE:
-                self.dir = Directive(self, x)
-                self.directive = x[i:]
-                precedingtoks = [ tok ]
-                output_and_expand_line = False
-                try:
-                    # Preprocessor directive      
-
-                    # Expand and yield what we have collected so far.
-                    # Last token cannot be a macro call because any '(' does
-                    # not follow any whitespace
-                    chunk = prep.macros.expand(chunk)
-                    yield from chunk
-                    chunk = Tokens()
-
-                    i += 1
-                    while i < len(x) and x[i].type.ws:
-                        precedingtoks.append(x[i])
-                        i += 1
-                    dirtokens = prep.tokenstrip(x[i:])
-                    if dirtokens:
-                        name = dirtokens[0].value
-                        args = prep.tokenstrip(dirtokens[1:])
-                    
-                        #if name in ('elif', 'else', 'endif'): prep.nesting -= 1
-                        # Get the directive arguments, with newlines replacing line continuations
-                        argvalue = [tok.value for tok in args]
-                        prep.log.write("# %s %s" % (dirtokens[0].value, "".join(argvalue)), token=dirtokens[0])
-                        #if name in ('elif', 'else'): prep.nesting += 1
-
-                        handling = prep.on_directive_handle(dirtokens[0],args, self.ifstate.ifpassthru, precedingtoks)
-                        # Did not raise OutputDirective.
-                        assert handling == True or handling == None
-
-                    else:
-                        # Null directive.
-                        name = ""
-                        args = []
-                        raise OutputDirective(Action.IgnoreAndRemove)
-
-                    res = self.dir(handling)
-                    if res: yield from res
-                    else: yield x[-1]
-                    ...
-                    """
-                    ##if name == 'define':
-                    ##    self.at_front_of_file = False
-                    ##    if enable:
-                    ##        if self.include_guard and self.include_guard[1] == 0:
-                    ##            if self.include_guard[0] == args[0].value and len(args) == 1:
-                    ##                self.include_guard = (args[0].value, 1)
-                    ##                # If ifpassthru is only turned on due to this include guard, turn it off
-                    ##                if prep.ifpassthru and not self.ifstack[-1].ifpassthru:
-                    ##                    prep.ifpassthru = False
-                    ##        prep.define(args)
-                    ##        macro = prep.macros[args[0].value]
-                    ##        #self.writedebug(self.verbose > 1 and repr(macro) or macro.show(), token=dirtokens[0], indent=5)
-                    ##        if handling is None:
-                    ##            yield from x
-
-                    ##elif name == 'include':
-                    ##    if enable:
-                    ##        oldfile = prep.macros['__FILE__'] if '__FILE__' in prep.macros else None
-                    ##        if args and args[0].value != '<' and args[0].type != prep.t_STRING:
-                    ##            args = self.tokenstrip(prep.macros.expand(args))
-                    ##        # print('***', ''.join([x.value for x in args]), file = sys.stderr)
-                    ##        yield from prep.include(args, x)
-                    ##        if oldfile is not None:
-                    ##            prep.macros['__FILE__'] = oldfile
-                    ##        self.source = abssource
-
-                    ##elif name == 'undef':
-                    ##    self.at_front_of_file = False
-                    ##    if enable:
-                    ##        prep.undef(args)
-                    ##        if handling is None:
-                    ##            yield from x
-
-                    ##elif name == 'ifdef':
-                    ##    prep.nesting += 1
-                    ##    self.at_front_of_file = False
-                    ##    self.ifstack.append(self.IfState(enable,iftrigger, prep.ifpassthru,x))
-                    ##    if enable:
-                    ##        prep.ifpassthru = False
-                    ##        if not args[0].value in prep.macros:
-                    ##            res = prep.on_unknown_macro_in_defined_expr(args[0])
-                    ##            if res is None:
-                    ##                prep.ifpassthru = True
-                    ##                self.ifstack[-1].rewritten = True
-                    ##                raise OutputDirective(Action.IgnoreAndPassThrough)
-                    ##            elif res is True:
-                    ##                iftrigger = True
-                    ##            else:
-                    ##                enable = False
-                    ##                iftrigger = False
-                    ##        else:
-                    ##            iftrigger = True
-
-                    ##elif name == 'ifndef':
-                    ##    prep.nesting += 1
-                    ##    if not self.ifstack and self.at_front_of_file:
-                    ##        prep.on_potential_include_guard(args[0].value)
-                    ##        self.include_guard = (args[0].value, 0)
-                    ##    self.at_front_of_file = False
-                    ##    self.ifstack.append(self.IfState(enable,iftrigger, prep.ifpassthru,x))
-                    ##    if enable:
-                    ##        prep.ifpassthru = False
-                    ##        if args[0].value in prep.macros:
-                    ##            enable = False
-                    ##            iftrigger = False
-                    ##        else:
-                    ##            res = prep.on_unknown_macro_in_defined_expr(args[0])
-                    ##            if res is None:
-                    ##                prep.ifpassthru = True
-                    ##                self.ifstack[-1].rewritten = True
-                    ##                raise OutputDirective(Action.IgnoreAndPassThrough)
-                    ##            elif res is True:
-                    ##                enable = False
-                    ##                iftrigger = False
-                    ##            else:
-                    ##                iftrigger = True
-
-                    ##elif name == 'if':
-                    ##    prep.nesting += 1
-                    ##    if not self.ifstack and self.at_front_of_file:
-                    ##        if args and args[0].value == '!' and args[1].value == 'defined':
-                    ##            n = 2
-                    ##            if args[n].value == '(': n += 1
-                    ##            self.on_potential_include_guard(args[n].value)
-                    ##            self.include_guard = (args[n].value, 0)
-                    ##    self.at_front_of_file = False
-                    ##    self.ifstack.append(self.IfState(enable,iftrigger, prep.ifpassthru,x))
-                    ##    if enable:
-                    ##        iftrigger = False
-                    ##        prep.ifpassthru = False
-                    ##        result, rewritten = self.evalexpr(args)
-                    ##        if rewritten is not None:
-                    ##            x = x[:i+2] + rewritten + [x[-1]]
-                    ##            x[i+1] = copy.copy(x[i+1])
-                    ##            x[i+1].type = prep.t_SPACE
-                    ##            x[i+1].value = ' '
-                    ##            prep.ifpassthru = True
-                    ##            self.ifstack[-1].rewritten = True
-                    ##            raise OutputDirective(Action.IgnoreAndPassThrough)
-                    ##        if not result:
-                    ##            enable = False
-                    ##        else:
-                    ##            iftrigger = True
-
-                    ##elif name == 'elif':
-                    ##    self.at_front_of_file = False
-                    ##    if self.ifstack:
-                    ##        if self.ifstack[-1].enable:     # We only pay attention if outer "if" allows this
-                    ##            if enable and not prep.ifpassthru:         # If already true, we flip enable False
-                    ##                enable = False
-                    ##            elif not iftrigger:   # If False, but not triggered yet, we'll check expression
-                    ##                result, rewritten = self.evalexpr(args)
-                    ##                if rewritten is not None:
-                    ##                    enable = True
-                    ##                    if not prep.ifpassthru:
-                    ##                        # This is a passthru #elif after a False #if, so convert to an #if
-                    ##                        x[i].value = 'if'
-                    ##                    x = x[:i+2] + rewritten + [x[-1]]
-                    ##                    x[i+1] = copy.copy(x[i+1])
-                    ##                    x[i+1].type = prep.t_SPACE
-                    ##                    x[i+1].value = ' '
-                    ##                    prep.ifpassthru = True
-                    ##                    self.ifstack[-1].rewritten = True
-                    ##                    raise OutputDirective(Action.IgnoreAndPassThrough)
-                    ##                if prep.ifpassthru:
-                    ##                    # If this elif can only ever be true, simulate that
-                    ##                    if result:
-                    ##                        newtok = copy.copy(x[i+3])
-                    ##                        newtok.type = prep.t_INTEGER
-                    ##                        newtok.value = prep.t_INTEGER_TYPE(result)
-                    ##                        x = x[:i+2] + [newtok] + [x[-1]]
-                    ##                        raise OutputDirective(Action.IgnoreAndPassThrough)
-                    ##                    # Otherwise elide
-                    ##                    enable = False
-                    ##                elif result:
-                    ##                    enable  = True
-                    ##                    iftrigger = True
-                    ##    else:
-                    ##        self.on_error(dirtokens[0].source,dirtokens[0].lineno,"Misplaced #elif")
-                            
-                    ##elif name == 'else':
-                    ##    self.at_front_of_file = False
-                    ##    if self.ifstack:
-                    ##        if self.ifstack[-1].enable:
-                    ##            if prep.ifpassthru:
-                    ##                enable = True
-                    ##                raise OutputDirective(Action.IgnoreAndPassThrough)
-                    ##            if enable:
-                    ##                enable = False
-                    ##            elif not iftrigger:
-                    ##                enable = True
-                    ##                iftrigger = True
-                    ##    else:
-                    ##        self.on_error(dirtokens[0].source,dirtokens[0].lineno,"Misplaced #else")
-
-                    ##elif name == 'endif':
-                    ##    self.at_front_of_file = False
-                    ##    if self.ifstack:
-                    ##        oldifstackentry = self.ifstack.pop()
-                    ##        enable = oldifstackentry.enable
-                    ##        iftrigger = oldifstackentry.iftrigger
-                    ##        ifpassthru = oldifstackentry.ifpassthru
-                    ##        #self.writedebug("(%s:%d %s)" % (oldifstackentry.startlinetoks[0].source, oldifstackentry.startlinetoks[0].lineno, "".join([n.value for n in oldifstackentry.startlinetoks])))
-                    ##        skip_auto_pragma_once_possible_check = True
-                    ##        if oldifstackentry.rewritten:
-                    ##            raise OutputDirective(Action.IgnoreAndPassThrough)
-                    ##    else:
-                    ##        self.on_error(dirtokens[0].source,dirtokens[0].lineno,"Misplaced #endif")
-
-                    ##elif name == 'pragma' and args[0].value == 'once':
-                    ##    if enable:
-                    ##        self.include_once[self.source] = None
-
-                    ##elif name == 'line':
-
-                    ##    ...
-
-                    ##elif enable:
-                    ##    # Unknown preprocessor directive
-                    ##    output_unexpanded_line = (prep.on_directive_unknown(dirtokens[0], args, prep.ifpassthru, precedingtoks) is None)
-                    """
-
-                except OutputDirective as e:
-                    if e.action == Action.IgnoreAndPassThrough:
-                        output_unexpanded_line = True
-                    elif e.action == Action.IgnoreAndRemove:
-                        pass
-                    else:
-                        assert False
-
-            # If there is ever any non-whitespace output outside an include guard, auto pragma once is not possible
-            if not skip_auto_pragma_once_possible_check and auto_pragma_once_possible and not self.ifstack and not all_whitespace and prep.include_depth > 1:
-                auto_pragma_once_possible = False
-                prep.log.write(f"Determined that #include \"{self.filename}\" is not entirely wrapped in an include guard macro, disabling auto-applying #pragma once", token=x[-1])
-                
-            if output_and_expand_line or output_unexpanded_line:
-                if not all_whitespace:
-                    self.at_front_of_file = False
-
-                # Normal text
-                if self.ifstate.enable:
-                    if output_and_expand_line:
-                        chunk.extend(x)
-                    elif output_unexpanded_line:
-                        for tok in prep.macros.expand(chunk):
-                            yield tok
-                        chunk = []
-                        for tok in x:
-                            yield tok
-                else:
-                    # Need to extend with the same number of blank lines
-                    i = 0
-                    while i < len(x):
-                        if x[i].type not in prep.t_WS:
-                            del x[i]
-                        else:
-                            i += 1
-                    chunk.extend(x)
-
-            lastline = x
-
-        chunk = prep.macros.expand(chunk)
-        yield from chunk
-
-        for i in self.ifstack[1:]:
-            prep.on_error(i.startlinetoks[0].source, i.startlinetoks[0].lineno, "Unterminated " + "".join([n.value for n in i.startlinetoks]))
-        if auto_pragma_once_possible and self.include_guard and self.include_guard[1] == 1:
-            prep.log.write("Determined that #include \"%s\" is entirely wrapped in an include guard macro called %s, auto-applying #pragma once" % (self.source, self.include_guard[0]), token=lastline[-1])
-            #self.include_once[self.source] = self.include_guard[0]
-        elif prep.auto_pragma_once_enabled and self.filename not in prep.include_once:
-            prep.log.write(f"Did not auto apply #pragma once to this file due to auto_pragma_once_possible={auto_pragma_once_possible}, self.include_guard={self.include_guard}", token=lastline[-1])
-        my_include_time_end = clock()
-        prep.include_times[my_include_times_idx].elapsed = my_include_time_end - my_include_time_begin
-        prep.include_depth -= 1
-
-        # Tell prep.write() to resume the old source file (if any).
-        prep.currsource = self.parent
-        if self.parent:
-            prep.changed_source = True
-            yield self.parent.lexer.null()
-
-    def __repr__(self) -> str:
-        return repr(self.filename)
 
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
-
