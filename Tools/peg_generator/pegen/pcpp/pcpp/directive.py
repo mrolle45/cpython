@@ -11,9 +11,9 @@ from operator import attrgetter, methodcaller
 import traceback
 
 from pcpp.common import *
-from pcpp.tokens import Tokens, TokIter, TokenSep, tokenstrip, filt_line
+from pcpp.tokens import (Tokens, TokIter, TokenSep, TokLocMove,
+                         tokenstrip, filt_line)
 from pcpp.dircondition import FileSection
-from pcpp.writer import OutPosMove
 
 class Directive:
     """ A single directive in a source file.
@@ -55,7 +55,7 @@ class Directive:
     def __call__(self,
                  moretoks: TokIter,         # All tokens afterwards in source.
                  ifsect: Section = None,    # Current section, for conditional.
-                 ) -> Iterable[PpTok]:
+                 ) -> Iterator[PpTok]:
         self.moretoks = moretoks
         self.ifsect = ifsect or FileSection()
         # Catch OutputDirective exceptions
@@ -67,8 +67,8 @@ class Directive:
                 res = prep.on_directive_unknown(
                     self.nametok, self.args, self.ifsect.passthru,
                     self.precedingtoks)
-                # May have raised OutputDirective, which will go to the caller.
-                # Otherwise, result is either True or None.
+                # May have raised OutputDirective, which will go to the
+                # caller.  Otherwise, result is either True or None.
                 if not res:
                     raise OutputDirective(Action.IgnoreAndPassThrough)
             else:
@@ -80,21 +80,25 @@ class Directive:
                     # Did not raise OutputDirective.
                     assert self.handling in (True, None)
                 res = self.handler(self)
-                if res: yield from res
-                elif self.check_macro_args(in_args=False):
+                if self.check_macro_args(in_args=False):
                     # In a macro function call, before the opening '('.
                     # This will keep the macro from finding a '('.
-                    yield self.dirtok.make_null()
+                    yield self.dirtok.make_marker()
+                if res: yield from res
         except OutputDirective as e:
             if e.action == Action.IgnoreAndPassThrough:
-                if prep.clang:
+                if prep.lang.clang:
                     return
                 tok = self.dirtok.copy(
-                    value=str(self.line), type=prep.TokType.CPP_PASSTHRU)
+                    value=str(self.line), type=prep.TokType.CPP_GROUP)
                 yield tok
+            if e.action == Action.AbortAll:
+                pass
+                raise prep.Abort(self.dirtok, *e.args)
         except BaseException as e:
-            traceback.print_exc()
-            print("Ignoring the exception.\a")
+            raise
+            #traceback.print_exc()
+            #print("Ignoring the exception.\a")
         return None
 
     def parse(self) -> Tuple[Tokens, PpTok | None, Tokens]:
@@ -122,7 +126,7 @@ class Directive:
         args = tokenstrip(Tokens(line))
         if nametok and nametok.type.int:
             args.insert(0, nametok)
-            args[1] = args[1].with_spacing()
+            args[1] = args[1].add_spacing()
         return precedingtoks, nametok, args
 
     ### Methods for all the different directive names, in alphabetical order...
@@ -248,10 +252,10 @@ class Directive:
         #   1. Don't change anything in the Source's lexer.  It will continue
         #      to generate tokens using line numbers in the source file,
         #      regardless of any #line directives in the file.
-        #   2. Generate a location marker token.  This will reference a OutLoc
-        #      object with the presumed line number and (possibly) file name.
-        #      This will be passed on, ultimately, to the Preprocessor's
-        #      Writer.
+        #   2. Generate a location marker token.  This will reference an
+        #      OutLoc object with the presumed line number and (possibly) file
+        #      name.  This will be passed on, ultimately, to the
+        #      Preprocessor's Writer.
         #   3. The Writer will see the marker before the next token is seen,
         #      adjust its idea of the current location, and (possibly) output
         #      a line directive.
@@ -284,27 +288,27 @@ class Directive:
             filename = None
         tok: PpTok = self.nametok
         move: MoveTok = tok.make_pos(
-            OutPosMove, lineno=lineno, filename=filename)
-        lexer.move = move
-        lexer.source.set_move(move)
+            TokLocMove, dir=tok, lineno=lineno, filename=filename)
+        lexer.move = move.pos
+        lexer.source.set_move(move.pos)
         yield move
 
     def on_pragma(self) -> Iterator[PpTok]:
         prep: Preprocessor = self.prep
         if self.check_macro_args():
-            # clang doesn't suport this in a macro call.
+            # clang doesn't support this in a macro call.
             return
         if self.args[0].value == 'once':
             # Note, GCC recognizes 'once' only without macro expansion.
             if not self.ifsect.skip:
                 self.source.file.once.pragma()
-            if not prep.emulate:
+            if not prep.lang.emulate:
                 return
             # GCC writes spaces up to the 'once' arg, minus one.
             #if prep.emulate:
             #    arg = self.args[0]
             #    yield arg.copy(
-            #        type=self.TokType.CPP_PASSTHRU, value='',
+            #        type=self.TokType.CPP_GROUP, value='',
             #        colno = arg.colno - 1)
         else:
             line = self.line
@@ -314,13 +318,11 @@ class Directive:
                 line[0] = line[0].copy(loc=loc)
             for i in range(2):
                 line[i] = line[i].without_spacing()
-            if not line[2].spacing:
-                line[2] = line[2].with_spacing()
-            if prep.clang:
-                line = Tokens(prep.macros.expand(TokIter(line),
-                                                 origin=self.dirtok))
+            line[2] = line[2].add_spacing()
+            # clang won't expand, as it is being run without MS extensions.  
+
             # GCC writes "#pragma " + the args (unindented and unexpanded).
-            line[0] = line[0].with_sep(TokenSep.create(indent=line[0].loc))
+            line[0] = line[0].with_indent(line[0].loc)
 
             yield self.dirtok.make_passthru(line)
             #yield from line
@@ -375,7 +377,7 @@ class Directive:
         if not self.args:
             return (0, None)
         result, partial_expansion = self.prep.evaluator.eval(
-            self.args, origin=self.dirtok)
+            self.args, dirtok=self.dirtok)
         if partial_expansion is not None:
             # partial_expansion is the expanded expression as far as it could
             # be expanded, and no presumed result was provided.
@@ -442,35 +444,33 @@ class Directive:
     def expand_args(self) -> Iterator[PpTok]:
         """ Expands and returns self.args. """
         with self.prep.nest():
-            return self.prep.macros.expand(
-                            TokIter(self.args), origin=self.dirtok,
-                          ).strip()
+            return self.prep.macros.expand(TokIter(self.args).strip())
 
-    def in_macro_call(self, in_args: bool = False) -> MacroCall:
+    def in_macro_call(self, in_args: bool = False) -> MacroArgs | None:
         """
         The call object if currently scanning a function macro call.  Only for
         clang.
         """
-        if self.prep.clang:
-            return self.source.in_macro
+        if self.prep.lang.clang:
+            return self.dirtok.lexer.in_macro(in_args)
         return None
 
     def check_macro_args(self, in_args: bool = True) -> bool:
         """
         True if currently scanning a function macro call after the opening
-        '('.  Posts an error message if so.  Only for clang.
+        '('.  Posts an error message if so.  With in_args = False, it checks
+        for before the '(' rather than after it, and no error message.  Only
+        for clang.
         """
-        call: MacroCall = self.in_macro_call()
-        if call:
-            if in_args and call.args is not None:
-                # clang doesn't suport this in a macro call.
+        args: MacroArgs | None = self.in_macro_call(in_args)
+        if args:
+            # clang doesn't support this in a macro call.
+            if in_args:
                 self.prep.on_error_token(
                     self.line[0],
-                    f"#{self.name} directive embedded in macro call is not supported "
-                    "by clang.")
-                return True
-            if not in_args and call.args is None:
-                return True
+                    f"#{self.name} directive embedded in macro call "
+                    "is not supported by clang.")
+            return True
         return False
 
     @property
@@ -518,7 +518,7 @@ class Handler:
         if self.cond: self.dirattrs.update(cond=True)
         if self.nest: self.dirattrs.update(nest=self.nest)
 
-    def __call__(self, dir: Directive) -> Iterable[PpTok]:
+    def __call__(self, dir: Directive) -> Iterator[PpTok]:
         """ Invoke the directive processing method.
         Also given the current depth of nested Skip groups.  This filters
         out some directives and processes others.
@@ -548,7 +548,6 @@ class Handler:
         try:
             res = self.method(dir, **kwds)
             return res
-            return res and [dir.dirtok.make_passthru(res)]
 
         finally:
             if self.effect and source.once_pend:
@@ -568,7 +567,7 @@ class NullHandler(Handler):
     """ A Handler for a null (no name) directive """
     dirattrs = {}
 
-    def __call__(self, dir: Directive) -> Iterable[PpTok]:
+    def __call__(self, dir: Directive) -> Iterator[PpTok]:
         # Make this an empty iterator
         return
         #yield
@@ -608,11 +607,13 @@ handlers[''] = NullHandler('<null>')
 
 class Action(object):
     """What kind of abort processing to do in OutputDirective"""
-    # Abort processing (don't execute), but pass the directive through to output
+    # Abort processing (don't execute), but pass the directive through to
+    # output
     IgnoreAndPassThrough = 0
     # Abort processing (don't execute), and remove from output
     IgnoreAndRemove = 1
-
+    # Abort the entire translation unit.
+    AbortAll = 2
 
 class OutputDirective(Exception):
     """
@@ -620,14 +621,15 @@ class OutputDirective(Exception):
     to instead possibly output it as is into the output.
     """
 
-    # This exception is raised:
-    # An unknown directive, if on_directive_unknown() returns True.
-    # A conditional directive when the group is in a passthru state.
-    # An undefined macro in a conditional control expression.
-    # An include file name not found or malformed.
+    # This exception is raised:  
+    # An unknown directive, if on_directive_unknown() returns True.  
+    # A conditional directive when the group is in a passthru state.  
+    # An undefined macro in a conditional control expression.  
+    # An include file name not found or malformed.  
     # on_directive_handle raises (in a custom preprocessor override).
 
-    def __init__(self, action: Action):
+    def __init__(self, action: Action, *args):
         self.action = action
+        self.args = args
 
 from pcpp.dircondition import GroupState

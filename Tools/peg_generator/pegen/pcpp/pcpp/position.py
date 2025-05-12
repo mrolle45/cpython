@@ -11,8 +11,8 @@ From the Position, one can obtain
     - presumed file name
 
 Every lexed token has a different position, and so having this be an int
-reduces the memory overhead from lots of tokens.  For a token following a line
-splice, the token also carries the number of skipped splices.
+reduces the memory footprint from lots of tokens.  For a token following a
+line splice, the token also carries the number of skipped splices.
 
 Positions are allocated in a range to each Source object, with an interval of
 1 separating them.  The first Source starts at Position 1.  Any token which
@@ -31,9 +31,10 @@ from array import array
 from bisect import bisect
 
 from pcpp.common import *
+from pcpp.tokens import TokLocMoveBase, TokLocMove
 
 # Position is a number representing a position in a SourceFile's (replaced)
-# data.  Each file has its own set of Position values, which are unique over
+# data.  Each file has its own range of Position values, which are unique over
 # all files in the prep.  Values are limited to those in an unsigned long C
 # type.
 
@@ -60,32 +61,6 @@ class PosRange:
 
     def __repr__(self) -> str:
         return repr(range(self.start, self.stop))
-
-class PresumeMover:
-    """
-    A shift in line number and/or filename within a Source.  Used to get
-    output line number and filename, and __LINE__ and __FILE__ macro values.
-
-    It is associated with a sub-range of the Positions owned by the Source.
-    """
-    source: Source
-    tok: PpTok = None               # Where the move was specified, if any.
-    phys_offset: int = 0            # Add to phys line number to get output.
-    filename: str                   # Output filename.
-
-    def __init__(self, source: Source, tok: PpTok = None):
-        self.source = source
-        self.tok = tok
-        if tok:
-            self.phys_offset = tok.pos.lineno - tok.lineno - 1
-            self.filename = tok.pos.filename or source.positions.move_tab[-1].obj.filename
-        else:
-            self.phys_offset = 0
-            self.filename = source.filename
-
-    def lineno(self, line: int) -> int:
-        """ Presumed line number for actual source line number. """
-        return line + self.phys_offset
 
 
 class PosLineTab(array):
@@ -142,7 +117,13 @@ class PosTab(collections.UserList[tuple[PosRange, T]]):
     """
     Mapping from a Position to a result [T] object.  Each result has a range
     of Position's.  Ranges are increasing and non-overlapping.
+
+    Used for:
+      - PosSrcMgr's in global position space.
+      - Ranges covered by a Move in Source position space.
     """
+    last_index: int = 0
+
     @dataclasses.dataclass
     class Entry:
         pos_range: PosRange
@@ -160,7 +141,7 @@ class PosTab(collections.UserList[tuple[PosRange, T]]):
             overlap: bool = False
             ) -> None:
         """
-        Add another T value with a range of positions.  Must be
+        Add another T value with a range of Positions.  Must be
         non-overlapping and in increasing order.  Optionally, the new range
         may steal from the current last range.
         """
@@ -177,9 +158,15 @@ class PosTab(collections.UserList[tuple[PosRange, T]]):
 
     def find(self, pos: Position) -> T:
         """ Get the T object with given position in its range, or None. """
+        if not self: return None
+        entry: Entry = last_entry
+        if entry:
+            if entry.pos_range.start <= pos < entry.pos_range.stop:
+                return entry.obj
         i : int = bisect(self.starts, pos) - 1
         if i < 0: return None
-        entry: Entry = self[i]
+        self.last_index = i
+        self.last_entry = self[i]
         if pos < entry.pos_range.stop: return entry.obj
         return None
 
@@ -187,7 +174,9 @@ class PosTab(collections.UserList[tuple[PosRange, T]]):
 class PosMgr:
     """ Central manager for all Positions in existence. """
     prep: Preprocessor
+    # Lookup for a Position -> PosSrcMgr
     source_tab: PosTab[PosSrcMgr]
+    # First Position to allocate to a new Source.
     next_pos: Position
 
     def __init__(self, prep: Preprocessor):
@@ -196,13 +185,13 @@ class PosMgr:
         self.next_pos = 1
 
     def add_source(self, source: Source) -> PosSrcMgr:
-        datalen = source.lexer.lex.lexlen
+        datalen = len(source.data)
         start = self.next_pos
         stop = start + datalen
         self.next_pos = stop + 1
         pos_range = PosRange(start, stop)
         mgr = PosSrcMgr(source, pos_range, self)
-        self.source_tab.add(PosRange(start, stop), mgr)
+        self.source_tab.add(pos_range, mgr)
         return mgr
 
     def source(self, pos: Position) -> Source:
@@ -216,7 +205,7 @@ class PosSrcMgr:
     source: Source
     pos_range: PosRange
     line_tab: PosLineTab
-    move_tab: PosTab[PresumeMover]
+    move_tab: PosTab[TokLocMove]
 
     def __init__(self, source: Source, pos_range: PosRange, owner: PosMgr):
         self.source = source
@@ -224,10 +213,10 @@ class PosSrcMgr:
         self.pos_range = pos_range
 
         self.line_tab = PosLineTab(source.iterlines(pos_range.start))
-        self.move_tab = PosTab[PresumeMover]()
-        self.add_move(PresumeMover(source))
+        self.move_tab = PosTab[TokLocMove]()
+        self.add_move(TokLocMoveBase())
 
-    def add_move(self, move: PresumeMover, offset: int = 0):
+    def add_move(self, move: TokLocMove, offset: int = 0):
         """
         Assign Position range, from given offset from the beginning of the
         Source, to the end of the Source.
@@ -236,13 +225,11 @@ class PosSrcMgr:
                                    self.pos_range.stop),
                           move, overlap=True)
 
-        # Put this in the Lexer while it is delivering SrcLoc's as loc().
-        self.source.lexer.move = move
 
-def find_mover(prep: Preprocessor, pos: Position) -> PresumeMover:
+def find_mover(prep: Preprocessor, pos: Position) -> TokLocMove:
     """ Get the move object which owns the position. """
     source: Source = prep.source_pos_tab.find(pos)
-    move: PresumeMover = source.move_pos_tab.find(pos)
+    move: TokLocMove = source.move_pos_tab.find(pos)
     return move
 
 PosMgr(None)

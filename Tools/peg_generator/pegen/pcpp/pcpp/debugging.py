@@ -25,26 +25,35 @@ def brkg(state = None) -> bool:
     return glob
 
 '''
-Debugger break conditions.  These can be used to set a breakpoint, or test with
-an if statement, based on several parameters, which are defined below.  Various
-object classes have a brk() method which tests some attributes of the object.
-For example, PpTok.brk() checks a token's line number, lexer data position, and
-source file name.
+Debugger break conditions.  These can be used to set a breakpoint, or test
+with an if statement, based on several parameters, which are defined below.
+Various object classes have a brk() method which tests some attributes of the
+object.  For example, PpTok.brk() checks a token's line number, lexer data
+position, and source file name.
 
-You can define several conditions.  One condition is defined for you from the global variables shown below.  Additional conditions can be created using the add() function, which takes keyword arguments for the various criteria.
+You can define several conditions.  One condition is defined for you from the
+global variables shown below.  Additional conditions can be created using the
+add() function, which takes keyword arguments for the various criteria.
 
-A Condition is a function which tests various values (given by keywords) against corresponding Container objects.  The predefined containers are listed below.  A single value can be used in place of a container.  A string can also match any substring produced by str.split().  Hint: a range object is a container of ints.
+A Condition is a function which tests various values (given by keywords)
+against corresponding Container objects.  The predefined containers are listed
+below.  A single value can be used in place of a container.  A string can also
+match any substring produced by str.split().  Hint: a range object is a
+container of ints.
 '''
 
 # Specific line numbers, if non-empty:
-break_lines: Container[int] = (25, 26)
+break_lines: Container[int] = (111)
+#break_lines = range(116, 125)
 
 # Column number in tuple, if non-empty.
 break_cols: Container[int] = ()
+#break_cols = range(26, 43)
 
 # File name in tuple, if non-empty.  Matches the base name of given filename.
 break_files: tuple[str, ...] = ()
-#break_files += ('test.c', )
+break_files += ('test.c', )
+#break_files += ('cat.h', )
 #break_files += ('cond.h', )
 #break_files += ('defs.h', )
 #break_files += ('dummy.h', )
@@ -54,7 +63,10 @@ break_files: tuple[str, ...] = ()
 #break_files += ('outloc.h', )
 #break_files += ('sep.h', )
 #break_files += ('t.c', )
-break_files += ('x1.h', )
+#break_files += ('testgen.h', )
+#break_files += ('< top level >', )
+#break_files += ('unicode.h', )
+#break_files += ('x1.h', )
 #break_files += ('y.h', )
 
 # lexer position in container or empty tuple

@@ -13,11 +13,12 @@ import traceback
 from pcpp.common import *
 from pcpp.directive import (Directive, Action, OutputDirective)
 from pcpp.dircondition import (FileSection)
-from pcpp.tokens import Tokens, TokIter, reduce_ws
-from pcpp.position import (PosSrcMgr, PresumeMover, PosRange,
+from pcpp.tokens import Tokens, TokIter, reduce_ws, TokLocMove, TokLocMoveBase
+from pcpp.position import (PosSrcMgr, PosRange,
                            PosTab, PosLineTab)
+from pcpp.replacements import ReplStage
 from pcpp.writer import (OutLoc, OutLoc, OutPosFlag, OutPosChange,
-                         OutPosMove, OutPosEnter)
+                         OutPosEnter)
 
 clock = time.perf_counter
 
@@ -42,20 +43,9 @@ class Source:
     # Handles output locations for the Writer.                    
     outloc: OutLoc = None     
 
-    # Shifts line and filename to reflect latest #line directive, if any.
-    # This is an object for the entire Source range, or one for the most
-    # recent #line directive.
-    move: PresumeMover
-    # Table of all PresumeMover objects with their ranges of global positions.
-    move_pos_tab: PosTab[PresumeMover]
-
     # Global positions of data.
-    pos_range: PosRage
+    positions: PosSrcMgr
 
-    # Table of physical line global positions.
-    line_pos_tab: SSrcPosTab = None
-
-    in_macro: MacroCall = None  # Set while scanning macro argument list.
     exp_macro: MacroCall = None # Set while expanding the macro.
     nesting: int = 0    # Used for debug log indentation.
 
@@ -64,18 +54,14 @@ class Source:
         self.prep = prep = file.prep
         self.parent = prep.currsource
         self.filename = file.filename
-        self.move_pos_tab = PosTab()
-
-
         self.hdr_name = file.filename
         if file.once_pend:
             self.once_pend = True
             self.once = file.once
 
-    def set_move(self, movetok: MoveTok = None):
+    def set_move(self, move: TokLocMoveBase):
         lexer = self.lexer
-        move = lexer.move = PresumeMover(self, movetok)
-        self.positions.add_move(move, lexer.lex.lexpos)
+        self.positions.add_move(move, lexer.src_pos)
 
     def input(self, input: str) -> None:
         """ Sets the input data and initializes the lexer to tokenize it. """
@@ -84,38 +70,48 @@ class Source:
 
         if '\t' in input:
             tabstop = prep.tabstop
-            if tabstop and not prep.clang:
+            if tabstop and not prep.lang.clang:
                 input = input.expandtabs(tabstop)
 
         self.lexer.input(input, self)
         self.positions = prep.positions.add_source(self)
 
+    @property
+    def data(self) -> str:
+        return self.file.data
+
     def tokens(self, input: str) -> TokIter:
         """ Tokenize the input. """
         return self.lexer.tokens()
 
-    newline_re: Pattern = re.compile(r'\n')
+    # Regex for newline, possibly preceded by escape.  Group 0 is the escape
+    # and group 1 is the newline.
+    newline_re: ClassVar[Pattern]
+    newline_re = re.compile(r'([\\]?)[\n]')
 
     def iterlines(self, base: Position = 0) -> Iterator[Position]:
         """
         Generates datapos for each newline character or elided line splice in
         the data.  Optional base Position added to each datapos.
         """
-        data: str = self.lexer.data
-        data_len: int = len(data)
+        data: str = self.lexer.src_data
         m: Match
         yield base
-        repls = filter(lambda r: r.spliced, self.lexer.repls)
+        repls = (r
+                 for mgr in self.lexer.repls
+                 if mgr.stage is ReplStage.SPLICE
+                 for r in mgr)
         repl = next(repls, 0)
-        repl_pos = repl and repl.repl_pos
+        new_pos = repl and repl.new_pos
         for m in self.newline_re.finditer(data):
-            pos = m.start() + base
+            pos = m.start()
             # Look for an earlier splice replacement.
-            while 0 < repl_pos < pos:
-                yield repl.repl_pos + base
-                repl = next(repls, 0)
-                repl_pos = repl and repl.repl_pos
-            yield pos
+            #while 0 < new_pos < pos:
+            #    yield new_pos + base
+            #    repl = next(repls, 0)
+            #    new_pos = repl and repl.new_pos
+            yield pos + base
+        x = 0
 
     @TokIter.from_generator
     def parsegen(self, *, dir: PpTok = None) -> TokIter:
@@ -148,7 +144,7 @@ class Source:
         toks: TokIter = prep.macros.expand(
             self.parsegen_after_directives(prep, input),
             top=self)
-        # Bundle this in an iter token so that it doesn't go through macro
+        # Bundle this in a group token so that it doesn't go through macro
         # expansion in upstream sources.
 
         yield lex.make_passthru(toks)
@@ -200,37 +196,37 @@ class Source:
 
         # End of the source
 
-    @contextlib.contextmanager
-    def inmacro(self, call: MacroCall) -> None:
-        """
-        Declare that the consumer of the next tokens is in or preceding a
-        function macro argument list, during the context.  Some lexing,
-        notably certain directives, are handled differently.
-        """
-        old = self.in_macro
-        self.in_macro = call
-        try: yield
-        finally:
-            if not old:
-                del self.in_macro
-            else:
-                self.in_macro = old
+    #@contextlib.contextmanager
+    #def inmacro(self, call: MacroCall) -> ContextManager[None]:
+    #    """
+    #    Declare that the consumer of the next tokens is in or preceding a
+    #    function macro argument list, during the context.  Some lexing,
+    #    notably certain directives, are handled differently.
+    #    """
+    #    old = self.in_macro
+    #    self.in_macro = call
+    #    try: yield
+    #    finally:
+    #        if not old:
+    #            del self.in_macro
+    #        else:
+    #            self.in_macro = old
 
-    @contextlib.contextmanager
-    def expanding(self, call: MacroCall) -> None:
-        """
-        Declare that the given macro call is being expanded.  This will be
-        visible while emitting all expansion tokens, except in a nested macro
-        call.
-        """
-        old = self.exp_macro
-        self.exp_macro = call
-        try: yield
-        finally:
-            if not old:
-                del self.exp_macro
-            else:
-                self.exp_macro = old
+    #@contextlib.contextmanager
+    #def expanding(self, call: MacroCall) -> ContextManager[None]:
+    #    """
+    #    Declare that the given macro call is being expanded.  This will be
+    #    visible while emitting all expansion tokens, except in a nested macro
+    #    call.
+    #    """
+    #    old = self.exp_macro
+    #    self.exp_macro = call
+    #    try: yield
+    #    finally:
+    #        if not old:
+    #            del self.exp_macro
+    #        else:
+    #            self.exp_macro = old
 
     def define_guard(self, tok: PpTok) -> None:
         """ Found an actual include guard. """
@@ -252,38 +248,6 @@ class Source:
         return repr(os.path.basename(self.filename))
 
 
-class _IndirectToMacroHook(object):
-    def __init__(self, p):
-        self.prep = p.prep
-        self.partial_expansion = False
-    def __contains__(self, key):
-        #return key != 'foo'
-        return True
-    def __getitem__(self, key):
-        if key.startswith('defined('):
-            self.partial_expansion = True
-            return 0
-        repl = self.prep.on_unknown_macro_in_expr(key)
-        if repl is None:
-            self.partial_expansion = True
-            return key
-        return repl
-
-
-class _IndirectToMacroFunctionHook(object):
-    def __init__(self, p):
-        self.prep = p.prep
-        self.partial_expansion = False
-    def __contains__(self, key):
-        return True
-    def __getitem__(self, key):
-        repl = self.prep.on_unknown_macro_function_in_expr(key)
-        if repl is None:
-            self.partial_expansion = True
-            return key
-        return repl
-
-
 class SourceFile:
     """
     A unique entry in the filesystem, keyed by absolute path.  The file can be
@@ -293,27 +257,33 @@ class SourceFile:
 
     prep: Preprocessor
 
-    abspath: str                # Absolute path which uniquely identifies self.
-                                # self.prep.files[self.abspath] is self.
-    basename: str               # Base name (without directories) of the file.
-
-    filename: str               # Name in #include directive
-                                # or command line input.
-    rewritten: str              # abspath without prefix in prep.rewrite_paths.
-    hdrname: str                # Name shown when writing a #line directive,
-                                # unless superceded by a #line directive in the
-                                # source file.
-    pathdir: str              # The search path directory where file is found.
-                                # '' if not found.
-    once: IncludeOnce = None    # Whether file can be included only once, or if
-                                # the status is yet to be determined.
-                                # None or false value means no restrictions.
-    once_pend: bool = False     # Deciding whether to include only once.
-    data: str                   # Entire contents of the file.
+    # Absolute path which uniquely identifies self.
+    # self.prep.files[self.abspath] is self.
+    abspath: str
+    # Base name (without directories) of the file.
+    basename: str
+    # Name in #include directive or command line input.
+    filename: str
+    # abspath without prefix in prep.rewrite_paths.
+    rewritten: str
+    # Name shown when writing a #line directive, unless superceded by a #line
+    # directive in the source file.
+    hdrname: str
+    # The search path directory where file is found.  '' if not found.
+    pathdir: str
+    # Whether file can be included only once, or if the status is yet to be
+    # determined.  None or false value means no restrictions.
+    once: IncludeOnce = None
+    # Deciding whether to include only once.
+    once_pend: bool = False
+    # Entire contents of the file.
+    data: str
+    # String used for all line endings, "" if endings are mixed or unknown.
+    line_endings: str = ""
 
     def __init__(self, prep: Preprocessor, abspath: str,
                  pathdir: str | None, filename: str, *,
-                 file: IOBase = None, dirname:str = None, **kwds):
+                 file: IOBase = None, dirname: str = None, **kwds):
         self.prep = prep
         self.abspath = abspath
         self.filename = filename
@@ -322,9 +292,14 @@ class SourceFile:
         if file is None:
             # Name comes from an #include.
             if pathdir is not None:
-                with open(abspath, encoding=prep.input_encoding or 'utf-8'
-                          ) as f:
-                    data = f.read()
+                try:
+                    with open(abspath, encoding=prep.input_encoding or 'utf-8'
+                             ) as f:
+                        data = f.read()
+                        self.get_line_endings(f)
+                except FileNotFoundError:
+                    self.pathdir = None
+                    data = ''
             else:
                 data = ''
         else:
@@ -336,6 +311,7 @@ class SourceFile:
             data = file.read()
             if isinstance(data, bytes):
                 data = data.decode()
+            self.get_line_endings(file)
 
         rewritten = filename
         if abspath:
@@ -351,11 +327,10 @@ class SourceFile:
         # With clang,
         #   The top file is only the basename.
         #   Other file is the filename with fix path sep.
-        if prep.clang:
+        if prep.lang.clang:
             if prep.sources_active.depth > 1:
                 if pathdir:
                     self.filename = os.path.join(self.pathdir, self.filename)
-
 
         self.data = data
         self.once = IncludeOnce(self)
@@ -426,6 +401,13 @@ class SourceFile:
             if abspath:
                 return abspath, pathdir
         return os.path.abspath(filename), ""
+
+    def get_line_endings(self, file: IOBase) -> None:
+        """ self.line_endings = line endings for the file. """
+        try: self.line_endings = file.newlines
+        except AttributeError: return
+        if not isinstance(self.line_endings, str):
+            del self.line_endings
 
     def __repr__(self) -> str:
         return f"<File \"{self.filename}\""

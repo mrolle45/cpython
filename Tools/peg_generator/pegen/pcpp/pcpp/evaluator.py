@@ -14,9 +14,10 @@ if __name__ == '__main__' and __package__ is None:
     sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
 from pcpp.common import *
 from pcpp.directive import OutputDirective
-from pcpp.lexer import default_lexer
 from pcpp.parser import yacc
+from pcpp.escape import escapes, Escape, EscapeDiag
 from pcpp.tokens import Tokens, TokIter
+from pcpp.replacements import ReplStage
 
 # The width of signed integer which this evaluator will use
 INTMAXBITS = 64
@@ -516,58 +517,80 @@ class EvalParser:
 
     def p_expression_character(
             self, p: YaccProduction, *,
-            _max = dict(u=0xffff, u8=0xff, U=0xffffffff, L=1<<64-1, dflt=0xff),
+            _max = dict(u=0xffff, u8=0x7f, U=0xffffffff, L=(1<<64)-1,
+                        dflt=0x7f),
             ):
         '''expression : CPP_EXPRCHAR
-                        | CPP_CHAR
+                      | CPP_CHAR
                         '''
+        # Unicode escapes have been replaced with the codepoint character.
         # Process the token's string value and char size.
         tok: PpTok = p.slice[1]
-        m: re.Match = tok.match
-        val = m.group('val')
-        pfx = m.group('pfx')
+        parts = tok.value.split("'")
+        pfx, val = parts[0], parts[-2]
+        prep = self.prep
+        lang = prep.lang
+
         # GCC with c++14 doesn't recognize the u8 prefix.
 
-        maxnum = pfx and _max[pfx] or 0xffffffff
-        text = codecs.decode(val, 'unicode-escape')
+        esc = escapes(lang)
+        chars: list[int]
+        try:
+            chars = list(esc.char_eval_iter(val, tok))
 
-        if not text:
-            self.prep.on_error_token(
-                tok,
-                f'Empty character constant in control expression: {text!r}.'
-                )
-            if self.prep.clang:
-                p[0] = Value(0, exception=SyntaxError())
+            maxnum = _max[pfx or 'dflt']
+
+            if not chars:
+                msg = f'Empty character constant in control expression: {val!r}.'
+                prep.on_error_token(tok, msg)
+                if self.set_exception(p, msg):
+                    return
+                num = 0
+            elif tok.repl_err:
+                msg = (f'Invalid char constant in control expression: '
+                       f'{pfx}{val!r}.')
+                prep.on_error_token(tok, msg)
+                if self.set_exception(p, msg):
+                    return
+            elif len(chars) != 1 and not pfx:
+                msg = (f'Multi-character char constant in control expression: '
+                       f'{val!r}.')
+                prep.on_warn_token(tok, msg)
+                # Plain '...' assembles up to 4 trailing bytes from the value.
+                num = 0
+                for c in chars[-4:]:
+                    num = (num << 8) + c
+                    #num = (num << 8) + ord(c)
+            elif len(chars) != 1 and pfx:
+                msg = (f'Multi-character char constant in control expression: '
+                       f'{pfx}{val!r}.')
+                prep.on_error_token(tok, msg)
+                if self.set_exception(p, msg):
+                    return
+                # Sized '...' uses only the last character.
+                num = chars[-1]
+                #num = ord(val[-1])
+            else:
+                num = chars[0]
+                #num = int(ord(val))
+            # Possible truncation.
+            if num > maxnum and (pfx or len(chars) == 1):
+                num &= maxnum
+                if len(chars) == 1:
+                    msg = ('Character constant too long for its type '
+                           'in control expression.')
+                    prep.on_error_token(tok, f'{msg}: {val!r}')
+                    if self.set_exception(p, msg):
+                        return
+
+        except EscapeDiag as e:
+            # The value contains an invalid escape somewhere.
+            msg = (f'Invalid escape in char constant in control expression: '
+                   f'{tok.value!r}.')
+            #prep.on_error_token(tok, e)
+            if self.set_exception(p, msg):
                 return
             num = 0
-        elif len(text) != 1 and not pfx:
-            msg = (f'Multi-character char constant in control expression: '
-                   f'{text!r}.')
-            self.prep.on_warn_token(tok, msg)
-            num = 0
-            # Plain '...' assembles up to 4 trailing bytes from the value.
-            for c in text[-4:]:
-                num = (num << 8) + ord(c)
-        elif len(text) != 1 and pfx:
-            msg = (f'Multi-character char constant in control expression: '
-                   f'{pfx}{text!r}.')
-            self.prep.on_error_token(tok, msg)
-            if self.prep.clang:
-                p[0] = Value(0, exception=SyntaxError(msg))
-                return
-            # Sized '...' uses only the last character.
-            num = ord(text[-1])
-        else:
-            num = int(ord(text))
-        # Possible truncation.
-        if num > maxnum:
-            num &= maxnum
-            if len(text) == 1:
-                self.prep.on_error_token(
-                    tok,
-                    f'Character constant too long for its type '
-                    f'n control expression: {text!r}.'
-                    )
 
         p[0] = Value(num)
 
@@ -698,6 +721,12 @@ class EvalParser:
         except Exception as e:
             p[0] = Value(0, exception = e)
 
+    def set_exception(self, p: YaccProduction, msg: str) -> bool:
+        if self.prep.lang.clang:
+            p[0] = Value(0, exception=SyntaxError(msg))
+            return True
+        return False
+
 class EvalExpr:
     """ This is a callable object which will evaluate a control expression.
     """
@@ -707,18 +736,18 @@ class EvalExpr:
         self.evalvars = self.IndirectToMacroHook(self)
         self.evalfuncts = self.IndirectToMacroFunctionHook(self)
 
-    def __call__(self, intoks: Tokens, origin: PpTok
+    def __call__(self, intoks: Tokens, dirtok: PpTok
                  ) -> Tuple[bool, Tokens | None]:
         """ Evaluate expression in given tokens, taken from the directive.
         Result is either True or False.  If False, there may be some tokens to
         be passed through.  Can also raise OutputDirective.
         """
 
-        self.origin = origin
+        self.dirtok = dirtok
         self.partial_expansion = False
 
         self.initer = TokIter(intoks)
-        exptoks: TokIter = self.prep.macros.expand(self.initer, origin=origin)
+        exptoks: TokIter = self.prep.macros.expand(self.initer)
         try:
             repltoks = Tokens(self.replacements(exptoks))
             # Call the yacc parser.
@@ -753,7 +782,7 @@ class EvalExpr:
             if tok.value == 'defined':
                 if tok.hide:
                     self.prep.on_warn_token(
-                        self.origin,
+                        self.dirtok,
                         "Macro expansion of control expression "
                         "contains 'defined'.  "
                         )

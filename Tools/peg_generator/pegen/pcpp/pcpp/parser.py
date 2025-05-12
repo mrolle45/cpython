@@ -87,9 +87,14 @@ class PreprocessorHooks(object):
                     )
         else:
             msg = f"Include file {includepath!r} not found"
+        # Example of returning an alternate directory for path search.
+        #newpath = "foo"
+        #path_retry = self.path_retry
+        #if newpath not in path_retry:
+        #    return newpath
         self._error_msg(self.lastdirective.source, msg,
                         self.lastdirective.lineno)
-        raise OutputDirective(Action.IgnoreAndPassThrough)
+        raise OutputDirective(Action.AbortAll, msg)
         
     def on_unknown_macro_in_defined_expr(self,tok):
         """Called when an expression passed to an #if contained a 'defined'

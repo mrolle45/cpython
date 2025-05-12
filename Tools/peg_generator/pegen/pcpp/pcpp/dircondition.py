@@ -142,7 +142,7 @@ class Section(abc.ABC):
         return self.state in (SectionState.Active, SectionState.Closed)
 
     @TokIter.from_generator
-    def parsegen(self, source: Source, toks: TokIter) -> Iterable[PpTok]:
+    def parsegen(self, source: Source, toks: TokIter) -> Iterator[PpTok]:
         """ Generate all tokens in this Section, consuming the input tokens.
         Nested Sections consume their own input tokens and generate their own
         tokens.

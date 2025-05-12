@@ -67,20 +67,7 @@ class CmdPreprocessor(Preprocessor):
             raise Exception("Cannot have both --gcc and --clang.")
 
         self.verbose = args.v
-        if args.cplusplus:
-            self.cplus_ver = args.cplusplus + 2000
-
-        if args.c_ver:
-            self.c_ver = {
-                                99: 1999,
-                                11: 2011,
-                                17: 2017,
-                                23: 2023,
-                                }[args.c_ver]
-
-        self.clang = args.clang
-        self.gcc = args.gcc
-        self.comments = args.passthru_comments
+        self.lang = lang = self.Language(self, args)
         self.debug = args.debug
         self.diag = args.diag
         if args.tabstop: self.tabstop = args.tabstop
@@ -148,13 +135,13 @@ class CmdPreprocessor(Preprocessor):
 
         msg = (f"Preprocessing "
                f"{' + '.join(repr(f.name) for f in args.inputs)}")
-        if self.cplus_ver:
-            msg += f" as C++ {self.cplus_ver % 100}."
+        if lang.cplus_ver:
+            msg += f" as C++ {lang.cplus_ver % 100}."
         else:
-            msg += f" as C {self.c_ver % 100}."
-        if self.emulate:
-            msg += (f"  Emulate {'GCC, CLANG'.split()[bool(self.clang)]}"
-                    f" version {self.emulate}"
+            msg += f" as C {lang.c_ver % 100}."
+        if lang.emulate:
+            msg += (f"  Emulate {'GCC, CLANG'.split()[bool(lang.clang)]}"
+                    f" version {lang.emulate}"
                     f"{' with GNU extensions' * bool(args.gnu)}"
                     ".")
         print(msg)
@@ -168,6 +155,11 @@ class CmdPreprocessor(Preprocessor):
                 self.startup_line(f'#include "{i.name}"')
                 SourceFile.openfile(i, self)
             self.write(self.parse(), args.output)
+        except self.Abort as e:
+            msg, tok = e.args
+            self.on_error_token(tok, 'Aborting.')
+            print(f'Fatal error: {msg}')
+            raise
         except:
             print(traceback.print_exc(10), file=sys.stderr)
             print("\nINTERNAL PREPROCESSOR ERROR AT AROUND "
@@ -244,7 +236,12 @@ class CmdPreprocessor(Preprocessor):
 
     def write(self, toks: TokIter, oh=sys.stdout):
         writer = Writer(self)
-        writer.write(toks, oh)
+        try:
+            writer.write(toks, oh)
+        except Exception as e:
+            #traceback.print_exc()
+
+            raise
         return
 
     def make_args(self, argv) -> tuple[Namespace, list[str]]:
@@ -325,8 +322,8 @@ class CmdPreprocessor(Preprocessor):
         addg('--passthru-comments', dest='passthru_comments',
              action='store_true',
              help='''
-                Pass through comments unmodified. But with GCC emulation,
-                (1) they are NOT whitespace, and (2) C++-style comments in a macro
+                Pass through comments unmodified. But with GCC emulation, (1)
+                they are NOT whitespace, and (2) C++-style comments in a macro
                 replacement are converted to C-style comments.
                 ''',
              )
@@ -403,7 +400,7 @@ class CmdPreprocessor(Preprocessor):
         addg = self.add_arg_group_func(
             argp, 'external tool emulation',
             '''
-            Make output similar to "gcc -E" "clang -E".,
+            Make output similar to "gcc -E" or "clang -E".,
             ''',
             )
         addg('--gcc', dest='gcc', nargs='?', const=10, type=int,
@@ -427,7 +424,7 @@ class CmdPreprocessor(Preprocessor):
                 ''')
         add('--trigraphs', dest='trigraphs', action=BooleanOptionalAction,
             help='''
-                Process trigraphs. Default if --gcc or if --c++ < 17.
+                Process trigraphs. Default if --gcc or if --c++ < 14.
                 Defines __PCPP_TRIGRAPHS__ = 1.
                 ''',
             )
@@ -556,7 +553,7 @@ class CmdPreprocessor(Preprocessor):
         return super().on_potential_include_guard(macro)
 
     def on_comment(self,tok):
-        if self.comments:
+        if self.lang.comments:
             return True  # Pass through
         return super().on_comment(tok)
 
@@ -620,6 +617,8 @@ def main(exit: bool = True):
         p.finish()
         if exit:
             sys.exit(p.return_code)
+    except Preprocessor.Abort:
+        pass
     except Exception as e:
         traceback.print_exc()
 

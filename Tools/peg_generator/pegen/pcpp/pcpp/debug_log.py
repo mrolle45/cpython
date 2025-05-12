@@ -8,11 +8,10 @@ import os
 from operator import attrgetter
 
 from pcpp.common import *
-from pcpp.tokens import split_lines
 
 __all__ = 'DebugLog',
 
-break_lines = [246]            # Put line number(s) within the log file,
+break_lines = [2431]            # Put line number(s) within the log file,
                             # to hit a debug breakpoint.
 
 # ----------------------------------------------------------------------
@@ -27,21 +26,23 @@ class DebugLog:
         self.nest = prep.nest
         self.enable: int = prep.debug
         self.loglines = []
+        self.leftwidth = 0
         self.wrapper = textwrap.TextWrapper(width=80)
         #self.file = open(self.enable + '2', "wt")
 
     def arg(self, name: str, arg: str, ref: PpTok, **kwds) -> None:
         if not self.enable: return
         val = str(arg).strip()
-        self.write(f"Arg {name} = {arg!r}", token=ref, **kwds)
+        self.write(f"Arg {name} = ‘{arg}’", token=ref, **kwds)
 
     def concatenate(self, pasted: PpTok | None,
                     *opnds: PpTok, **kwds
                     ) -> None:
         if not self.enable: return
         expr = ' ## '.join(map(repr, map(attrgetter('value'), opnds)))
+        expr = ' ## '.join(f"‘{opnd.value}’" for opnd in opnds)
         if pasted:
-            self.write(f"Concatenate {expr} -> {pasted.value!r}",
+            self.write(f"Concatenate {expr} -> ‘{pasted.value}’",
                        token=pasted, **kwds)
         else:
             self.write(f"Concatenate {expr} FAILED", **kwds)
@@ -87,11 +88,10 @@ class DebugLog:
                     self.write(f"While expanding {', '.join(expanding_from)}",
                                token=ref, **kwds)
                 if is_func:
-                    for i, name in enumerate(macro.arglist):
-                        if i < macro.nargs:
-                            self.arg(name, str(call.args[i]), ref)
+                    for i, name in enumerate(macro.param_names):
+                        self.arg(name, str(call.args[i]), ref)
                 if macro:
-                    self.write(f"Replacement = {str(macro.value)!r}",
+                    self.write(f"Replacement = ‘{str(macro.value)}’",
                                token=macro.nametok, **kwds)
 
     def eval_ctrl(self, ref: PpTok) -> None:
@@ -107,7 +107,7 @@ class DebugLog:
 
     def stringize(self, name: str, string: str, ref: PpTok, **kwds) -> None:
         if not self.enable: return
-        self.write(f"Stringize # {name} = {string.value}", token=ref, **kwds)
+        self.write(f"Stringize # {name} = ‘{string}’", token=ref, **kwds)
 
     def write(self, text: str, *, indent = 0, nest: int = 0,
               token = None,
@@ -150,6 +150,7 @@ class DebugLog:
             f"{'| ' * (prep.nesting + nest)}"
             )
         wrapper.subsequent_indent = wrapper.initial_indent + '... '
+        self.leftwidth = max(self.leftwidth, len(left))
         for line in text.splitlines():
             if not line.strip(): continue
             for line2 in wrapper.wrap(line):
@@ -157,7 +158,8 @@ class DebugLog:
                     left,
                     f"{line2}")
                     )
-                #print(left, line2, file=self.file)
+                if 0x0000:
+                    print("%-*s %s" % (self.leftwidth, left, line2))
                 left = ''
             wrapper.indent = wrapper.subsequent_indent
             more = "... "
@@ -172,8 +174,8 @@ class DebugLog:
                     lefts, _ = zip(*self.loglines)
                     leftwidth = max(len(s) for s in lefts)
                     for left, right in self.loglines:
-
-                        print("%-*s %s" % (leftwidth, left, right), file=file)
+                        print("%-*s %s"
+                              % (self.leftwidth, left, right), file=file)
 
     def brk(self) -> bool:
         """ Put this in a breakpoint condition to break on any line

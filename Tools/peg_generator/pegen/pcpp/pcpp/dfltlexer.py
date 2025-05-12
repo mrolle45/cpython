@@ -60,7 +60,10 @@ FuncRule = Callable[[RawLexer, LexToken], LexToken]
 Rule = Union[StrRule, FuncRule]
 
 def default_lexer(prep: Preprocessor) -> PpLex:
-    return LexerFactory.create(prep)
+    lexer: PpLex = LexerFactory(prep).create()
+    pasting: PpLex = LexerFactory(prep, pasting=True).create(pasting=True)
+    lexer.pasting = pasting
+    return lexer
 
 class LexerFactory:
     """
@@ -69,30 +72,83 @@ class LexerFactory:
     lexing rules are methods.
     """
 
-    # Some attributes are independent of the prep, so they can be specified here directly.
+    # All possible token names.  Some of these might not be used in a
+    # particular instance.
+    tokens: list[str]
 
-    tokens: list[str] = type_names
+    # All possible state names
+    states: list[str]
 
-    states = [
-        ('DIRECTIVE', 'inclusive'),
-        ('INCLUDE', 'inclusive'),
-        ('DEFINE', 'inclusive'),        # In #define directive
-        ('OBJREPL', 'inclusive'),       # In #define after object macro name
-        ('FUNCREPL', 'inclusive'),      # In #define after function macro name
-        ('CONTROL', 'inclusive'),
-    ]
+    # Mapping of a punctuator value to the name(s) of its token.
+    punct_values: Mapping[str, list[str]]
 
-    # Mapping of a punctuator value to the name of its token.
-    punct_values: Mapping[str, str] = {}
+    # Regular expressions used.
+    REs: RegExes
 
-    t_CPP_ID = r'\+'
+    # An enumeration type for tokens.
+    TokType: type
+
+    # The name of the lextab module created while creating the lexer.
+    lextab: str
+
+    def __init__(self, prep: Preprocessor, pasting: bool = False):
+        """
+        Construct to match the language of the Preprocessor, with option to
+        customize it for lexing pasted values.
+        """
+        self.prep = prep
+        self.lang = lang = prep.lang
+        self.tokens = type_names
+        self.states = [
+            ('DIRECTIVE', 'inclusive'),
+            ('INCLUDE', 'inclusive'),
+            ('DEFINE', 'inclusive'),        # In #define directive
+            ('OBJREPL', 'inclusive'),       # In #define after object macro name
+            ('FUNCREPL', 'inclusive'),      # In #define after function macro name
+            ('CONTROL', 'inclusive'),
+        ]
+        self.punct_values = collections.defaultdict(list)
+        if pasting:
+            self.REs = REs = prep.lang.REs_pasting
+        else:
+            self.REs = REs = prep.lang.REs
+
+        # Set up the necessary class attributes.
+        self.rules()
+
+        # create or reuse the TokType enumeration.
+        if pasting:
+            TokType = prep.TokType
+        else:
+            TokType = make_TokType(prep, REs, self.punct_values)
+
+        prep.TokType = self.TokType = TokType
+
+        # We need to have the lextab module name be specific to the same
+        # parameters that govern the content of the lexer, i.e.,
+        # 
+        # lang.cplus_ver selects C or C++ as the language, standard version
+        # doesn't matter.  C++ enables the extra punctuators
+        #
+        # prep.emulate includes ` @ and $ as literals..
+        #
+        # prep.gnu enables R-strings for all languages.
+        lextab = f"""\
+            lextab\
+            {'-c -cplusplus'.split()[bool(lang.cplus_ver)]}\
+            {'-clang' * bool(lang.clang)}\
+            {'-gcc' * bool(lang.gcc)}\
+            {'-gnu' * bool(lang.gnu)}\
+            """
+        self.lextab = lextab.replace(' ', '')
+
 
     # Rules and helper methods to create them.  Every Rule is stored in
-    # cls.t_(state_)*token.  Types of Rules, in the order tested by the lexer:
-    # - Proxy FuncRule.  Created by makeproxy() for a rule with just a regex
-    #   and no function, to place it first in the order.
-    # - Other FuncRule.  Created with decorator @funcrule(regex, rulename).
-    # - Plain StrRule.  Created by assignment cls.rulename = regex.
+    # self.t_(state_)*token.  Types of Rules, in the order tested by the
+    # lexer:
+    # - FuncRule.  Created with decorator @funcrule(regex, rulename).
+    # - StrRule.  Created by assignment self.rulename = regex, or by
+    #   plainrule().
 
     class RuleName:
         """
@@ -105,8 +161,6 @@ class LexerFactory:
                 token = token[2:]
             self.token = token
             self.states = [s for state in states for s in state.split('_')]
-
-
 
         def __repr__(self) -> str:
             return '_'.join(('t', *self.states, self.token))
@@ -126,12 +180,10 @@ class LexerFactory:
                     break
             return cls('_'.join(parts[i:]), *parts[:i])
 
-    @classmethod
-    def add_rule(cls, name: RuleName, rule: Rule) -> None:
-        setattr(cls, name, rule)
+    def add_rule(self, name: RuleName, rule: Rule) -> None:
+        setattr(self, name, rule)
 
-    @classmethod
-    def funcrule(cls, regex: str, name: str = None
+    def funcrule(self, regex: str, name: str = None
                  ) -> Callable[[FuncRule], FuncRule]:
         """
         Decorator for a function f(t: LexToken) -> Lextoken.  This creates ALL
@@ -139,7 +191,8 @@ class LexerFactory:
         Lexer will apply the regexes in alphabetical order of rule name.
         """
         def func(f: FuncRule) -> FuncRule:
-            def proxy(self, t: LexToken) -> LexToken:
+            def proxy(t: LexToken) -> LexToken:
+            #def proxy(self, t: LexToken) -> LexToken:
                 return f(t)
 
             proxy.regex = regex
@@ -148,45 +201,43 @@ class LexerFactory:
             else:
                 fname = f.__name__
             proxy.__name__ = fname
-            cls.add_rule(fname, proxy)
+            self.add_rule(fname, proxy)
         return func
 
-    @classmethod
-    def makefunc(cls, regex: str, token: str) -> None:
+    def makefunc(self, regex: str, token: str) -> None:
         """
         Creates a function t_{token} with regex and returning its argument.
         This is stored in cls.{name}.
         """
-        @cls.funcrule(regex, f't_{token}')
+        @self.funcrule(regex, f't_{token}')
         def f(t: LexToken):
             return t
 
-    @classmethod
-    def puncs(cls) -> None:
+    def puncs(self) -> None:
         """
         Creates the subset of lexing rules which are for punctuator tokens.  A
         punctuator is any token which has a single specific value.
         """
-        prep = cls.prep
+        lang = self.lang
 
         # Helpers which create the rules for various ways of specifying them.
 
         # All token values that are restricted to C++.
         cplusplus_values = set('''
-            .* -.* <=> :: 
+            .* ->* <=> :: 
             and and_eq bitand bitor compl not not_eq or or_eq xor xor_eq'''
             .split())
 
         def cplusplus_filt(value: str) -> bool:
             """ Is the value valid based on prep c++ flag? """
             if value in cplusplus_values:
-                return cls.prep.cplus_ver
+                return self.lang.cplus_ver
             else:
                 return True
 
         def makeproxy(regex: str, name: str, proxy: FuncRule) -> None:
-            """ Create a rule cls.{name} which calls proxy(). """
-            @cls.funcrule(regex, name)
+            """ Create a rule self.{name} which calls proxy(). """
+            @self.funcrule(regex, name)
             def f(t: LexToken) -> LexToken:
                 return proxy(t)
 
@@ -203,8 +254,8 @@ class LexerFactory:
             return func
 
         def plainrule(regex: str, name: str) -> None:
-            """ Creates a string-valued rule in cls.t_{name}. """
-            cls.add_rule(f'{name}', regex)
+            """ Creates a string-valued rule in self.t_{name}. """
+            self.add_rule(f'{name}', regex)
 
         def punc(token: str, *values: str, func: bool = False,
                  proxy: FuncRule = None, state: str = '',
@@ -214,8 +265,8 @@ class LexerFactory:
             C++ values are included only if --c++ on command line.  Any values
             after the first value become separate rules with different names.
 
-            cls.punct_values will map the value to the token name.
-            cls.t_{token} or cls.t_{state}_{token} will be the actual rule.
+            self.punct_values will map the value to the token name(s).
+            self.t_{token} or self.t_{state}_{token} will be the actual rule.
             """
             if state: state += '_'
             for i, value in enumerate(filter(cplusplus_filt, values)):
@@ -225,17 +276,17 @@ class LexerFactory:
                         token = f"CXX_{value.upper()}"
                     else:
                         token = f"CPP_ALT_{token[4:]}"
-                assert token in cls.tokens, f"Token name {token} unknown."
+                assert token in self.tokens, f"Token name {token} unknown."
                 # The name of the rule in the lexer.
                 name = f"t_{state}{token}"
                 regex = re.escape(value)
                 if proxy:
                     makeproxy(regex, name, proxy)
                 elif func:
-                    cls.makefunc(regex, name[2:])
+                    self.makefunc(regex, name[2:])
                 else:
                     plainrule(regex, name)
-                cls.punct_values[value] = token
+                self.punct_values[value].append(token)
 
         # Arithmetic operators
         punc('CPP_PLUS',            '+')
@@ -249,9 +300,8 @@ class LexerFactory:
         punc('CPP_RSHIFT',          '>>')
 
         # Logical operators
-        #   Place && and || before & and |
-        punc('CPP_LOGICALAND',      '&&',   'and',    func=True)
-        punc('CPP_LOGICALOR',       '||',   'or',     func=True)
+        punc('CPP_LOGICALAND',      '&&',   'and')
+        punc('CPP_LOGICALOR',       '||',   'or')
         punc('CPP_EXCLAMATION',     '!',    'not')
 
         # bitwise operators
@@ -322,6 +372,7 @@ class LexerFactory:
             except AttributeError: pass
             return t
 
+        self.punct_values['#'].append('CPP_DIRECTIVE')
         # '##' is special in any macro definition.  '#' is special only in
         # function macro.
         punc('CPP_PASTE',           '##', '%:%:',   state='FUNCREPL_OBJREPL')
@@ -332,35 +383,36 @@ class LexerFactory:
         punc('CPP_ELLIPSIS',        '...')
 
         # Single-characters not in the source character set (valid in GCC).
-        if prep.emulate:
+        if lang.emulate:
             punc('CPP_DOLLAR',      '$')
             punc('CPP_AT',          '@')
             punc('CPP_GRAVE',       '`')
 
-    @classmethod
-    def rules(cls) -> None:
+        punc('CPP_DELTA', r'\u03b4')
+
+    def rules(self) -> None:
         """ Create all the lexer rules as class attributes. """
-        prep = cls.prep
-        REs = cls.REs
+        lang = self.lang
+        REs = self.REs
 
         # Whitespace, one or more consecutive whitespace character(s) 
-        # other than newline.
-        cls.t_ANY_CPP_WS = r'((?!\n)\s)+'
+        # other than newline.  ASCII only, no unicode.
+        self.t_ANY_CPP_WS = r'((?a)(?!\n)\s)+'
 
         # Special newline in a directive.  Returns to INITIAL state.
 
         # Place before the newline rule below!
         # A newline in any state other than INITIAL returns to INITIAL.
-        @cls.funcrule(REs.newline)
+        @self.funcrule(REs.newline)
         def t_DIRECTIVE_INCLUDE_DEFINE_OBJREPL_FUNCREPL_CONTROL_CPP_NEWLINE(t):
             t.lexer.begin('INITIAL')
             return t
 
         # Newline, other than in a directive.
-        cls.makefunc(REs.newline, 'INITIAL_CPP_NEWLINE')
+        self.makefunc(REs.newline, 'INITIAL_CPP_NEWLINE')
 
         # Certain directive names.
-        @cls.funcrule(r'[A-Za-z_][\w_]*')
+        @self.funcrule(r'[A-Za-z_][\w_]*')
         def t_DIRECTIVE_CPP_ID(t):
             
             if t.value == 'include':
@@ -373,80 +425,107 @@ class LexerFactory:
                 t.lexer.begin('INITIAL')
             return t
 
-        # Identifier 
-        cls.t_CPP_ID = REs.ident
-
-        # Object and function macro identifiers.  
-        # CPP_FUNC_MACRO is the macro name, if followed immediately by '('.
-        # CPP_OBJ_MACRO is the macro name, otherwise.
-        @cls.funcrule(rf'{REs.ident}(?=\()')
-        def t_DEFINE_CPP_FUNC_MACRO(t):
-            t.type = 'CPP_FUNC_MACRO'
-            t.lexer.begin('FUNCREPL')
-            return t
-        # Place this AFTER FUNC_MACRO!
-        @cls.funcrule(REs.ident)
-        def t_DEFINE_CPP_OBJ_MACRO(t):      
-            t.type = 'CPP_OBJ_MACRO'
-            t.lexer.begin('OBJREPL')
-            return t
-
-        ## Paste operator ('##') in a macro definition only.  Place before
-        ## punctuator rules.
-        #cls.makefunc(re.escape('##'), 'MACREPL_CPP_PASTE', )
-        #cls.makefunc('%:%:', 'MACREPL_CPP_ALT_PASTE', )
-        ##t_MACREPL_CPP_ALT_PASTE = '%:%:'
-
-        ## Stringize operator ('#') in a macro definition only.  Place before
-        ## punctuator rules and after ##.
-        #cls.makefunc(re.escape('#'), 'MACREPL_CPP_MKSTR', )
-        #cls.makefunc('%:', 'MACREPL_CPP_ALT_MKSTR', )
-        ##t_MACREPL_CPP_ALT_MKSTR = '%:'
-
         # Floating literal.  Put these before integer.
-        cls.makefunc(REs.float, 'CPP_FLOAT', )
-        cls.makefunc(REs.dotfloat, 'CPP_DOT_FLOAT', )
+        self.makefunc(REs.float, 'CPP_FLOAT', )
+        self.makefunc(REs.dotfloat, 'CPP_DOT_FLOAT', )
 
         # Integer constant 
-        cls.makefunc(REs.int, 'CPP_INTEGER', )
+        self.makefunc(REs.int, 'CPP_INTEGER', )
 
         # General pp-number, other than integer or float constant.  (C99
         # 6.4.8, C++14 5.9).  Put this after integer and float.
-        @cls.funcrule(REs.ppnum)
+        @self.funcrule(REs.ppnum)
         def t_CPP_NUMBER(t):
             message = f'Illegal preprocessing number: {t.value}'
-            return cls.error(t, message, warn=True, keep_type=True)
+            return self.error(t, message, warn=True, keep_type=True)
 
-        # String literal.  # Terminating " required on same logical line.
-        cls.t_CPP_STRING = REs.string
+        # Char and String tokens with a prefix could also lex as an ident.
+        # They need to be functions so as to come before identifiers.
+
+        # String literal.  
+        # Terminating " required on same logical line.
+        self.makefunc(REs.string, 'CPP_STRING')
 
         # Raw string literal.  
-        # Terminating matching delimiter required, possibly on later logical line.
-        # Only tokenized if C++ or (C with GNU extensions).
+        # Terminating matching delimiter required, possibly on later logical
+        # line.  Only tokenized if C++ or (GCC with GNU extensions) or clang.
 
-        if prep.cplus_ver or prep.emulate:
-            cls.t_CPP_RSTRING = REs.rstring
+        if lang.cplus_ver or lang.emulate:
+            self.makefunc(REs.rstring, 'CPP_RSTRING')
 
         # h-type and q-type header names.  Only used in INCLUDE state.  
         # Note, some things in these names are undefined behavior (C99 6.4.7),
         # and this is checked in the preprocessor.include() method.
 
-        cls.t_INCLUDE_CPP_H_HDR_NAME = REs.hhdrname
-        cls.t_INCLUDE_CPP_Q_HDR_NAME = REs.qhdrname
+        self.t_INCLUDE_CPP_H_HDR_NAME = REs.hhdrname
+        self.t_INCLUDE_CPP_Q_HDR_NAME = REs.qhdrname
 
-        # Character constant (L|U|u|u8)?'cchar*'.  # Terminating ' required.
-        cls.t_CPP_CHAR = REs.char
+        ## Character constant (L|U|u|u8)?'cchar*', within a CONTROL expression.  
+        ## Terminating ' required.  yacc evaluates this differently.
+        self.makefunc(REs.char, 'CONTROL_CPP_EXPRCHAR')
 
-        # Same, within a CONTROL expression.  yacc evaluates this differently.
-        cls.t_CONTROL_CPP_EXPRCHAR = REs.char
+        # Character constant (L|U|u|u8)?'cchar*'ud_sfx?.  
+        # Terminating ' required.
+        self.makefunc(REs.char, 'CPP_CHAR')
 
-        # Block comment (C), possibly spanning multiple lines.  
-        cls.t_CPP_COMMENT1 = r'(/\*(.|\n)*?\*/)'
+        # Identifier.  Place this after string and char literals.
+        # The RE only matches up to the first codepoint, which may or may not
+        # be valid.
+        @self.funcrule(REs.identifier)
+        def t_CPP_ID(t: Token) -> Token:
+            m = t.lexer.lexmatch
+            groups = m.group('unistart', 'cont')
+            if any(groups):
+                # Contains a codepoint.
+                import pcpp.unicode as uni
+                #u = uni.Uni(self.lang)
+                uni.ident(self.lang, *groups, t, m)
+                #if u.ident_start(m):
+                #    if m.group('cont'):
+                #        u.ident_cont(t, m)
+                #else:
+                #    u.ident_trunc_start(t, m)
+                #    return self.error(t, f"Illegal character {t.value!r}")
+            #elif m.group('cont'):
+            #    # One or more ascii chars followed by a codepoint.
+            #    import pcpp.unicode as uni
+            #    u = uni.Uni(self.lang)
+            #    u.ident_cont(t, m)
+            return t
+
+        # Object and function macro identifiers.  Place after char and string
+        # literals and identifiers.  
+        # An identifier may be modified if it contains a unicode codepoint.  A
+        # token function needs to find the modified identifier string.  And
+        # then it needs to look for a '(' immediately following, then set the
+        # token type accordingly.
+        #  
+        # CPP_FUNC_MACRO is the macro name, if followed immediately by '('.
+        # CPP_OBJ_MACRO is the macro name, otherwise.
+
+        @self.funcrule(REs.identifier)
+        def t_DEFINE_CPP_MACRO(t):
+            t = self.t_CPP_ID(t)
+            m = t.lexer.lexmatch
+            nextpos = t.lexer.lexpos
+            nextchar = m.string[nextpos : nextpos + 1]
+            if t.type == 'error':
+                pass
+            elif nextchar == '(':
+                t.type = 'CPP_FUNC_MACRO'
+                t.lexer.begin('FUNCREPL')
+            else:
+                t.type = 'CPP_OBJ_MACRO'
+                t.lexer.begin('OBJREPL')
+            return t
+
+         # Block comment (C), possibly spanning multiple lines.  
+        self.t_CPP_COMMENT1 = r'(/\*(.|\n)*?\*/)'
 
         # Line comment (C++).  PCCP accepts them in C files also.  
-        cls.t_CPP_COMMENT2 = r'(//[^\n]*)'
+        self.t_CPP_COMMENT2 = r'(//[^\n]*)'
     
-        cls.puncs()
+        self.puncs()
 
         def error(self, t: PpTok, msg: str, keep_type: bool = False) -> PpTok:
             if not keep_type:
@@ -455,7 +534,7 @@ class LexerFactory:
                 t.lexer.prep.on_error_token(t, msg)
             return t
 
-        @cls.funcrule(None)
+        @self.funcrule(None)
         def t_ANY_error(t):
             # Check for unmatched quote character.  
             if t.value[0] in '\'\"':
@@ -466,55 +545,38 @@ class LexerFactory:
                 t.value = t.value[0]
                 message = f"Illegal character {t.value!r}"
             t.lexer.owner.skip(len(t.value))
-            return cls.error(t, message)
+            return self.error(t, message)
 
     @classmethod
     def error(cls, t: PpTok, msg: str, keep_type: bool = False,
               warn: bool = False) -> PpTok:
         owner: RawLexer = t.lexer.owner
         if not keep_type:
-            t.type = owner.TokType.error
+            t.type = owner.TokType.error.name
         if owner.errors:
             owner.prep.on_error_token(t, msg, warn=warn)
         return t
 
-    @classmethod
-    def create(cls, prep: Preprocessor) -> PpLex:
-        cls.prep = prep
-        cls.REs = REs = RegExes(prep)
-        # Set up the necessary class attributes.
-
-        cls.rules()
-
-        # create the TokType enumeration.
-        TokType = make_tok_type(prep, REs, cls.punct_values)
-
-        prep.TokType = TokType
-
-        # We need to have the lextab module name be specific to the same
-        # parameters that govern the content of the lexer, i.e.,
-        # 
-        # prep.cplus_ver selects C or C++ as the language, standard version
-        # doesn't matter.  C++ enables the extra punctuators
-        #
-        # prep.emulate includes ` @ and $ as literals..
-        #
-        # prep.gnu enables R-strings for all languages.
-        lextab = f"""\
-            lextab\
-            {'-c -cplusplus'.split()[bool(prep.cplus_ver)]}\
-            {'-gcc' * bool(prep.emulate)}\
-            {'-gnu' * bool(prep.gnu)}\
-            """
-        lextab = lextab.replace(' ', '')
-
-        fact = cls()
-        lexer = lex.lex(module=fact, lextab=lextab)
-        #lexer = PpLex(prep, lex.lex(lextab=lextab))
-        lexer.prep = prep
-        lexer.TokType = TokType
-        
-        lexer.REs = REs
+    def create(self, pasting: bool = False) -> PpLex:
+        """
+        Create the PpLex from attributes of self.  Also create a pasting
+        version which is stored in result.pasting.
+        """
+        lexer = self.build(self.__dict__, lextab=self.lextab)
+        lexer.prep = self.prep
+        lexer.TokType = self.TokType
+        lexer.REs = self.REs
         return PpLex(from_lexer=lexer)
 
+    @staticmethod
+    def build(items: dict, **kwds) -> Lexer:
+        """
+        Makes the lex.Lexer for given variables, preserving order of
+        rules.
+        """
+        for key, value in items.items():
+            exec(f"{key} = value")
+
+        lexer = lex.lex(**kwds)
+        return lexer
 

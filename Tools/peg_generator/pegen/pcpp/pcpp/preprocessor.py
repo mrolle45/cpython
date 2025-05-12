@@ -23,11 +23,12 @@ if __name__ == '__main__' and __package__ is None:
 
 from pcpp.common import *
 from pcpp.parser import (PreprocessorHooks)
-from pcpp.lexer import (default_lexer, PpLex, OutPosFlag)
+from pcpp.lexer import (PpLex, OutPosFlag)
 from pcpp.tokens import PpTok, Tokens, TokIter, Hide, HideNames, HideDict
 from pcpp.evaluator import Evaluator
 from pcpp.macros import Macro, Macros
 from pcpp.position import (PosMgr, PosRange, PosTab, PosLineTab)
+from pcpp.regexes import RegExes
 from pcpp.source import Source, SourceFile
 from pcpp.writer import OutPosFlag, OutPosEnter, OutPosLeave
 from pcpp.debug_log import DebugLog
@@ -343,6 +344,10 @@ Lines.
 # directories, and other information
 # ------------------------------------------------------------------
 
+class X:
+    "..."
+    def foo(): pass
+
 class Preprocessor(PreprocessorHooks):
     """
     Generic preprocessor object, which accepts various arguments, and
@@ -376,14 +381,76 @@ class Preprocessor(PreprocessorHooks):
     # set this.
     ignore: Collection[TokType] = {}
 
-    # Version (4-digit year) of either C or C++ Standard being followed.
-    # Set one but not both of them.
-    c_ver: int = 0          # 1999, 2011, 2017, or 2023
-    cplus_ver: int = 0      # 2011, 2014, 2017, 2020, or 2023
+    # Language options.
+    lang: Language
+    class Language:
+        """
+        Several preprocessor options relating to the source language, combined
+        in a single object. 
+        """
 
-    # Handle trigraph sequences.  If None, then it will depend on whether the
-    # C or C++ standard specifies them.
-    trigraphs: bool | None = None
+        # Object which created self.
+        prep: Preprocessor
+
+        # Version (4-digit year) of either C or C++ Standard being followed.
+        # Set one but not both of them.
+        c_ver: int = 0          # 1999, 2011, 2017, or 2023
+        cplus_ver: int = 0      # 2011, 2014, 2017, 2020, or 2023
+
+        # Pass comments to the generated output.  With emulation, these are
+        # ordinary tokens.  A comment before a directive causes the leading '#' to
+        # be a regular token, not a directive.
+        comments: bool = False
+
+        # Handle trigraph sequences.  Either set explicitly (as in from
+        # command line) or determined based on other options.
+        @functools.cached_property
+        def trigraphs(self) -> bool:
+            return self.gcc or 0 < self.cplus_ver < 2014
+
+        # Tool emulation (gcc or clang), if any.  Value is the MAJOR.MINOR.
+        # version string.  Don't set both of them.
+        gcc: str = None
+        clang: str = None
+        @property
+        def emulate(self) -> bool: return self.gcc or self.clang
+
+        # Use GNU extensions.  Doesn't require gcc or clang.
+        gnu: bool = False
+
+        def __init__(self, prep: Preprocessor,
+                     args: Namespace = None, **kwds):
+            """
+            Constructor.  Attributes are specified either by command line
+            arguments, or by explicit keywords.
+            """
+            if args:
+                if args.cplusplus:
+                    self.cplus_ver = args.cplusplus + 2000
+
+                if args.c_ver:
+                    self.c_ver = {
+                                        99: 1999,
+                                        11: 2011,
+                                        17: 2017,
+                                        23: 2023,
+                                        }[args.c_ver]
+
+                self.clang = args.clang
+                self.gcc = args.gcc
+                self.comments = args.passthru_comments
+                if args.trigraphs is not None:
+                    self.trigraphs = args.trigraphs
+
+            self.prep = prep
+            if kwds: self.__dict__.update(**kwds)
+            self.REs = RegExes(self)
+            self.REs_pasting = RegExes(self, pasting=True)
+
+        def with_pasting(self) -> Self:
+            new: Self = copy.copy(self)
+            new.REs = RegExes(new, pasting=True)
+            return new
 
     # Expand leading tabs to this many spaces.  This will align the output
     # line to match the input line for readability.
@@ -398,20 +465,6 @@ class Preprocessor(PreprocessorHooks):
     # self.startup_define() and self.startup_include() can be used.
     startup: io.StringIO = io.StringIO()
 
-    # Tool emulation (gcc or clang), if any.  Value is the MAJOR.MINOR.
-    # version string.  Don't set both of them.
-    gcc: str = None
-    clang: str = None
-    @property
-    def emulate(self) -> bool: return self.gcc or self.clang
-
-    # Use GNU extensions.  Doesn't require gcc or clang.
-    gnu: bool = False
-
-    # Pass comments to the generated output.  With emulation, these are
-    # ordinary tokens.  A comment before a directive causes the leading '#' to
-    # be a regular token, not a directive.
-    comments: bool = False
 
     # Reduce size of generated output.  If >= 2, all blank lines are suppressed.
     compress: int = 0
@@ -475,6 +528,11 @@ class Preprocessor(PreprocessorHooks):
     # "..." but not <...>.
     files_active: Stack[SourceFile]
 
+    # List of -I formal search paths for includes.
+    path: list[str]
+    # Use instead of self.path if retrying an include.
+    path_retry: list[str] = []
+
     # Source objects being translated, or already translated.
     sources: Stack[Source]
 
@@ -499,21 +557,8 @@ class Preprocessor(PreprocessorHooks):
 
     def __init__(self, lexer=None):
         super().__init__()
+        lang = self.lang
         self.diag = self.diag or sys.stderr
-        if self.trigraphs is None:
-            if self.emulate:
-                self.trigraphs = (
-                    (   self.c_ver
-                        or (self.cplus_ver and self.cplus_ver < 2017)
-                    )
-                    and not self.gnu
-                    )
-            else:
-                self.trigraphs = (
-                    (   (self.c_ver and self.c_ver < 2023)
-                        or (self.cplus_ver and self.cplus_ver < 2014)
-                    )
-                )
         self.rewrite_paths = [
             (re.escape(os.path.abspath('') + os.sep) + '(.*)', '\\1')]
         self.source_pos_tab = PosTab()
@@ -523,7 +568,8 @@ class Preprocessor(PreprocessorHooks):
 
         self.log = DebugLog(self)
         if lexer is None:
-            lexer = default_lexer(self)
+            from pcpp.dfltlexer import default_lexer as dfltlex
+            lexer = dfltlex(self)
         self.lexer = lexer
         self.macros = Macros(self)
 
@@ -535,29 +581,29 @@ class Preprocessor(PreprocessorHooks):
         self.startup.seek(0)
         # Magic macros
         if not self.passthru_magic_macros:
-            self.macros.define_dynamic('__COUNTER__')
-            self.macros.define_dynamic('__FILE__')
-            self.macros.define_dynamic('__LINE__')
+            startup_define('__COUNTER__')
+            startup_define('__FILE__')
+            startup_define('__LINE__')
             tm = time.localtime()
             startup_define(f"__DATE__ \"{time.strftime('%b %e %Y', tm)}\"")
             startup_define(f"__TIME__ \"{time.strftime('%H:%M:%S', tm)}\"")
 
-        if self.gcc:
+        if lang.gcc:
             startup_define(f"__GNUC__ {self.gcc}")
-        if self.clang:
-            parts = self.clang.split('.')
+        if lang.clang:
+            parts = lang.clang.split('.')
             if len(parts) != 2:
                 raise Exception("--clang option requires a MAJOR.MINOR value.")
             startup_define(f"__clang__ 1")
             startup_define(f"__clang_major__ {parts[0]}")
             startup_define(f"__clang_minor__ {parts[1]}")
-            startup_define(f"__GNUC__ {parts[0]}")
-        self.gnu_ext: bool = bool(self.gnu)
+            startup_define(f"__GNUC__ 4")
+        self.gnu_ext: bool = bool(lang.gnu)
         if not self.gnu_ext:
-            startup_define('__STRICT_ANSI__ 1')
+           startup_define('__STRICT_ANSI__ 1')
 
-        self.gplus_mode: bool = bool(self.emulate and self.cplus_ver)
-        if self.trigraphs:
+        lang.gplus_mode: bool = bool(lang.emulate and lang.cplus_ver)
+        if lang.trigraphs:
             startup_define('__PCPP_TRIGRAPHS__ 1')
 
 
@@ -577,26 +623,26 @@ class Preprocessor(PreprocessorHooks):
         self.__lexprobe()
 
         startup_define("__PCPP__ 1")
-        if not self.gnu: startup_define("__STDC__ 1")
-        if self.cplus_ver:
+        if not lang.gnu: startup_define("__STDC__ 1")
+        if lang.cplus_ver:
             # Standard value of __cplusplus.  Note, GCC gets C++20 wrong!
             modes = {
                     2011 : '201103L',
                     2014 : '201402L',
                     2017 : '201703L',
-                    2020 : self.emulate and '201709L' or '202002L',
+                    2020 : lang.emulate and '201709L' or '202002L',
                     2023 : '202302L',
                 }
-            startup_define(f"__cplusplus {modes[self.cplus_ver]}")
-        if self.c_ver:
+            startup_define(f"__cplusplus {modes[lang.cplus_ver]}")
+        if lang.c_ver:
             # Standard value of __STDC_VERSION__.
             modes = {
                     1999 : '199901L',
                     2011 : '201112L',
                     2017 : '201710L',
-                    2023 : self.emulate and '202000L' or '202311L',
+                    2023 : lang.emulate and '202000L' or '202311L',
                 }
-            startup_define(f"__STDC_VERSION__ {modes[self.c_ver]}")
+            startup_define(f"__STDC_VERSION__ {modes[lang.c_ver]}")
         # Go to the end, so that subclass can add more stuff.
         self.startup.seek(0, os.SEEK_END)
 
@@ -624,7 +670,8 @@ class Preprocessor(PreprocessorHooks):
     #   Store TokIter for the tokens in self.parser.
     # ----------------------------------------------------------------------
     def parse(self, input: str | io.IOBase = None, source: str = None,
-              ignore: set[str] = {}) -> None:
+              ignore: set[str] = {}
+              ) -> TokIter:
         """
         Parse startup script or input file or plain data.
         """
@@ -643,6 +690,7 @@ class Preprocessor(PreprocessorHooks):
         #top = SourceFile.openfile(input, self, dirname='.')
         self.files_active.append(top)
         self.parser = self.parsegen(top)
+        return self.parser
 
     @staticmethod
     def string_file(name: str, data: str = '') -> StringIO:
@@ -745,13 +793,18 @@ class Preprocessor(PreprocessorHooks):
         #             once=file.once)
 
         if dir:
-            yield dir.make_pos(OutPosEnter, source=src)
+            yield dir.make_pos(poscls=OutPosEnter, source=src)
         with self.sources_active.nest(src):
             yield from src.parsegen(dir=dir)
         if dir and dir.source.parent:
-            tok = dir.make_pos(OutPosLeave)
+            tok = dir.make_pos(poscls=OutPosLeave)
             yield tok
 
+
+    class Abort(Exception):
+        def __init__(self, tok: PpTok, msg: str = None):
+            super().__init__(msg or 'Aborting.', tok)
+        pass
 
     @property
     def currsource(self) -> Source | None:
@@ -843,7 +896,7 @@ class Preprocessor(PreprocessorHooks):
 
     def fix_path_sep(self, path: str, sep: str = '/') -> str:
         """ Changes the path separators in given path. """
-        if self.emulate:
+        if self.lang.emulate:
             # GCC preserves the separators, but doubles single backslashes.
             if os.sep == '\\':
                 path = re.sub(r'\\',r'\\\\', path)
@@ -921,18 +974,26 @@ class Preprocessor(PreprocessorHooks):
         path = self.path or ['']
 
         # Create a SourceFile object.
-        file = SourceFile.open(filename, qfile, path, self)
+        while True:
+            file = SourceFile.open(filename, qfile, path, self)
+
+            if file.pathdir is None:
+                # File was not found.
+                newpath = self.on_include_not_found(
+                    is_malformed=False, is_system_include=is_system_include,
+                    curdir=self.files_active.top().dirname,
+                    includepath=filename)
+                # Did not raise OutputDirective, so returns a replacement path.
+                assert newpath is not None
+                if newpath not in path:
+                    path.append(newpath)
+                    self.path_retry = path
+                    continue
+            if self.path_retry:
+                del self.path_retry
+            break
 
         # Decide whether to translate this file.
-        if file.pathdir is None:
-            # File was not found.
-            filename = self.on_include_not_found(
-                is_malformed=False, is_system_include=is_system_include,
-                curdir=self.files_active.top().dirname,
-                includepath=filename)
-            # Did not raise OutputDirective, so returns a replacement filename.
-            assert filename is not None
-            file = SourceFile.open(filename, path, self)
         if file.once:
             self.log.write(f"File \"{file.filename}\" skipped as already seen.",
                            token=tokens[0])
@@ -983,14 +1044,17 @@ class Preprocessor(PreprocessorHooks):
 
     @property
     def nesting(self) -> int:
-        return self.currsource.nesting
+        if self.currsource:
+            return self.currsource.nesting
+        return 0
 
     @nesting.setter
     def nesting(self, n) -> None:
-        self.currsource.nesting = n
+        if self.currsource:
+            self.currsource.nesting = n
 
     @contextlib.contextmanager
-    def nest(self, n: int = 1):
+    def nest(self, n: int = 1) -> ContextManager[None]:
         self.nesting += n
         try:
             yield
@@ -1013,7 +1077,8 @@ class Preprocessor(PreprocessorHooks):
                 file = f"{file}:{col}"
 
         type = warn and 'warning' or 'ERROR'
-        self.log.write(f"{type}: {msg}", source=source, lineno=line, colno=col)
+        self.log.write(f"{type}: {msg}", source=source, lineno=line,
+                       colno=col)
         msg = f"{file} {type}: {msg}"
         print(msg, file = self.diag)
         if warn:
@@ -1021,7 +1086,8 @@ class Preprocessor(PreprocessorHooks):
         else:
             self.return_code += 1
 
-    def on_error_token(self, token: PpTok, msg: str, warn: bool = False
+    def on_error_token(self, token: PpTok | LexToken, msg: str,
+                       warn: bool = False
                        ) -> None:
         """
         Called when the preprocessor has encountered an error or warning
@@ -1032,7 +1098,7 @@ class Preprocessor(PreprocessorHooks):
             obj = token
         else:
             obj = token.lexer.owner
-        self._error_msg(obj.source, msg, obj.lineno, obj.colno, warn=warn)
+        self._error_msg(obj.source, msg, obj.loc.lineno, obj.colno, warn=warn)
 
     def on_warn_token(self, token: PpTok, msg: str):
         """
@@ -1040,7 +1106,6 @@ class Preprocessor(PreprocessorHooks):
         a Token.
         """
         self.on_error_token(token, msg, warn=True)
-
 
 
 if __name__ == "__main__":
