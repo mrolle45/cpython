@@ -1,7 +1,8 @@
 """ dfltlexer.py
 
 Builds the default PpLex, using a LexerFactory class instance.  It is
-customized to the attributes of a Preprocessor object.
+customized to the attributes of a Preprocessor object.  The lexer holds
+another lexer which is the same except for being used to lex pasted values.
 
 It uses the ply.lex module.  See "Alternative specification of lexers" section
 in https://github.com/dabeaz/ply/blob/master/doc/ply.md for example of
@@ -89,7 +90,7 @@ class LexerFactory:
     TokType: type
 
     # The name of the lextab module created while creating the lexer.
-    lextab: str
+    lextab: str = None
 
     def __init__(self, prep: Preprocessor, pasting: bool = False):
         """
@@ -133,12 +134,14 @@ class LexerFactory:
         # prep.emulate includes ` @ and $ as literals..
         #
         # prep.gnu enables R-strings for all languages.
+        # pasting provides alternate regular expressions for pasted values.
         lextab = f"""\
             lextab\
-            {'-c -cplusplus'.split()[bool(lang.cplus_ver)]}\
-            {'-clang' * bool(lang.clang)}\
-            {'-gcc' * bool(lang.gcc)}\
-            {'-gnu' * bool(lang.gnu)}\
+            {'_c _cplusplus'.split()[bool(lang.cplus_ver)]}\
+            {'_clang' * bool(lang.clang)}\
+            {'_gcc' * bool(lang.gcc)}\
+            {'_gnu' * bool(lang.gnu)}\
+            {'_pasting' * bool(pasting)}\
             """
         self.lextab = lextab.replace(' ', '')
 
@@ -478,19 +481,7 @@ class LexerFactory:
             if any(groups):
                 # Contains a codepoint.
                 import pcpp.unicode as uni
-                #u = uni.Uni(self.lang)
                 uni.ident(self.lang, *groups, t, m)
-                #if u.ident_start(m):
-                #    if m.group('cont'):
-                #        u.ident_cont(t, m)
-                #else:
-                #    u.ident_trunc_start(t, m)
-                #    return self.error(t, f"Illegal character {t.value!r}")
-            #elif m.group('cont'):
-            #    # One or more ascii chars followed by a codepoint.
-            #    import pcpp.unicode as uni
-            #    u = uni.Uni(self.lang)
-            #    u.ident_cont(t, m)
             return t
 
         # Object and function macro identifiers.  Place after char and string
@@ -559,9 +550,11 @@ class LexerFactory:
 
     def create(self, pasting: bool = False) -> PpLex:
         """
-        Create the PpLex from attributes of self.  Also create a pasting
-        version which is stored in result.pasting.
+        Create the PpLex from attributes of self.  Optionally create a pasting
+        version.
         """
+        # TODO: Build with optimize=True if the lextab is up to date.  The
+        # lexer might use anything in the pcpp package.
         lexer = self.build(self.__dict__, lextab=self.lextab)
         lexer.prep = self.prep
         lexer.TokType = self.TokType

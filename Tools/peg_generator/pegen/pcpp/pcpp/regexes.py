@@ -13,9 +13,11 @@ class RegExes:
     Collection of various REs used by the lexer.  Most are class variables,
     but some are customized by the language.
 
-    All characters in the lexer data are 8-bit values.  Wider characters in
-    the source file have been replaced by equivalent UCN escapes.  For
-    example, 'δ' becomes '\\u03b4'.
+    For any Language, there are two RegExes objects:  One is used for normal
+    lexing from lexer data transformed from source data.  The other is used
+    for strings that are pasted from two tokens.  The reason for the
+    distinction is that clang deals with ud-suffixes differently in both
+    cases.
     """
     # Data pertaining to unicode.
     uni_info: UniInfo
@@ -28,13 +30,12 @@ class RegExes:
 
         def set_re(**re) -> None:
             """
-            For each name=regex argument, sets the self.name = regex.  Wraps
+            For each name=regex keyword, sets the self.name = regex.  Wraps
             it in (?x) to remove whitespace and (?a) to restrict to ASCII.
             """
             for name, regex in re.items():
                 if regex:
                     setattr(self, name, self.wrap(regex))
-
 
         # Newline.
         self.newline = r'(\n)'
@@ -72,11 +73,6 @@ class RegExes:
         # -  \u{num} or \x{num} with num that is not all hex digits.
         # -  likewise for \o{oct} with octal digits.
 
-        # The canonical bad escape replacement.  Absence of
-        # any hex digits means the escape could not be given a character
-        # value suitable for a quoted token.
-
-        #bad_escape = rf'\x{{{hexlower}*}}'
         # Replacement for a bad escape sequence.  In a quoted token, this will
         # be reverted to the original spelling after the token is lexed.
         badescape = rf'\\{{{hexlower}*}}'
@@ -111,11 +107,7 @@ class RegExes:
                 octbody,
                 )
         else:
-            #nucbody = ''
-            #nuc = ''
-            #nucgroup = ''
             self.match_nuc = lambda m: False
-            #ucnhexbody = hexescbody = octescbody =''
             cplusescbody = ''
 
         uniescbody = self.joinalts(
@@ -126,13 +118,12 @@ class RegExes:
             )
 
         # General unicode codepoint.  Mostly a single character with a valid
-        # unicode value with optional group.  Otherwise a canonical replacement unicode escape
-        # sequence.
+        # unicode value with optional group.  Otherwise a canonical
+        # replacement unicode escape sequence.
         def codepoint(groupname: str = '') -> str:
             """ The regex for a codepoint, with optional group if invalid. """
             num = r'[\u0080-\U0010FFFF]'        # valid codepoint
             escape = rf'\\{uniescbody}'
-            #escape = codepoint_esc
             if groupname:
                 num = self.group(num, groupname)
             return self.joinalts(
@@ -176,16 +167,8 @@ class RegExes:
             self.group(ident_asc_start, 'ascstart'),
             # Starts with codepoint as group 'unistart'
             self.group(codepoint('numstart'), 'unistart'),
-            #self.group(codepoint('escstart'), 'unistart'),
             )
 
-        # Continuation character(s) of an identifier.
-        #ident_cont = self.joinalts(
-        #    # ascii character(s)
-        #    f'({char_asc_cont}+)',
-        #    # single unicode character
-        #    codepoint('esccont'),
-        #    )
         # Continuation character(s) of an identifier, with groups 'asc' and
         # 'uni'.  'uni' group has group 'esccont'.
         ident_cont_group = self.joinalts(
@@ -210,10 +193,6 @@ class RegExes:
         set_re(char_uni_cont=codepoint('numcont'),)
         set_re(char_uni_start=codepoint('numstart'))
         
-            #ucnescbody = self.group(rf'u{{{hex}+}}', 'ucn++')
-            #hexescbody = self.group(rf'x{{{hex}+}}', 'hex++')
-            #octescbody = self.group(rf'o{{{oct}+}}', 'oct++')
-
         # Original C escapes.  
         #
         escbody = self.joinalts(
@@ -224,16 +203,9 @@ class RegExes:
             fr'{self.group(f"{oct}{{1,3}}", "oct")}',
             )
         undefescbody = self.group(r'.', 'undef')
-        # Universal character name.  \uxxxx or \Uxxxxxxxx or \u{x+}.
-        #   Used in an identifier or escape sequence in a quoted string.
-        #ucnbody = self.joinalts(
-        #    fr'u{hex}{{4}}',
-        #    fr'U{hex}{{8}}',
-        #    cplus_escbody,
-        #    )
-        #ucn = fr'\\{ucnbody}'
 
-        # Possible Unicode codepoint.  Outside ASCII range.
+        # Possible Unicode codepoint.  Outside ASCII range.  Exclude C1
+        # control codes, surrogate codepoints, and over maximum.
         unicode_range = r'\u00C0-\uD7FF\uE000-\U0010FFFF'
 
         # Identifier (C99 6.4.2.1), used in a user defined suffix.
@@ -288,10 +260,15 @@ class RegExes:
 
         # User-defined suffix for number, char, or string literal (C++ only,
         # also clang).  Any identifier that begins with '_'.  However, if it
-        # does not begin with '_', clang lexes it anyway, with an error
-        # diagnostic. 
+        # does not begin with '_', and not lexing a pasted value, clang lexes
+        # it anyway, with an error diagnostic. 
         if lang.cplus_ver or lang.clang:
-            opt_ud_sfx = f'(?P<ud_sfx>_{self.ident})?'
+            if pasting:
+                # Paste token lexing requires the initial _.
+                opt_ud_sfx = f'(?P<ud_sfx>_{self.ident})?'
+            else:
+                # Normal token lexing allows suffix without _.
+                opt_ud_sfx = f'(?P<ud_sfx>{self.ident})?'
         else:
             opt_ud_sfx = '(?P<ud_sfx>)'
 
@@ -332,8 +309,6 @@ class RegExes:
             )
             '''
         # String literal.  
-        # NEW: following the original PCPP which takes anything between the
-        # quotes.
         set_re(string=rf'''
             {strprefix}
             \"(?P<val>
@@ -348,8 +323,6 @@ class RegExes:
             )
             """
         # Character constant  
-        # NEW: following the original PCPP which takes anything between the
-        # quotes.
         set_re(char=rf"""
             {chrprefix}
             \'(?P<val>
@@ -495,18 +468,6 @@ class RegExes:
 
         # Patterns used to find repls in the input for each replacement stage.
 
-        #replbody = self.joinalts(
-        #    fr'(?P<splice>{ws}*\n)',             # Line splice
-        #    ucnbody,
-        #    )
-        #altrepls: list[str] = [        # Alternative REs for repls pattern
-        #    # These escapes might have a ??/ for the \, so put them first.
-        #    fr'\\({replbody})',
-        #    # The 9 trigraphs (C99 5.2.1.1)
-        #    lang.trigraphs and r'\?\?[=\(/\)\'<\!>\-]',   # The 9 trigraphs
-        #]
-        #set_re(repls=self.joinalts(*altrepls))
-
         # The 9 trigraphs.
         set_re(repl_trigraphs=lang.trigraphs and r'\?\?[=\(/\)\'<\!>\-]')
         # Line splices, after trigraphs replaced.
@@ -537,7 +498,6 @@ class RegExes:
         joined = '| '.join(alt + '\n' for alt in alts)
         return f'(?:{joined})'
 
-
     @staticmethod
     def group(regex: str, name: str = '') -> str:
         """ Embed regex in a named or unnamed capturing group. """
@@ -566,6 +526,4 @@ class RegExes:
         group = self.group(chars, groupname)
         others = r'[^}}\'"\n]*'
         return rf'{{{group}{others}}}?'
-
-x = 0
 
