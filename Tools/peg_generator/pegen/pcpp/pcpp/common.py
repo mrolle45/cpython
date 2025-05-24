@@ -95,68 +95,6 @@ class Offset(int, typing.Generic[T]):
     pass
 
 
-class Range(typing.Generic[IndexType]):
-    """
-    Standin for a range object with extra frills, but no step.  It's a range
-    of indices of type IndexType, into a container.
-
-    Construct similarly to range(), i.e., Range(stop) or Range(start, stop).
-    Also from Range(start, len=len).
-
-    Add or subtract an offset to translate start and stop.
-
-    Used as:
-      - val: Sequence[T] = range.get_from(seq)
-      - val: Sequence[T] = get_range(seq, range)
-      - for i in range:
-            val: T = seq[i]
-
-    """
-    start: IndexType
-    stop: IndexType
-
-    def __init__(self, *args: IndexType, len: IndexType = None):
-        from builtins import len as l
-        if len is None:
-            assert 1 <= l(args) <= 2, f"Range() got {l(args)} arguments"
-            if l(args) == 1:
-                self.start, self.stop = 0, args[0]
-            else:
-                self.start, self.stop = args
-        else:
-            assert 1 == l(args), f"Range() got {l(args)} arguments"
-            start = args[0]
-            self.start, self.stop = start, start + len
-
-    def __add__(self, rhs: IndexType) -> Self:
-        return Range(self.start + rhs, self .stop + rhs)
-
-    def __sub__(self, rhs: IndexType) -> Self:
-        return Range(self.start - rhs, self.stop - rhs)
-
-    def __iter__(self) -> Iterator[IndexType]:
-        return iter(self.range)
-
-    def __contains__(self, i: int) -> bool:
-        return self.start <= i < self.stop
-
-    @property
-    def range(self) -> range:
-        return range(self.start, self.stop)
-
-    def extend(self, delta: IndexType) -> Self:
-        """ Extend self.stop by given amount """
-        return Range(self.start, self.stop + delta)
-
-    def get_from(self, seq: Sequence[T]) -> Sequence[T]:
-        return seq[self.start: self.stop]
-
-    def __repr__(self) -> str:
-        r = self.range
-        res = f'[{r.start or ""}:{r.stop or ""}'
-        if r.step != 1: res = f'{res}:{r.step}'
-        return f'{res}]'
-
 class RangeTuple(typing.NamedTuple):
     """
     Standin for a range object with extra frills, but no step.  It's a range
@@ -173,6 +111,7 @@ class RangeTuple(typing.NamedTuple):
       - for i in range:
             val: T = seq[i]
 
+    Can be compared as tuples (start, stop).
     """
     start: IndexType
     stop: IndexType
@@ -182,9 +121,6 @@ class RangeTuple(typing.NamedTuple):
 
     def __sub__(self, rhs: IndexType) -> Self:
         return RangeTuple(self.start - rhs, self.stop - rhs)
-
-    #def __iter__(self) -> Iterator[IndexType]:
-    #    return iter(self.range)
 
     def __contains__(self, i: int) -> bool:
         return self.start <= i < self.stop
@@ -264,15 +200,12 @@ class RangeMap(Ranges[RangeType], typing.Generic[T, IndexType]):
     """
     Item = tuple[RangeType, T]
 
-    #values: list[T] = []
     items: list[Item] = []
 
     def __init__(self, *items: Item):
         if items:
             self.items = list(items)
             ranges, values = zip(*items)
-            #self.ranges = list(ranges)
-            #self.values = list(values)
 
     def __getitem__(self, index: IndexType,
                     ) -> T:
@@ -300,12 +233,8 @@ class RangeMap(Ranges[RangeType], typing.Generic[T, IndexType]):
 
     def append(self, range: RangeType, value: T):
         items = self.items
-        #ranges = self.ranges
         assert not items or items[-1][0].stop <= range.start
         items.append((range, value))
-        #assert not ranges or ranges[-1].stop <= range.start
-        #ranges.append(range)
-        #self.values.append(value)
 
     def steal(self, start: IndexType, value: T):
         """
@@ -313,13 +242,9 @@ class RangeMap(Ranges[RangeType], typing.Generic[T, IndexType]):
         second part.
         """
         last, lastvalue = self.items[-1]
-        #last = self.ranges[-1]
         assert(last.stop >= start)
         self.items[-1] = (Range(last.start, start), lastvalue)
         self.items.append((Range(start, last.stop), value))
-        #self.ranges[-1] = Range(last.start, start)
-        #self.ranges.append(Range(start, last.stop))
-        #self.values.append(value)
 
 
 try: from itertools import pairwise
@@ -371,15 +296,5 @@ else:
     from bisect import bisect_right as bisect_key
 
 from bisect import bisect
-
-rt = RangeMap((Range(0, 1), 40))
-repr(rt)
-rt.append(Range(3, 10), 42)
-rt.steal(5, 43)
-rt[0]   # 40
-rt[3]   # 42
-rt[5]   # 43
-#rt[2]  ValueError
-#rt[22] ValueError
 
 in_production = 0  # Set to 0 if editing pcpp implementation!

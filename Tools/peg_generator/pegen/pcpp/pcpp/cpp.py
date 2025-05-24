@@ -848,7 +848,7 @@ class Preprocessor(object):
     # ----------------------------------------------------------------------
 
     def read_include_file(self, filepath):
-        with open(filepath, 'r', encoding='utf-8', errors='surrogateescape') as file:
+        with open(filepath, 'r') as file:
             return file.read()
 
     # ----------------------------------------------------------------------

@@ -11,7 +11,7 @@ from pcpp.common import *
 
 __all__ = 'DebugLog',
 
-break_lines = [2431]            # Put line number(s) within the log file,
+break_lines = []            # Put line number(s) within the log file,
                             # to hit a debug breakpoint.
 
 # ----------------------------------------------------------------------
@@ -63,10 +63,12 @@ class DebugLog:
                call: MacroCall = None,
                **kwds,
                ) -> None:
-        """ Name of the macro appears in `ref` token.
-        Macros expanding from are logged separately.
-        Arguments are logged separately.
-        Definition is logged separately.
+        """
+        Log the expansion, or nonexpansion, of a macro.  
+
+        Name of the macro appears in `ref` token.  Macros expanding from are
+        logged separately.  Arguments are logged separately.  Definition is
+        logged separately.
         """
         if not self.enable: return
         name = ref.value
@@ -113,11 +115,15 @@ class DebugLog:
               token = None,
               source: Source = None, lineno = None, colno = None,
               ):
-        """ Common method for all logging.
-        Logs a single message, which may contain multiple lines.
-        Resulting lines are saved in self.loglines, to be written
-        to the log file by self.writelog().
         """
+        Common method for all logging.  Logs a single message, which may
+        contain multiple lines.
+
+        Resulting lines are saved in self.loglines, to be written to the log
+        file by self.writelog() at the end of preprocessing.
+        """
+        # You can set a breakpoint for 'self.brk()' here.  Will break when the
+        # log file line number is in break_lines[].
         if not self.enable: return
         if token:
             source = token.source
@@ -158,15 +164,13 @@ class DebugLog:
                     left,
                     f"{line2}")
                     )
-                if 0x0000:
-                    print("%-*s %s" % (self.leftwidth, left, line2))
                 left = ''
             wrapper.indent = wrapper.subsequent_indent
             more = "... "
 
     def writelog(self):
         """ This writes the entire output log file, if enabled.
-        Called after everything has been processed.
+        Called after everything has been preprocessed.
         """
         if self.enable:
             with open(self.enable, "wt") as file:

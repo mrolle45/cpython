@@ -1,4 +1,4 @@
-""" Module source.py
+""" Module source.py  
 Source class, which handles a single input file.
 """
 
@@ -13,9 +13,8 @@ import traceback
 from pcpp.common import *
 from pcpp.directive import (Directive, Action, OutputDirective)
 from pcpp.dircondition import (FileSection)
-from pcpp.tokens import Tokens, TokIter, reduce_ws, TokLocMove, TokLocMoveBase
-from pcpp.position import (PosSrcMgr, PosRange,
-                           PosTab, PosLineTab)
+from pcpp.tokens import Tokens, TokIter, TokLocMove, TokLocMoveBase
+from pcpp.position import (Position, PosSrcMgr, PosRange, PosTab, PosLineTab)
 from pcpp.replacements import ReplStage
 from pcpp.writer import (OutLoc, OutLoc, OutPosFlag, OutPosChange,
                          OutPosEnter)
@@ -106,12 +105,7 @@ class Source:
         for m in self.newline_re.finditer(data):
             pos = m.start()
             # Look for an earlier splice replacement.
-            #while 0 < new_pos < pos:
-            #    yield new_pos + base
-            #    repl = next(repls, 0)
-            #    new_pos = repl and repl.new_pos
             yield pos + base
-        x = 0
 
     @TokIter.from_generator
     def parsegen(self, *, dir: PpTok = None) -> TokIter:
@@ -144,10 +138,11 @@ class Source:
         toks: TokIter = prep.macros.expand(
             self.parsegen_after_directives(prep, input),
             top=self)
+
         # Bundle this in a group token so that it doesn't go through macro
         # expansion in upstream sources.
-
         yield lex.make_passthru(toks)
+
         if self.once_pend:
             del self.once_pend
             self.once.finish()
@@ -167,14 +162,11 @@ class Source:
         # True if auto pragma once still a possibility for this #include
         #   (it may have been disabled by the subclass constructor).
         auto_pragma_once_possible = prep.auto_pragma_once_enabled
-        # (MACRO, 0) means #ifndef MACRO or #if !defined(MACRO) seen,
-        # (MACRO,1) means #define MACRO seen.
         prep.on_potential_include_guard(None)
 
         tokens = self.tokens(input)
         for tok in tokens:
             all_whitespace = True
-            #self.lineno = lineno = tok.lineno
 
             if tok.type.dir:
                 # Preprocessor directive      
@@ -196,47 +188,16 @@ class Source:
 
         # End of the source
 
-    #@contextlib.contextmanager
-    #def inmacro(self, call: MacroCall) -> ContextManager[None]:
-    #    """
-    #    Declare that the consumer of the next tokens is in or preceding a
-    #    function macro argument list, during the context.  Some lexing,
-    #    notably certain directives, are handled differently.
-    #    """
-    #    old = self.in_macro
-    #    self.in_macro = call
-    #    try: yield
-    #    finally:
-    #        if not old:
-    #            del self.in_macro
-    #        else:
-    #            self.in_macro = old
-
-    #@contextlib.contextmanager
-    #def expanding(self, call: MacroCall) -> ContextManager[None]:
-    #    """
-    #    Declare that the given macro call is being expanded.  This will be
-    #    visible while emitting all expansion tokens, except in a nested macro
-    #    call.
-    #    """
-    #    old = self.exp_macro
-    #    self.exp_macro = call
-    #    try: yield
-    #    finally:
-    #        if not old:
-    #            del self.exp_macro
-    #        else:
-    #            self.exp_macro = old
+    def position_at(self, offset: int) -> Position:
+        return Position(self.positions.pos_range.start + offset)
 
     def define_guard(self, tok: PpTok) -> None:
         """ Found an actual include guard. """
         assert self.once is not None
         self.once.define_guard()
         self.prep.log.write(
-            f"Determined that this file is entirely "
-            f"wrapped "
-            f"in an include guard.\n"
-            f"Auto-applying #pragma once.",
+            f"Determined that this file is entirely wrapped "
+            f"in an include guard.\nAuto-applying #pragma once.",
             token=tok)
 
     def no_guard(self) -> None:
@@ -420,12 +381,12 @@ class IncludeOnce:
     are totally skipped.
 
     The first time the name is seen in a file, an IncludeOnce object is stored
-    in file.once, with a false value.  As it is being processed by a
-    Source, if it meets the once-only requirements, it is set to a true value.
-    If this doesn't occur, file.once is deleted.
+    in file.once, with a false value.  As it is being processed by a Source,
+    if it meets the once-only requirements, it is set to a true value.  If
+    this doesn't occur, file.once is deleted.
 
-    On subsequent includes, file.once is checked; if it exists and is true, then the file
-    is skipped, otherwise it is processed normally.
+    On subsequent includes, file.once is checked; if it exists and is true,
+    then the file is skipped, otherwise it is processed normally.
     """
     file: SourceFile            # The file being analyzed.
     on: bool = False            # Set True by finding either a #pragma once

@@ -13,9 +13,11 @@ chain = itertools.chain
 from pcpp.debugging import *
 from pcpp.tokentype import *
 
-__all__ = ('PpTok, Tokens, reduce_ws, split_lines'.split()
-           + 'tokenstrip, tokenstripiter'.split()
-           )
+__all__ = ('PpTok Tokens TokIter tokenstrip'
+           ' TokenSep TokenSepNone TokenSepSpace TokenSepIndent'
+           #' TokenSep TokenSepNone TokenSepSpace TokenSepIndent TokenSepPad'
+           ' TokLocMove'
+           ).split()
 
 #class Hide(frozenset[str]):
 #    """ The "hide set" of a token, in Prosser's algorithm.
@@ -64,15 +66,6 @@ class Hide(HideDict):
 
     def __init__(self, prep: Preprocessor, *names: str):
         pass
-    #    self.data = HideDict(((name, None) for name in names))
-    #    prep.hides[names] = self
-    #    prep = prep
-    #    self.names = frozenset(names)
-
-
-    #def __init__(self, data: Mapping[str, None] = {}):
-    #    super().__init__(data)
-    #    self.names = frozenset(data)
 
     def __or__(self, other: Hide) -> Hide:
         """ Add names to end of self, preserving order. """
@@ -115,10 +108,11 @@ class I(int):
     def __new__(cls, i = 42):
         return super().__new__(cls, i)
 
-i = I(4)
+#i = I(4)
 
-h = Hide(p, 1, 2, 3)
-hh = Hide(p, 1, 2, 3)
+#h = Hide(p, 1, 2, 3)
+#hh = Hide(p, 1, 2, 3)
+
 class RawTok:
     """
     Result of lexing the next token, with minimal information.  Includes
@@ -157,74 +151,125 @@ class RawTok:
         return f"{self.value!r}"
 
 
-class TokenSep:
+class TokenSep(abc.ABC):
     """
     Represents the separation properties between two PpTok's (called lhs and
-    rhs) in the output stream.  The base class is a singleton object which
-    states that the two tokens are written adjacently.
+    rhs) in the output stream.
 
-    Two TokenSep's can be merged using the operator (rhs |= lhs).  An indent
+    Two TokenSep's can be merged using the operator (left + right).  An indent
     takes precedence over a spacing.
     """
 
-    def __bool__ (self) -> bool: return False
+    # rhs is preceded by a move to this location (line and column).  In
+    # TokenSepIndent class, this is an instance variable.
     indent: ClassVar[TokLoc] = None
+    # rhs is preceded by a single space character.  In TokenSepSpace this is a
+    # class variable = True.
     spacing: ClassVar[bool] = False
 
+    # rhs is preceded by a single space character if required to avoid making
+    # a different token if lhs and rhs are written adjacently.  True as a
+    # class variable in TokenSepPad class.
+    #padding: ClassVar[bool] = False     # True for TokenSepPad
+
+    # Used to return singleton instance of the class, for some subclasses.
     instance: ClassVar[TokenSep]
 
+    # Used to return singleton instance with no indent and given spacing.
+    space_tab: ClassVar[tuple[TokenSep, TokenSepSpace]]
+
+    def __new__(cls, spacing: bool = False) -> TokenSep:
+        """ Constructor for no indent, possible spacing. """
+        return cls.space_tab[bool(spacing)]
+
+    @abc.abstractmethod
+    def __bool__ (self) -> bool:
+        """ Any kind of separation, either space or indent or padding. """
+        ...
+
+    @abc.abstractmethod
     def moveto(self, writer: OutLoc) -> None:
         """ Called by the Writer after writing lhs and before writing rhs. """
-        pass
+        ...
 
-    def __ior__(self, lhs: TokenSep):
-        """ Merge with lhs.  Self is not an indent. """
-        if lhs: return lhs
-        else: return self
+    @abc.abstractmethod
+    def __add__(self, rhs: TokenSep) -> TokenSep:
+        """ Merge with rhs. """
+        ...
 
     @classmethod
     def create(cls, *, indent: TokLoc = None, spacing: bool = False) -> Self:
         if indent:
             return TokenSepIndent(indent)
-        if spacing:
-            return TokenSepSpace.instance
-        return TokenSep.instance
+        return cls.space_tab[bool(spacing)]
+
+
+class TokenSepNone(TokenSep):
+    """
+    Writes nothing between lhs and rhs, which are adjacent in the same source.
+    """
+    instance: ClassVar[Self]
+
+    def __new__(cls, ) -> Self:
+        return cls.instance
+
+    def __bool__ (self) -> bool:
+        return False
+
+    def __add__(self, rhs: TokenSep) -> TokenSep:
+        """ Merge with rhs. """
+        return rhs
+
+    def moveto(self, writer: OutLoc) -> None:
+        if writer.avoid_paste(): writer.spacing()
+        pass
 
     def __repr__(self) -> str:
-        return "<>"
-
-TokenSep.instance = TokenSep()
+        return PpTok.Reprs.nospace
 
 
 class TokenSepIndent(TokenSep):
-    """ Moves output to the logical line and column of lhs.
-    """
-    indent: PpTok
+    """ Moves output to the logical line and column of a token. """
+
+    def __new__(cls, indent: TokLoc) -> Self:
+        self = object.__new__(cls)
+        self.indent = indent
+        return self
 
     def __bool__ (self) -> bool: return True
 
-    def __init__(self, indent: TokLoc):
-        self.indent = indent
-
-    def __ior__(self, lhs: TokenSep):
-        return self
+    def __add__(self, rhs: TokenSep) -> TokenSep:
+        """ Merge with rhs. """
+        if rhs.indent:
+            return rhs
+        else:
+            return self
 
     def moveto(self, writer: OutLoc) -> None:
         writer.indent(self.indent)
 
     def __repr__(self) -> str:
         ind = self.indent
-        rep = f"{PpTok.Reprs.toline}{ind.phys_lineno}"
+        rep = f"{PpTok.Reprs.toline}{ind.lineno}"
         if ind.colno > 1:
-            rep = f"{rep} {PpTok.Reprs.tocol}{ind.colno - 1}"
+            rep = f"{rep}:{ind.colno}"
         return rep
 
 
 class TokenSepSpace(TokenSep):
     """ WrItes a single space between lhs and rhs. """
-    def __bool__ (self) -> bool: return True
     spacing: ClassVar[bool] = True
-    instance: ClassVar[TokenSepSpace]
+    instance: ClassVar[Self]
+
+    def __new__(cls, ) -> Self:
+        return cls.instance
+
+    def __bool__ (self) -> bool: return True
+
+    def __add__(self, rhs: TokenSep) -> TokenSep:
+        """ Merge with rhs. """
+        if rhs.indent: return rhs
+        else: return self
 
     def moveto(self, writer: OutLoc) -> None:
         writer.spacing()
@@ -232,7 +277,10 @@ class TokenSepSpace(TokenSep):
     def __repr__(self) -> str:
         return PpTok.Reprs.spacing
 
-TokenSepSpace.instance = TokenSepSpace()
+
+TokenSepNone.instance = object.__new__(TokenSepNone)
+TokenSepSpace.instance = object.__new__(TokenSepSpace)
+TokenSep.space_tab = (TokenSepNone.instance, TokenSepSpace.instance)
 
 
 class PpTok:
@@ -254,74 +302,45 @@ class PpTok:
     lexer: Lexer
 
     # Globally unique number, which can be decoded into a Source and an offset
-    # within the Source's data.
-    pos: Position
+    # within the Source's data.  0 for a non-lexed token.
+    pos: Position = 0
 
     type: TokType
 
-    # Length of the value, for types with varying values.  For types with a
-    # fixed value, use the length of that value.
-    len: int = 0
+    # New output location mover.
+    newpos: TokMove = None
+
+    # For types with varying values, this is the value from the lexer.
+    _value: str = None
+
+    # Number of chars removed from the lexed value.  Added to the value length
+    # to get the lexpos for the end of the lexed value.  This only applies if
+    # there is an invalid codepoint which is to be ignored.
+    skip_len: int = 0
 
     hide: Hide = None         # Macro names to suppress expansion.
 
+    # True if the token is part of a macro replacement list, or part of a
+    # macroargument list.
+    in_macro: bool = False
+
     # Instance variable = replacements made in this token, if any.
-    repls: list[Repl] = []
-    # Instance variable = the token before reverting if revert() called and
-    # repls != [].
-    reverted_from: PpTok = None
-    # Where in the Source the start of the value is located.
+    repls: Repls = None
+
+    # True if any Repl has repl.err.
+    repl_err: bool = False
+
+    # Where in the Source the start of the value is located.  TODO: this can
+    # be derived from self.pos.
     loc: TokLoc = None
 
-    # Token spacing...
-    '''
-    Indicates if a padding space is written between this token and previous
-    token, or indentation at the start of logical line.
+    # Separation from adjacent token in output.
 
-    1. The lexer establishes a logical line number for each token.  It counts
-      line splices seen in any tokens since the last newline token, and then
-      subtracts this from the actual line number.
-    2. If a token is not whitespace and is preceded by whitespace token(s),
-      the lexer sets token.spacing = the first of these whitespace tokens.
-    3. The current Source groups these tokens into logical lines, separated
-      by newlines.
-    4. Macro expansion processes either a directive line or a maximal 
-      sequence of non-directive logical lines.  If a function macro call
-      extends over multiple lines, then the next logical line is considered to
-      begin after the macro call.
-    5. The first token, `t`, in a logical line ignores t.spacing and sets
-      t.spacing = t itself.  This tells the output Writer that it starts a new
-      line and where the starting column is.  If the line is not empty, the
-      Writer outputs spaces up to the starting column.
-    6. If any token, `t`, is a macro that is replaced, then t.spacing is
-      moved to the first replacement token, or if no replacement tokens, then
-      to the following token (if any).  If t is the start of a line, this
-      tells the Writer that the line was originally non-empty.  When emulating
-      GCC, it treats the line as non-empty even if there are no more tokens in
-      the line.
-    7. In some circumstances connected with macro expansion, a token `t`
-      may follow a token `t0` that it did not follow originally.  If there is
-      no t.spacing already, then the Writer makes a fast check to see if a
-      separating space is necessary.  This check uses the types, not the
-      values, of t0 and t, and so may indicate a spacing required when it is
-      not actually needed.  In GCC emulation, there are some cases where it
-      requires spacing but no possible values for the tokens do.
-    '''
+    sep: TokenSep = TokenSepNone.instance
+    sep_after: TokenSep = TokenSepNone.instance
 
-
-    sep: PpTok = TokenSep.instance
-    spacing: bool = False   # Possible space before in output.
-    indent: PpTok = None    # self.orig if first token in logical line.
-                            # Use this token for output location.
-
-
-    exp_from: Macro = None  # Macro whose definition contains self.
-
-    # Macro call which generated this token from macro replacement list.
-    call_from: MacroCall = None
-
-    prev: PpTok = None      # Previous token on same line, skipping whitespace.
-                            # None if first token in logical line. 
+    # Previous adjacent token, if there is no space between it and self.
+    prev: PpTok = None
 
     def __init__(self, lexer: PpLex, lextoken: LexToken = None,
                  token: PpTok = None, **attrs):
@@ -333,6 +352,12 @@ class PpTok:
             self.__dict__.update(lextoken.__dict__)
             try: self.type = lexer.TokType[self.type]
             except KeyError: pass
+            if not self.type.lit:
+                self._value = lextoken.value
+            del self.__dict__['value']
+            try: self.skip_len = lextoken.skip_len
+            except AttributeError: pass
+
         elif token:
             self.loc = token.loc
         else:
@@ -340,18 +365,29 @@ class PpTok:
         self.__dict__.update(**attrs)
         self.lexer = lexer
 
-    def add_hide(self, hide: Hide) -> None:
-        """ Add the hide set to the current hide set """
+    def add_hide(self, hide: Hide) -> PpTok:
+        """ New token with given hide set added to the current hide set """
         if self.hide:
-            self.hide |= hide
-        else:
-            self.hide = hide
+            hide = self.hide | hide
+        return self.copy(hide=hide)
 
-    def copy(self, **attrs) -> PpTok:
+    def copy(self, value: str = None, **attrs) -> PpTok:
         """ Make a copy, and update attributes using keywords. """
         tok: PpTok = copy.copy(self)
         tok.__dict__.update(attrs)
+        if value is not None:
+            tok.value = value
         return tok
+
+    @property
+    def value(self) -> str:
+        """ The value of the token. """
+        return self.type.lit or self._value
+
+    @value.setter
+    def value(self, val: str) -> None:
+        if not self.type.lit:
+            self._value = val
 
     @property
     def source(self) -> Source:
@@ -359,6 +395,7 @@ class PpTok:
 
     @property
     def lineno(self) -> int:
+        """ The physical line number. """
         return self.loc.lineno
 
     @property
@@ -366,12 +403,22 @@ class PpTok:
         return self.loc.colno
 
     @property
-    def phys_lineno(self) -> int:
-        return self.loc.phys_lineno
+    def log_lineno(self) -> int:
+        return self.loc.log_lineno
 
     @property
     def datapos(self) -> int:
         return self.loc.datapos
+
+    @property
+    def dataendpos(self) -> int:
+        return self.loc.datapos + len(self.value) + self.skip_len
+
+    @property
+    def datarange(self) -> Range:
+        """ (start, end) of offsets into the replaced source data. """
+        start = self.loc.datapos
+        return Range(start, len=len(self.value) + self.skip_len)
 
     @property
     def move(self) -> MoveTok:
@@ -402,6 +449,12 @@ class PpTok:
         """ Tokens are equal if they have the same location. """
         return rhs and self.loc is rhs.loc
 
+    def spacing_after(self) -> None:
+        """ Copy of self, with sep_after set. """
+        if not self.sep_after:
+            return self.copy(sep_after=TokenSepSpace.instance)
+        return self
+    
     def make_space(self) -> PpTok:
         """ A new token at same location, with a space characer value. """
         return self.copy(value=' ', type=self.type.CPP_WS)
@@ -410,92 +463,87 @@ class PpTok:
         """ A new CPP_NEWLINE token at same location. """
         return self.copy(value='\n', type=self.type.CPP_NEWLINE)
 
-    def make_pos(self, cls: Type[OutPosChange], **attrs) -> PpTok:
+    def make_pos(self, poscls: Type[OutPosChange] = None,
+                 tokcls: Type[PpTok] = None,
+                 _typenames = dict(
+                     OutPosEnter='CPP_LOCENTER',
+                     OutPosLeave='CPP_LOCLEAVE',
+                     TokLocMove='CPP_LOCMOVE',
+                     ),
+                 **kwds) -> PpTok:
         """
-        Create a CPP_NEWPOS token at my location.  This will be for a
+        Create a position-change token at my location.  This will be for a
         different location from my current location, though in the same
         Source.  It will later be used to set a new output location.
         """
         source = self.source
         
-        pos: OutPosChange = cls(**attrs)
+        newpos: OutPosChange = poscls(**kwds)
 
-        if pos.move:
-            tok = self.lexer.make_token(self.lexer.TokType.CPP_NEWPOS,
-                                        cls=MoveTok, loc=self.loc, pos=pos)
-            self.lexer.move = tok
-        else:
-            tok = self.lexer.make_token(self.lexer.TokType.CPP_NEWPOS,
-                                        loc=self.loc, pos=pos)
+        tok = self.lexer.make_token(
+            self.lexer.TokType(_typenames[poscls.__name__]),
+            loc=self.loc, newpos=newpos,
+            cls=tokcls or PpTok)
         return tok
 
-    def make_null(self, **attrs) -> PpTok:
-        """ A CPP_NULL token at same location. """
-        return self.copy(value='', type=self.type.CPP_NULL, **attrs)
+    def make_marker(self, sep: TokenSep = None, **attrs) -> PpTok:
+        """ A CPP_MARKER token at same location, optional separation. """
+        tok: Self = self.copy(value='', type=self.type.CPP_MARKER, **attrs)
+        if sep is not None:
+            tok.sep = sep
+        return tok
+
+    def make_string(self, string: str, **kwds) -> str:
+        """ Make CPP_STRING token. """
+        return self.copy(value=f'"{string}"', type=self.type.CPP_STRING,
+                         **kwds)
 
     def make_passthru(self, toks: Iterable[PpTok]) -> PpTok:
-        """ A CPP_PASSTHRU token at same location. """
-        return self.copy(value='', type=self.type.CPP_PASSTHRU,
+        """ A CPP_GROUP token at same location. """
+        return self.copy(value='', type=self.type.CPP_GROUP,
                          toks=toks, spacing=False)
 
     def with_sep(self, sep: TokenSep) -> PpTok:
+        """ Same token, or copy, with sep = given value. """
         return sep is not self.sep and self.copy(sep=sep) or self
 
-    def set_spacing(self, spacing: bool) -> PpTok:
-        """ Same token, or copy, with spacing = given value. """
-        return (self.spacing != spacing
-                and self.copy(spacing=spacing,
-                              sep=spacing and TokenSep.instance
-                              or TokenSepSpace.instance)
+    def add_sep(self, sep: TokenSep) -> PpTok:
+        """ Same token, or copy, with sep | given value. """
+        return (sep is not self.sep and self.copy(sep=self.sep + sep)
                 or self)
-
-    #def with_indent(self, indent: PpTok) -> PpTok:
-    #    """ Same token, or copy, with indent = given value. """
-    #    return (self.indent is not indent
-    #            and self.copy(indent=indent, spacing=False,
-    #                          sep=indent and TokenSepIndent(indent)
-    #                          or TokenSep.instance)
-    #            or self)
 
     def without_spacing(self) -> PpTok:
         """ Same token, or copy, with spacing = False. """
-        return (self.spacing
-                and self.copy(spacing=False, sep=TokenSep.instance)
-                or self)
+        if self.spacing:
+            self = self.copy()
+            self.sep = TokenSepNone()
+        return self
 
-    def with_spacing(self, spacing: bool = True) -> PpTok:
+    def add_spacing(self) -> PpTok:
         """
         If given value is true (the default), return self, or copy, with
         spacing = True.  Otherwise self unchanged.
         """
-        return (not self.spacing and spacing
-                and self.copy(spacing=True, sep=TokenSepSpace.instance)
-                or self)
+        if not self.spacing:
+            self = self.add_sep(TokenSepSpace())
+        return self
 
-    def revert(self, typ: TokType = None, *, unicode: bool = False,
-               spliced: bool = False, trigraph: bool = False,
-               orig_spelling: bool = False # don't do special clang stuff.
-               ) -> PpTok:
+    def with_indent(self, indent: TokLoc) -> PpTok:
+        return self.copy(sep=TokenSepIndent(indent))
+
+    #def revert(self, stage: ReplStage = None, *, force: bool = True) -> PpTok:
+    def revert(self, stage: ReplStage = None, *, force: bool = False) -> PpTok:
         """
         Reconstruct the original text for the token value and store it in the
         value.  Some replacements won't be reverted, based on the token type.
         Returns new token if changed, else self.
         """
-        if not self.repls or self.reverted_from:
+        # TODO: Use reverted Repls and value to make new token.
+        if not self.repls:
             return self
-        # Get the options, from the token type or from the keywords.
-        if typ:
-            spliced, trigraph, unicode = (
-                typ.spliced, typ.trigraph, typ.unicode)
-        # Special case.  clang reverts to the unicode character even
-        # if it was a UCN in the source.
-        codepoint = (unicode and not orig_spelling
-                     and typ and not typ.quoted and self.lexer.prep.clang
-                    )
-        newvalue = self.lexer.repls.revert(
-            self, spliced, trigraph, unicode, codepoint)
-        return self.copy(reverted_from=self, value=newvalue,
-                         value_orig=self.value)
+        newtok: PpTok = self.repls.revert(self, stage or self.type.revert,
+                                          force=force)
+        return newtok
 
     @property
     def match(self) -> re.Match | None:
@@ -509,7 +557,7 @@ class PpTok:
 
     def brk(self) -> bool:
         """ Break condition for debugging. """
-        return break_match(line=self.loc and self.phys_lineno,
+        return break_match(line=self.loc and self.lineno,
                            col=self.loc and self.colno,
                            pos=self.datapos,
                            file=self.loc and self.source
@@ -521,88 +569,88 @@ class PpTok:
         """
         return f"{self.spacing and ' ' or ''}{self.value}"
 
-    # Special characters used in repr()...
+    # Special characters used in __repr__()...
     class Reprs:
-        null = 'φ'
-        spacing = '•'
-        toline = '↑'
-        tocol = '→'
-        paste = 'π'        # '##' concatenate in macro
-        tostr = 'Σ'        # '#' stringize in macro
+        # For tokens...
+        marker = 'φ'        # '' Empty param or VaOpt or macro expansion.
+        paste = 'π'         # '##' concatenate in macro
+        tostr = 'σ'         # '#' stringize in macro
+        nl = '↩'            # newline
+        # For separators...
+        nospace = '⦾'       # TokSepNone
+        spacing = '•'       # TokSepSpace
+        maybe = '‖'         # TokSepPad
+        toline = '🠙'        # TokSepIndent, with {line}(:{col})?
+
+    def show_pads(self) -> str:
+        """ A display of self which shows any pads. """
+        try: pads = ''.join(str(pad) for pad in self.pads)
+        except AttributeError: pads = ''
+        if pads: pads += ' '
+        return f'{pads}{self!r}'
 
     def __str__(self) -> str:
         val = self.value
         if not self.type:
             rep = f"{val!r}"
         elif self.type.str:
-            rep = f'"{val}"'
+            rep = f'‘{val}’'
         elif self.type.dir and hasattr(self, 'line'):
-            rep = f"\'{self.line}\'"
-        elif self.type.passthru:
-            rep = "<passthru>"
+            rep = f"‘{self.line}’"
+        elif self.type.group:
+            rep = f"<group {self.source}>"
         elif self.type.paste:
             rep = self.Reprs.paste
         elif self.type.stringize:
             rep = self.Reprs.tostr
+        elif self.type.marker:
+            rep = self.Reprs.marker
+        elif self.type.nl:
+            rep = self.Reprs.nl
         elif val:
-            rep = f"{val}"
-        elif self.type.pos: rep = f'<pos {self.pos}>'
-        else: rep = self.Reprs.null
+            rep = f"‘{val}’"
+        elif self.type.newpos: rep = f'<newpos {type(self.newpos).__name__}>'
+        else: rep = "''"
         return rep
 
     def __repr__(self) -> str:
         rep = str(self)
-        indent = self.indent
-        if indent:
-            # Sets output position, maybe indirectly.
-            if indent.colno > 1:
-                rep = f"{self.Reprs.tocol}{indent.colno - 1} {rep}"
-            rep = f"{self.Reprs.toline}{indent.phys_lineno} {rep}"
+        seps: str
+        if self.sep:
+            rep = f"{self.sep} {rep}"
+        if self.sep_after:
+            rep = f"{rep} {self.Reprs.spacing}"
         rep = f"{rep} @{self.loc.showpos}"
         if self.hide:
             rep = f"{rep} - {self.hide!r}"
-        if self.spacing:
-            rep = f"{self.Reprs.spacing} {rep}"
 
         return rep
 
 
 class MoveTok(PpTok):
     """
-    Specialized PpTok which carries an OutPosMove as self.pos to indicate a
+    Specialized PpTok which carries an OutPosMove as self.newpos to indicate a
     change in output location which takes effect at this token's location.
     This is reused by all tokens until a new OutPosMove is seen.
     """
-    def __init__(self, lexer: PpLex, pos: OutPosMove, **attrs):
+    def __init__(self, lexer: PpLex, newpos: TokMove, **attrs):
         """ Constructed from another token and an OutPosChange.  Copies the
         token's location and other attributes, but with type CPP_NEWPOS.
         """
         super().__init__(lexer, **attrs)
-        self.pos = pos
-        self.addline = pos.lineno - self.lineno - 1
+        self.newpos = newpos
 
-    def __getitem__(self, src_lineno: int) -> int:
-        """ Maps a source line to a presumed output line. """
-        return src_lineno + self.addline
-
-    def linemacro(self, m: PpTok) -> int:
-        """
-        Evaluate a __LINE__ macro token where self is the move currently in
-        effect.
-        """
-        return m.phys_lineno + self.addline
-
-    def filemacro(self) -> str:
-        """ Evaluate a __FILE__ macro token. """
-        return self.pos.filename or self.loc.output_filename
 
 @dataclass(frozen=True)
 class TokLoc:
     """
-    The location within a Source of a PpTok.  It does not change even if other
-    token attributes change or the token is copied.  Useful to compare tokens.
+    The location within a Source of the start of data for a PpTok.  This is
+    kept in the PpLex, then stored in the PpTok when the token is lexed.
+
+    It does not change even if other token attributes change or the token is
+    copied.  Useful to compare tokens.
     """
-    # Logical Line number, starting at 1.
+    # Physical Line number, starting at 1.
     lineno: int
     # The Source it was lexed from.
     source: Source
@@ -610,7 +658,7 @@ class TokLoc:
     datapos: int
     # Column number of start of value, starting at 1.
     colno: int
-    # Current out location change.
+    # Current out location change.  Comes from a #line directive executed.
     move: PresumeMover
     # Physical line number - self.lineno.
     phys_offset: ClassVar[int] = 0
@@ -619,71 +667,131 @@ class TokLoc:
         return dataclasses.replace(self, **attrs)
 
     @property
-    def phys_lineno(self) -> int:
+    def log_lineno(self) -> int:
         """
-        Physical line where token is located, rather than lineno, which is the
-        logical line.
+        Logical line where token is located, rather than lineno, which is the
+        physical line.
         """
-        return self.lineno + self.phys_offset
+        return self.lineno - self.phys_offset
 
     @property
     def output_lineno(self) -> int:
         """ Presumed line number for writing a token. """
-        return self.move.lineno(self.phys_lineno)
+        return self.move.out_lineno(self.lineno)
 
     @property
     def output_filename(self) -> str:
         """
         Presumed file name for writing a token.  Used for __FILE__ macro at
         this location. """
-        return self.move.filename
-
-    def linemacro(self) -> int:
-        """
-        Evaluate this token as a __LINE__ macro.  self.move maps phys line
-        numbers to output line numbers.  Without self.move, the mapping is an
-        identity.
-        """
-        if self.move:
-            return self.move.linemacro(self)
-        else:
-            return self.phys_lineno
-
-    def filemacro(self) -> str:
-        """ Evaluate this token as a __FILE__ macro. """
-        if self.move:
-            return self.move.filemacro()
-        else:
-            return self.source.filename
+        return self.move.out_filename(self.source)
 
     @property
     def showpos(self) -> str:
         """ String for just the line and column, not the source. """
         if self.phys_offset:
-            line = f"{self.lineno}/{self.lineno + self.phys_offset}"
+            line = f"{self.log_lineno}/{self.lineno}"
         else:
             line = f"{self.lineno}"
         return f"{line}:{self.colno}"
 
     def brk(self) -> bool:
         """ Break condition for debugging. """
-        return break_match(line=self.phys_lineno,
+        return break_match(line=self.lineno,
                            col=self.colno,
                            pos=self.datapos,
                            file=self.source and self.source.filename,
                            )
 
     def __str__(self) -> str:
-        filename = self.move.filename
-        filename = (f'/{filename!r}'
-                    * bool(filename != self.source.filename))
-        return f"{self.source}{filename} @{self.showpos}"
+        if self.source:
+            filename = self.output_filename
+            filename = (f'/{filename!r}'
+                        * bool(filename != self.source.filename))
+            filename = f"{self.source}{filename}"
+        else:
+            filename = '<no file>'
+        return f"{filename} @{self.showpos}"
 
     def __repr__(self) -> str:
         return f"{self}"
 
-s = TokLoc(1, 2, 3, 4, 5)
-    
+class TokLocRange(TokLoc):
+    """ Location range within a Source file data. """
+    src_stop: int                       # End of the range.
+
+    def __init__(self, src_stop: int = None, *args, **kwds):
+        super().__init__(*args, **kwds)
+        self.src_stop = src_stop
+
+    @property
+    def src_range(self) -> Range[str]:
+        return Range[str](self.datapos, self.src_stop)
+
+
+class TokLocMoveBase:
+    """
+    An object which represents a (possible) #line directive executed in a
+    Source file.  At any point in the file, it will provide the presumed line
+    number and filename.  These are used when writing a #line directive and
+    when expanding __LINE__ and __FILE__ macros.
+
+    As an optimization, the base class has no #line associated with it, and is
+    used for the entire source file, or until the first #line is executed.
+    The methods for presumed line number and file name are trivial.
+
+    """
+    filename: str = None
+
+    def out_lineno(self, src_lineno: int) -> int:
+        """
+        The output line number for given source line number.  This class
+        returns the given line number.
+        """
+        return src_lineno
+
+    def out_filename(self, source: Source) -> str:
+        """
+        The output file name for given Source.  This class returns the Source's actual filename.
+        """
+        return source.filename
+
+
+class TokLocMove(TokLocMoveBase):
+    """
+    A shift in line number and/or filename within a Source.  Used to get
+    output line number and filename, and __LINE__ and __FILE__ macro values.
+
+    It is associated with a sub-range of the source data, starting after an
+    executed #line directive and extending to the next one, or to the end of
+    the data.
+    """
+    delta_lineno: int           # Add to src_lineno to get output.
+    filename: str = ""          # Output filename, if overriding Source.
+
+    def __init__(self,
+                 # Token for the #line directive, which takes effect at the
+                 # following line.
+                 dir: PpTok,
+                 # New line number.
+                 lineno: int,
+                 # New file name, if any.  Otherwise use the current lexer's
+                 # move's file name.
+                 filename: str,
+                 ):
+        self.delta_lineno = lineno - dir.lineno - 1
+        filename = filename or dir.lexer.move.filename
+        if filename:
+            self.filename = filename
+
+    def out_lineno(self, src_lineno: int) -> int:
+        """ Presumed line number for actual source line number. """
+        return src_lineno + self.delta_lineno
+
+    def out_filename(self, source: Source) -> str:
+        return self.filename or source.filename
+
+
 class Tokens(collections.UserList[PpTok]):
     """
     An iterable of PpTok tokens, constructed from an iterable of these tokens.
@@ -716,7 +824,6 @@ class Tokens(collections.UserList[PpTok]):
 # The TTokens type is anything which can iterate PpTok objects.
 TTokens = typing.NewType('TTokens', typing.Iterator[PpTok])
 
-# New and improved TokIter class.
 class TokIter(typing.Iterator[PpTok]):
     """
     A specialized Iterator of PpTok objects.
@@ -753,7 +860,7 @@ class TokIter(typing.Iterator[PpTok]):
     iterator, thus preserving future iteration result.
     """
 
-    # The generator of Tokens.  self.gen() returns next token or
+    # The generator of Tokens.  next(self.gen) returns next token or
     # StopIteration.  Will change after the first Item is exhausted, leaving
     # only the remainder.  Will be an empty iterator after the iteration is
     # exhausted.
@@ -769,7 +876,9 @@ class TokIter(typing.Iterator[PpTok]):
     # to return the macro name identifier verbatim.
     in_defined_expr: ClassVar[bool] = False
 
-    if __debug__: _serial = itertools.count(1)
+    if __debug__:
+        _serial = itertools.count(1)
+        ser: int
 
     def __init__(self, gen: Iterable[PpTok] = None):
         """
@@ -778,25 +887,29 @@ class TokIter(typing.Iterator[PpTok]):
         """
         if gen:
             if isinstance(gen, typing.Sequence):
-                self.gen = (self.SeqGen(self, gen, self.Empty))
+                self.set_gen(self.SeqGen(self, gen, self.Empty))
             else:
-                self.gen = (self.PairGen(self, gen, self.Empty))
+                self.set_gen(self.PairGen(self, gen, self.Empty))
         else:
-            self.gen = self.Empty
+            self.set_gen(self.Empty)
         if __debug__: self.ser = next(self._serial)
 
-    def __iter__(self): return self
+    def __iter__(self):
+        while True:
+            try: yield next(self.gen)
+            except StopIteration: return
+
     def __next__(self) -> PpTok:
         return next(iter(self.gen))
 
     def __bool__(self) -> bool: return bool(self.gen.peek())
 
-    def peek(self) -> PpTok | None:
-        return self.gen.peek()
-
     @classmethod
     def class_init(cls):
         cls.Empty = cls.EmptyGen()
+
+    def set_gen(self, gen: Iterable[PpTok]) -> None:
+        self.gen = gen
 
     @classmethod
     def empty(cls) -> TokIter:
@@ -836,19 +949,22 @@ class TokIter(typing.Iterator[PpTok]):
 
         return tokens
 
+    def peek(self) -> PpTok | None:
+        return self.gen.peek()
+
     def putback(self, token: PpTok) -> None:
         """ Puts a given token in front of the existing iteration. """
 
-        self.gen = self.LookaheadGen(self, token, self.gen)
+        self.set_gen(self.LookaheadGen(self, token, self.gen))
 
     def prepend(self, gen: Iterable[PpTok]) -> None:
         """
         Puts a given token iterable in front of the existing iteration.
         """
         if isinstance(gen, typing.Sequence):
-            self.gen = self.SeqGen(self, gen, self.gen)
+            self.set_gen(self.SeqGen(self, gen, self.gen))
         else:
-            self.gen = self.PairGen(self, gen, self.gen)
+            self.set_gen(self.PairGen(self, gen, self.gen))
 
     def get_tokens(self, max: int = None) -> Tokens:
         """
@@ -867,6 +983,34 @@ class TokIter(typing.Iterator[PpTok]):
                     yield tok
             return Tokens(toks())
 
+    def gen_until(self, pred: Callable[[PpTok], bool]) -> Iterator[PpTok]:
+        """
+        Generate all initial tokens which DO NOT satisfy pred(tok).  These are
+        consumed but the next token, if any, remains in the iteration.
+        """
+        tok: PpTok = self.peek()
+        if not tok or pred(tok):
+            return
+        for tok in self:
+            if pred(tok):
+                self.putback(tok)
+                break
+            yield tok
+
+    def gen_while(self, pred: Callable[[PpTok], bool]) -> Iterator[PpTok]:
+        """
+        Generate all initial tokens which satisfy pred(tok).  These are
+        consumed but the next token, if any, remains in the iteration.
+        """
+        tok: PpTok = self.peek()
+        if not (tok and pred(tok)):
+            return
+        for tok in self:
+            if not pred(tok):
+                self.putback(tok)
+                break
+            yield tok
+
     def copy_tokens(self, max: int = None) -> Tokens:
         """
         Runs the iteration, puts the iterated tokens back into self, and
@@ -880,8 +1024,63 @@ class TokIter(typing.Iterator[PpTok]):
         return toks
 
     @from_generator
+    def apply(self, func: Callable[[PpTok], PpTok]) -> Iterator[PpTok]:
+        """ New iterator with given function called on the tokens. """
+        yield from (func(tok) for tok in self)
+
+    def apply_first(self, func: Callable[[PpTok], PpTok]) -> TokIter:
+        """
+        Same iterator with the first token (if any) changed by calling the
+        given function, and remaining tokens unchanged.
+        """
+        for tok in self:
+            self.putback(func(tok))
+            break
+        return self
+
+    @from_generator
+    def frame_pads(self, ref: PpTok) -> Iterator[PpTok]:
+        """
+        Generate the tokens, preceded and followed by pads.  A φ is supplied
+        for an empty iterator.
+        """
+        tok: PpTok = next(self, None)
+        if not tok:
+            tok = ref.make_marker()
+        # First token, or new marker.  Gets sep added.
+        tok = tok.add_sep(ref.sep)
+        prev = tok
+        for tok in self:
+            yield prev
+            prev = tok
+        # Last token.  Gets sep after itself.
+        tok = tok.add_seps_after()
+        yield tok
+
+    @from_generator
+    def skip_pads(self) -> list[PpTok]:
+        """
+        Consume and return pad tokens at the beginning.  Depending on what the
+        next non-pad token is, the caller may want to output these pads.
+        """
+        if not self.peek().pad:
+            return []
+        result: list[PpTok] = []
+        for tok in self:
+            if tok.pad:
+                result.append(tok)
+            else:
+                self.putback(tok)
+                break
+        return result
+
+    @from_generator
     def strip(self) -> Iterator[PpTok]:
-        """ Remove leading/trailing whitespace. """
+        """
+        Remove leading/trailing whitespace.  Only the first token can have
+        whitespace, so that is removed.  Remaining tokens are unchanged.
+        Returns self.
+        """
         tok = next(self, None)
         if tok:
             yield tok.without_spacing()
@@ -932,11 +1131,6 @@ class TokIter(typing.Iterator[PpTok]):
             super().__init__(ti)
             self.tok = tok
             self.tail = tail
-
-        def gen(self) -> Iterator[PpTok]:
-            tail = self.tail
-            self.ti.gen = tail
-            yield self.tok
 
         def __next__(self) -> PpTok:
             """ Get the next token.  Reset ti to point to tail. """
@@ -1007,21 +1201,18 @@ class TokIter(typing.Iterator[PpTok]):
             ti to point to tail and try again.
             """
             tok: PpTok = next(self.head, None)
-            if __debug__: self.i += 1
+            self.i += 1
             if tok: return tok
 
             self.ti.gen = iter(self.tail)
             return next(self.ti)
 
-        def gen(self) -> Iterator[PpTok]:
-            for self.i in range(self.len):
-                yield self.head[self.i]
-            self.ti.gen = iter(self.tail)
-            tok = next(self.ti, None)
-            if tok: yield tok
-
         def peek(self) -> PpTok | None:
-            return self.toks[self.i]
+            if self.i < self.len:
+                return self.toks[self.i]
+            self.ti.gen = iter(self.tail)
+            return self.ti.peek()
+
 
         if __debug__:
             def printitems(self, indent: str) -> None:
@@ -1052,109 +1243,6 @@ class TokIter(typing.Iterator[PpTok]):
 
 TokIter.class_init()
 
-# This will iterate with 42, 43, 44.
-
-ti = TokIter.empty()
-ti.putback(42)
-
-ti = TokIter([42, 43])
-t = next(ti)
-t = next(ti)
-t = next(ti, None)
-ti = TokIter.from_tokens([42, 43])
-next(ti)
-next(ti)
-next(ti, None)
-ti = TokIter.from_token(44)
-ti.prepend([42, 43])
-next(ti)    # 42
-next(ti)    # 43
-next(ti)    # 44
-next(ti, None)
-for t in ti:
-    pass
-# This will iterate with 41, then 42, 43, 42, 43, ... forever.
-ti = TokIter(itertools.cycle([43, 44]))
-ti.putback(42)
-next(ti)    # 42
-next(ti)    # 43
-next(ti)    # 44
-next(ti)    # 43
-next(ti)    # 44
-
-# Empty iterator
-ti = TokIter.empty()
-bool(ti)    # False
-ti.peek()   # None
-next(ti, None)  # None
-
-def reduce_ws(toks: Iterable[PpTok], prep: Preprocessor) -> Iterable[PpTok]:
-    """ Compresses whitespace, as in translation phase 3.
-    However, comments will be preserved if the Preprocessor says so.  Tabs
-    have been expanded, if specified by command line arguments.
-
-    Zero or more whitespace characters before the first non-whitespace
-    character are replaced by an indentation token
-
-    One or more other whitespace characters are replaced by a single space.
-
-    Consumes the input if it is an iterator.
-    """
-
-    tok: PpTok
-    have_ws: bool = False
-    all_ws: bool = True
-
-    for tok in toks:
-        if tok.type.nl:
-            have_ws = False
-            all_ws = True
-        elif (tok.type.ws
-              and (not tok.type.comment
-                   or not prep.on_comment(tok)
-                  )
-             ):
-            # This is whitespace to compress
-            if have_ws or all_ws: continue
-            # First consecutive whitespace token.
-            have_ws = True
-            tok = tok.make_space()
-        else:
-            # Non-whitespace.
-            if all_ws:
-                #yield tok.make_indent()
-                all_ws = False
-            have_ws = False
-
-        yield tok
-
-@TokIter.from_generator
-def filt_line(toks: TokIter, lineno: int) -> Iterator[Pptok]:
-    """
-    Generates all incoming tokens having the given line number.  Any following
-    token is put back into the input.
-    """
-    for tok in toks:
-        if tok.lineno == lineno:
-            yield tok
-        else:
-            toks.putback(tok)
-            break
-
-def split_lines(toks: Tokens) -> Iterator[Tokens]:
-    """ Breaks the Tokens into groups separated by newlines.
-    Each line is a Tokens object (without the newline),
-        which is reused each time.
-    """
-    line = Tokens()
-    for tok in toks:
-        if tok.type.nl:
-            yield line
-            line.clear()
-        else:
-            line.append(tok)
-    if line:
-        yield line
 
 # ----------------------------------------------------------------------
 # tokenstrip()

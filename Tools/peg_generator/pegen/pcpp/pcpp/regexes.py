@@ -1,4 +1,5 @@
 """ regexes.py
+
 Collection of regular expressions used by a lexer.
 """
 
@@ -39,20 +40,18 @@ class RegExes:
 
         # Newline.
         self.newline = r'(\n)'
+
         # Whitespace, other than newline, i.e. ' ', \f, \t, \v, \r.
         ws = r'(((?!\n)\s)+)'
 
         # Hex char.
         hex = r'[0-9a-fA-F]'
         hexlower = r'[0-9a-f]'
-        # Hex nondigit
-        hexletter = r'[a-fA-F]'
         # Digit
         digit = r'[0-9]'
         self.digit = digit
         # Octal digit
         oct = r'[0-7]'
-
 
         # All escapes will be replaced in the original data by single
         # codepoint characters they represent, if possible.  self.repl_escape
@@ -146,7 +145,7 @@ class RegExes:
         #    - C11, listed in standard annex D.1.
 
         # An identifer has the form (AS | US) (AC | UC)*.  
-        # There is no regex for US or UC, so they are lexed as a general
+        # There is no regex for US or UC, so these are lexed as a general
         # unicode codepoint, which may or not be valid at their locations in
         # the identifier.  The token function will check their validity and
         # change the lexed token if it finds any invalid codepoints.
@@ -155,7 +154,6 @@ class RegExes:
         char_asc_cont = '[a-zA-Z_0-9]'      # AC character
         # A codepoint char whose value is validated by the token function.
         char_uni = codepoint()              # US or UC character.
-        #char_uni_group = codepoint_group    # US or UC character with 'esc'
 
         # Initial ascii characters (at least one) of identifier.
         ident_asc_start = f'{char_asc_start}{char_asc_cont}*'
@@ -170,13 +168,12 @@ class RegExes:
             )
 
         # Continuation character(s) of an identifier, with groups 'asc' and
-        # 'uni'.  'uni' group has group 'esccont'.
+        # 'uni'.
         ident_cont_group = self.joinalts(
             # ascii character(s) as group 'asc'
             self.group(f'({char_asc_cont}+)', 'asc'),
             # single unicode character as group 'uni'
             self.group(codepoint('numcont'), 'uni'),
-            #self.group(codepoint('esccont'), 'uni'),
             )
         # The complete RE for the identifier, before the token function
         # handles any unicode characters.  
@@ -229,41 +226,40 @@ class RegExes:
         #   Available prefixes vary with the language and version.
         #   u8 sometimes recognized only for strings.
         #
-        #                   L   u   U   u8"" u8''
-        #                   ---------------------
+        #                   L   u   U   u8'' u8""   R
+        #                   -------------------------
         #       c99         ✓
-        #       C11, C17    ✓  ✓  ✓  ✓   ✓  
-        #       C23         ✓  ✓  ✓  ✓   ✓
-        #       C++11, 14   ✓  ✓  ✓  ✓
-        #       C++17 - 23  ✓  ✓  ✓  ✓   ✓
+        #       C11, C17    ✓  ✓  ✓       ✓ 
+        #       C23         ✓  ✓  ✓  ✓   ✓ 
+        #       C++11       ✓  ✓  ✓       ✓     ✓
+        #       C++14 - 23  ✓  ✓  ✓  ✓   ✓     ✓ 
 
-        # gcc and clang don't follow these standards in a few cases.
+        # NOTE: clang doesn't recognize u8'...' with C++14.
 
-        # C++...
-        if lang.cplus_ver:
-            if lang.cplus_ver >= 2017:
-                strprefix = chrprefix = 'L u U u8'
-            elif lang.cplus_ver >= 2011:
-                strprefix =  'L u U u8'
-                chrprefix =  'L u U'
-        # C...
-        elif lang.c_ver >= 2023:
-            strprefix = chrprefix = 'L u U u8'
-        elif lang.c_ver >= 2011:
-            strprefix = chrprefix =  'L u U u8'
-        else:
+        # TODO: See which cases GCC gets wrong.
+
+        if 0 < lang.c_ver < 2011:
             # C99
-            strprefix = chrprefix = 'L'
+            strprefixes = chrprefixes = 'L'
+        else:
+            # C11 and C++
+            strprefixes = chrprefixes = 'L u U u8'
+            if 0 < lang.c_ver <= 2017 or 0 < lang.cplus_ver < 2014:
+                chrprefixes = 'L u U'
+            # clang gets it wrong with C++14.
+            if lang.clang and lang.cplus_ver == 2014:
+                # Doesn't recognize u8'...'.
+                chrprefixes = 'L u U'
 
-        strprefix = f"(?P<pfx>({'|'.join(strprefix.split())})?)"
-        chrprefix = f"(?P<pfx>({'|'.join(chrprefix.split())})?)"
+        strprefix = f"(?P<pfx>({'|'.join(strprefixes.split())})?)"
+        chrprefix = f"(?P<pfx>({'|'.join(chrprefixes.split())})?)"
 
-        # User-defined suffix for number, char, or string literal (C++ only,
-        # also clang).  Any identifier that begins with '_'.  However, if it
-        # does not begin with '_', and not lexing a pasted value, clang lexes
-        # it anyway, with an error diagnostic. 
-        if lang.cplus_ver or lang.clang:
-            if pasting:
+        # User-defined suffix for number, char, or string literal (C++ only).
+        # Any identifier that begins with '_'.  However, if it does not begin
+        # with '_', and not lexing a pasted value, clang lexes it anyway, with
+        # an error diagnostic. 
+        if lang.cplus_ver:
+            if pasting and lang.clang:
                 # Paste token lexing requires the initial _.
                 opt_ud_sfx = f'(?P<ud_sfx>_{self.ident})?'
             else:
@@ -292,13 +288,6 @@ class RegExes:
         quoted = r'([^\\\n]|(\\(.|\n)))*?'
 
         # Escape sequence (C99 6.4.4.4).  Can appear in cchar or schar.
-        #escapebody = self.joinalts(      # What can follow the backslash.
-        #    r'[\'"?\\abfnrtv]',
-        #    r'[oct]{{1,3}}',
-        #    rf'x{hex}+',
-        #    ucnbody,
-        #    r'.',
-        #    )
         escape = rf'\\({escbody})'
 
         # s-char.  Part of a string literal (C99 6.4.5).  
@@ -331,19 +320,22 @@ class RegExes:
             {opt_ud_sfx}                # optional ud-suffix
             """)
 
-        # h-char.  Part of a <...> header name (C99 6.4.7).
+        # h-char.  Part of a <...> header name (C99 6.4.7).  
         # Any source char other than newline or >.
         hchar = fr'((?![>\n]).)'
         set_re(hhdrname=rf'<({hchar})*>')
 
-        # q-char.  Part of a "..." header name (C99 6.4.7).
+        # q-char.  Part of a "..." header name (C99 6.4.7).  
         # Any source char other than newline or ".
         qchar = fr'((?!["\n]).)'
         set_re(qhdrname=rf'\"({qchar})*\"')
 
-        # Raw string (C++14 5.13.5).  Also accepted by GCC C.
+        # Raw string (C++14 5.13.5).  Also accepted by GCC C with GNU
+        # extensions.
+
         # Delimeter in a raw string.  Named group "delim".
         delim = r'(?P<delim>[^()\\\s]*)'
+
         # Complete raw string.
         set_re(rstring=rf'''
             (?s)
@@ -352,13 +344,11 @@ class RegExes:
             {opt_ud_sfx}                # optional ud-suffix
             ''')
 
-
         # Digit separator.  Only for C++.
         if lang.cplus_ver:
             digsep = "[']?"                 # Optional "'".
         else:
             digsep = ""
-        # Otherwise, C++ and C are the same.
 
         # Preprocessing number (C99 6.4.8), (C++14 5.9).
         # Note, the grammar makes use of general identifier characters
@@ -468,11 +458,12 @@ class RegExes:
 
         # Patterns used to find repls in the input for each replacement stage.
 
-        # The 9 trigraphs.
+        # The 9 trigraphs.  TRIGRAPH stage.
         set_re(repl_trigraphs=lang.trigraphs and r'\?\?[=\(/\)\'<\!>\-]')
-        # Line splices, after trigraphs replaced.
+        # Line splices, after trigraphs replaced.  SPLICE stage.
         set_re(repl_splice=fr'\\{ws}*\n')
-        # Escape sequences, after trigraphs and splices replaced.
+        # Escape sequences, after trigraphs and splices replaced.  ESCAPE
+        # stage
         repl_escape_body = self.joinalts(
             escbody,
             cplusescbody,

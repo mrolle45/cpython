@@ -1,7 +1,9 @@
-#!/usr/bin/python
-# Python C99 conforming preprocessor command line
-# (C) 2017-2020 Niall Douglas http://www.nedproductions.biz/
-# Started: March 2017
+#!/usr/bin/python  
+# Python C99 conforming preprocessor command line  
+# (C) 2017-2020 Niall Douglas http://www.nedproductions.biz/  
+# Started: March 2017  
+# Updated: Jun 2024 by Michael Rolle
+
 
 from __future__ import annotations
 
@@ -96,11 +98,6 @@ class CmdPreprocessor(Preprocessor):
             enc: str = args.assume_input_encoding
             if enc == 'auto': enc = None
             self.input_encoding = enc
-            #if len(args.inputs) == 1:
-            #    # Reopen our input files with the appropriate encoding
-            #    _ = self.on_file_open(False, args.inputs[0].name)
-            #    args.inputs[0].close()
-            #    args.inputs[0] = _
             if args.output_encoding is None:
                 args.output_encoding = enc
         if args.output_encoding:
@@ -145,6 +142,7 @@ class CmdPreprocessor(Preprocessor):
                     f"{' with GNU extensions' * bool(args.gnu)}"
                     ".")
         print(msg)
+        self.log.write(msg)
         out = args.output
         if out is not sys.stdout:
             print(f"Output file {os.path.abspath(out.name)!r}")
@@ -197,10 +195,14 @@ class CmdPreprocessor(Preprocessor):
             once_objs = [file.once for file in self.files.values()
                           if file.once]
             if once_objs:
-                print("\nPragma once files (including heuristically applied):")
+                print("\nPragma once files (including heuristically applied):"
+                      )
                 print("====================================================")
                 for once in sorted(once_objs,
-                                key=lambda once: (os.path.basename(once.file.filename), once.file.filename)):
+                                   key=lambda once: (os.path.basename(
+                                                        once.file.filename),
+                                                        once.file.filename)
+                                   ):
                     hint = once.guard or '#pragma'
                     print(f" {once.file.filename} ({hint})")
 
@@ -224,7 +226,9 @@ class CmdPreprocessor(Preprocessor):
                 else:
                     filetimes[path] = [self.include_times[n].elapsed,
                                        self.include_times[n].elapsed]
-                if self.include_times[n].elapsed > 0 and len(currentfiles) > 1:
+                if (self.include_times[n].elapsed > 0
+                        and len(currentfiles) > 1
+                        ):
                     filetimes[currentfiles[-2]][1] -= (
                               self.include_times[n].elapsed)
             filetimes = [(v[0],v[1],k) for k,v in filetimes.items()]
@@ -236,12 +240,7 @@ class CmdPreprocessor(Preprocessor):
 
     def write(self, toks: TokIter, oh=sys.stdout):
         writer = Writer(self)
-        try:
-            writer.write(toks, oh)
-        except Exception as e:
-            #traceback.print_exc()
-
-            raise
+        writer.write(toks, oh)
         return
 
     def make_args(self, argv) -> tuple[Namespace, list[str]]:
@@ -466,8 +465,9 @@ class CmdPreprocessor(Preprocessor):
             self, argp: ArgumentParser, title = None, description = None, *,
             exclusive: bool = False
             ) -> Callable[str, ...]:
-        """ Defines an argument group, which may be exclusive.
-        Returns a function which calls the group.add_argument() method.
+        """
+        Defines an argument group, which may be exclusive.  Returns a function
+        which calls the group.add_argument() method.
         """
         group = argp.add_argument_group(title, description)
         if exclusive:
@@ -505,17 +505,16 @@ class CmdPreprocessor(Preprocessor):
         """
         Called when there is any directive with a name (not a bare #).
         
-        Return True to execute and remove from the output,
-        raise OutputDirective to pass through or remove without execution,
-        or return None to execute AND pass through to the output
-        (this only works for #define, #undef).
+        Return True to execute and remove from the output, raise
+        OutputDirective to pass through or remove without execution, or return
+        None to execute AND pass through to the output (this only works for
+        #define, #undef).
         
-        The default returns True (execute and remove from the output).
-        A subclass could override this.
+        The default returns True (execute and remove from the output).  A
+        subclass could override this.
 
-        directive is the directive name,
-        toks is the tokens after the directive,
-        ifpassthru is whether we are in passthru mode,
+        directive is the directive name, toks is the tokens after the
+        directive, ifpassthru is whether we are in passthru mode,
         precedingtoks is the tokens preceding the directive from the # token
             until the directive name.
         """
@@ -560,7 +559,8 @@ class CmdPreprocessor(Preprocessor):
 class UndefAction(argparse.Action):
     """
     An action which stores its argument followed by a "-" to distinguish it
-    from a define. """
+    from a define.
+    """
     def __init__(self, **kwds): super().__init__(**kwds)
 
     def __call__(self, parser, namespace, values, option_string) -> None:

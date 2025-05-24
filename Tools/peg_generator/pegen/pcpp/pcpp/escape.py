@@ -15,47 +15,6 @@ import codecs
 from pcpp.common import *
 from pcpp.regexes import RegExes
 
-# Regular expressions.  Varies with language options.  
-# Before lexing the source file, and after performing translation phases 1 and
-# 2, the lexer replaces each escape with a single character, if possible, or
-# else a canonical error escape.
-
-#@functools.cache
-#def escape_regex(lang: Preprocessor.Language):
-#    REs = RegExes(lang)
-
-#    def body_alts() -> Iterator[str]:
-#        """ Generate the alternative regexes for the escape body. """
-#        # Reference C 6.4.4.4. or C++ 5.13.3.
-#        hex = '[0-9a-fA-F]'
-#        oct = '[0-7]'
-#        # simple-escape-sequence.
-#        yield r'[\'"?\\abfnrtv]'
-#        # octal-escape=seuence
-#        yield rf'{oct}{{1,3}}'
-#        # hexadecimal-escape=seuence
-#        yield rf'x{hex}+'
-#        # universal-character-name (C 6.4.4.4, C++ 5.3)
-#        yield rf'u{hex}{{4}}'
-#        yield rf'U{hex}{{8}}'
-#        # New in C++23, also clang for all languages;
-#        if lang.cplus_ver >= 2023 or lang.clang:
-#            # universal-character-name
-#            yield rf'u{{{hex}+}}'
-#            # named-universal-character
-#            n_char = '[^\\n}}]'         # any but '}' or '\n'.
-#            yield rf'N{{{n_char}+}}'
-#            # octal-escape=seuence
-#            yield rf'o{{{oct}+}}'
-#            # hexadecimal-escape=seuence
-#            yield rf'x{{{hex}+}}'
-#        # conditional-escape-sequence.  Any single char not in the above.
-#        yield '.'
-
-#    body = REs.joinalts(*body_alts())
-#    regex = REs.wrap(rf'\\{body}')
-#    return regex
-
 
 class EscapeDiag(Exception):
     """
@@ -211,22 +170,6 @@ class EscSimple(Escape):
     """ Simple escape '\' + single character with corresponding value. """
     pass
 
-def make_simple_escape(body: str):
-    """
-    Create global class EscXX, with given body and corresponding body and
-    replacement.  Class will be a singleton.
-    """
-    val: int = ord(body)
-    name: str = f'{val:02X}'
-    clsdict = dict(value=val,
-                   body=body,
-                   _repl=rf'\{{{name}}}',
-                   __new__=lambda cls: cls.instance,
-                   )
-    cls: Type[Escape] = type(f'Esc{name}', (Escape, ), clsdict)
-    cls.instance = object.__new__(cls)
-    globals()[cls.__name__] = cls
-
 
 '\'"?abfnrtv'
 class Esc27(EscSimple): value = 0x27; _repl = r'\{27}'; body = '\''
@@ -261,6 +204,7 @@ class EscBodyLen(EscBody):
             self.set_diag(rf'Truncated escape sequence',
                        #warn=True,
                        )
+
 
 class EscDelim(EscBody):
     """ Escape of the form '\' <prefix> { <body> }. """
@@ -309,11 +253,9 @@ class EscUnicode(Escape):
         self.getvalue()
 
     def getvalue(self) -> int | None:
-        #if self.err:
-        #    return None
         codepoint: int = super().getvalue()
         # Check for invalid codepoint.
-        if codepoint is not None:
+        if codepoint is not None and not self.diag:
             handler = self.mgr.invalid_codepoints.get(codepoint)
             if handler:
                 handler(self, codepoint)
@@ -323,27 +265,13 @@ class EscUnicode(Escape):
     def repl(self) -> str | None:
         """
         Replacement for the escape in the ESCAPE stage of the Lexer
-        replacement pass.  There is always some replacement string, even for
-        invalid escapes.  In most cases, it is a single unicode character
-        designated by the escape.  Otherwise it is a placeholder string which
-        will let it be lexed as part of a quoted or an identifier token.
+        replacement pass.  In most cases, it is a single unicode character
+        designated by the escape.
         """
         if self.err:
             return None
         val = self.value
-        if val and val < 0:
-            # Placeholder for escape which has no defined value.
-            return None
-            return r'\{}'
-        try:
-            if val and val >= 0x20:
-                return chr(val)
-        except ValueError:
-            # Value is out of range.
-            pass
-        # Value is out of range, or an ASCII control character.
-        return None
-        return rf'\{{{val:x}}}'
+        return chr(val)
 
     # Handlers for an invalid codepoint ...
     def diag_name(self, codepoint: int) -> int:
@@ -354,21 +282,46 @@ class EscUnicode(Escape):
 
     def diag_control(self, codepoint: int) -> None:
         """ Handle a codepoint which is a control code. """
-        if not self.ctrlexpr:
-            self.set_diag(
-                f"Universal character name refers to a control character",
-                quoted=False,
-                )
+        self.set_diag(
+            f"Universal character name refers to a control character",
+            quoted=False,
+            )
+
+    def diag_control_clang(self, codepoint: int) -> None:
+        """ Handle a codepoint which is a control code, with clang. """
+        self.set_diag(
+            f"Universal character name refers to a control character",
+            quoted=False, ctrlexpr=not self.mgr.lang.later_versions,
+            )
 
     def diag_ascii(self, codepoint: int) -> None:
-        """ Handle a codepoint which is an ASCII char. """
-        if not self.ctrlexpr:
-            char = chr(codepoint)
-            self.set_diag(
-                f"ASCII character {char!r} cannot be "
-                f"a universal character name",
-                quoted=False,
-                )
+        """ Handle a codepoint which is an ASCII char other than $, @, `. """
+        char = chr(codepoint)
+        self.set_diag(
+            f"ASCII character {char!r} cannot be "
+            f"a universal character name",
+            quoted=False, ctrlexpr=False,
+            )
+
+    def diag_ascii_clang(self, codepoint: int) -> None:
+        """ Handle a codepoint which ASCII but not $, @, with clang. """
+        char = chr(codepoint)
+        # In a control expression, might be an error, depending on language.
+        self.set_diag(
+            f"ASCII character {char!r} cannot be "
+            f"a universal character name",
+            quoted=False, ctrlexpr=not self.mgr.lang.later_versions,
+            )
+
+    def diag_special_clang(self, codepoint: int) -> None:
+        """ Handle a codepoint which is $, @, with clang. """
+        char = chr(codepoint)
+        # In a control expression, might be an error, depending on language.
+        self.set_diag(
+            f"ASCII character {char!r} cannot be "
+            f"a universal character name",
+            quoted=False, ctrlexpr=False,
+            )
 
     def diag_surrogate(self, codepoint: int) -> None:
         """ Handle a codepoint which is a surrogate. """
@@ -382,16 +335,13 @@ class EscUnicode(Escape):
         """ Handle a codepoint over maximum range.  Used in clang mode. """
         self.set_diag(f"Unicode escape value out of range", skip=True)
 
-    def codepoint_escape(self, codepoint: int) -> str:
-        """ Make a unicode escape string for the codepoint. """
-        return rf'\{{{codepoint:x}}}'
+
+class EscUni4(EscUnicode, EscBodyLen, EscHexVal, ): len = 4 # \uxxxx
+class EscUni8(EscUnicode, EscBodyLen, EscHexVal, ): len = 8 # \Uxxxxxxxx
+class EscUniDelim(EscUnicode, EscDelim, EscHexVal, ): pass  # \u{x...}
 
 
-class EscUni4(EscUnicode, EscBodyLen, EscHexVal, ): len = 4
-class EscUni8(EscUnicode, EscBodyLen, EscHexVal, ): len = 8
-class EscUniDelim(EscUnicode, EscDelim, EscHexVal, ): pass
-
-
+# \N{name}
 class EscNucVal(EscDelim):
 
     def getvalue(self) -> int:
@@ -400,8 +350,7 @@ class EscNucVal(EscDelim):
         try:
             new = ord(codecs.decode(
                 f'\\N{{{name}}}', 'unicode-escape'))
-            # Check for lowercase letters and spaces with
-            # clang.
+            # Check for lowercase letters and spaces with clang.
             if self.mgr.lang.clang and name.upper() != name:
                 # With lowercase letters, clang reports an
                 # error, but makes the replacement anyway.  However, in a
@@ -420,10 +369,10 @@ class EscNuc(EscUnicode, EscNucVal): pass
 
 
 # Numeric escapes...
-class EscOct(EscOctVal): pass
-class EscHex(EscHexVal): pass
-class EscOctDelim(EscDelim, EscOctVal): pass
-class EscHexDelim(EscDelim, EscHexVal): pass
+class EscOct(EscOctVal): pass                   # \[0-7]{1, 3}
+class EscHex(EscHexVal): pass                   # \x(xx)+
+class EscOctDelim(EscDelim, EscOctVal): pass    # \o{[0-7]+}
+class EscHexDelim(EscDelim, EscHexVal): pass    # \x{x+}
 
 
 # Undefined escape.
@@ -454,18 +403,6 @@ class EscapeMgr:
     # Regular expression which matches any escape, or any unicode escape.
     regex: str
     uni_regex: str
-
-    ## Type of Escape initializer.  Returns replacement string.
-    #Call = typing.Callable[[Escape], str]
-
-    ## Type of entry in self.disp dispatch table.
-    #class Disp(typing.NamedTuple):
-    #    key: str
-    #    zero: int
-    #    group: int
-    #    cls: Type[Escape]
-    #    #call: Call
-    #    #args: tuple
 
     # Dispatch table, which translates an escape to a subclass of Escape.
     # Entries are indexed by matching group index.  There is a separte table
@@ -553,17 +490,54 @@ class EscapeMgr:
         body = REs.joinalts(*uni_patts)
         self.uni_regex = re.compile(REs.wrap(rf'\\{body}'))
 
-        self.invalid_codepoints = RangeMap(
-            (Range(-1, 0x00), EscUnicode.diag_name),
-            (Range(0x00, 0x20), EscUnicode.diag_control),
-            (Range(0x20, 0x7F), EscUnicode.diag_ascii),
-            (Range(0x7F, 0xA0), EscUnicode.diag_control),
-            (Range(0xD800, 0xE000), EscUnicode.diag_surrogate),
-            (Range(
-                sys.maxunicode + 1, 0x_1_0000_0000),
-                lang.clang and EscUnicode.diag_range_clang
-                or EscUnicode.diag_range),
-            )
+        def invalid_ranges() -> Iterator[RangeMap.Item]:
+            """ Generate invalid ranges and corresponding handlers. """
+            yield (Range(-1, 0x00), EscUnicode.diag_name)
+            # C23 and C++11 allow control characters and basic source
+            # characters.  $, @, ` are allowed in all language modes.
+
+            # Exceptions with clang, depending on their context:
+            # - In control expression, no exceptions.
+            # - In identifiers, $, @, ` are also errors.
+
+            if (not (lang.c_ver >= 2023 or lang.cplus_ver)
+                or lang.clang
+                ):
+                if lang.clang:
+                    yield (Range(0x00, 0x20), EscUnicode.diag_control_clang)
+                    yield (Range(0x7F, 0xA0), EscUnicode.diag_control_clang)
+                    yield (Range(0x20, 0x24), EscUnicode.diag_ascii_clang)
+                    # 0x24 = '$' is special.
+                    yield (Range(0x24, 0x25), EscUnicode.diag_special_clang)
+                    yield (Range(0x25, 0x40), EscUnicode.diag_ascii_clang)
+                    # 0x40 = '@' is special.
+                    yield (Range(0x40, 0x41), EscUnicode.diag_special_clang)
+                    yield (Range(0x41, 0x60), EscUnicode.diag_ascii_clang)
+                    # 0x60 = '`' is special.
+                    yield (Range(0x60, 0x61), EscUnicode.diag_special_clang)
+                    yield (Range(0x61, 0x7F), EscUnicode.diag_ascii_clang)
+                    yield (
+                        Range(sys.maxunicode + 1, 0x_1_0000_0000),
+                        EscUnicode.diag_range_clang
+                    )
+                else:
+                    yield (Range(0x00, 0x20), EscUnicode.diag_control)
+                    yield (Range(0x20, 0x24), EscUnicode.diag_ascii_clang)
+                    # 0x24 = '$' is OK.
+                    yield (Range(0x25, 0x40), EscUnicode.diag_ascii_clang)
+                    # 0x40 = '@' is OK.
+                    yield (Range(0x41, 0x60), EscUnicode.diag_ascii_clang)
+                    # 0x60 = '`' is OK.
+                    yield (Range(0x61, 0x7F), EscUnicode.diag_ascii_clang)
+                    yield (Range(0x7F, 0xA0), EscUnicode.diag_control)
+                    # 0x60 = '`' is OK.
+                    yield (
+                        Range(sys.maxunicode + 1, 0x_1_0000_0000),
+                        EscUnicode.diag_range
+                    )
+            yield (Range(0xD800, 0xE000), EscUnicode.diag_surrogate)
+
+        self.invalid_codepoints = RangeMap(*sorted(invalid_ranges()))
 
     def __call__(self, esc: str, m: re.Match, uni: bool = False, **kwds
                  ) -> Escape:

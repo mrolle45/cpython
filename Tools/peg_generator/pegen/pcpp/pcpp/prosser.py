@@ -1,3 +1,4 @@
+
 """ prosser.py.
 Implements macro expansion in the manner of D. M. Prosser's paper.
 With added code to handle __VA_OPT__ expressions.
@@ -13,7 +14,7 @@ from pcpp.macros import *
 
 def Prosser(macros: Macros, TS: Tokens, debug: bool = False) -> Tokens:
     """
-    Python versions of Prosser's algorithm.  Implements the outermost
+    Python version of Prosser's algorithm.  Implements the outermost
     expand(TS) call and returns the resulting OS list.  Returned tokens are
     copies of tokens taken from either the input TS or the replacement list of
     some macro.

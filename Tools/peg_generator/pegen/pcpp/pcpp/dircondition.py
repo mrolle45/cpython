@@ -37,9 +37,8 @@ class Section(abc.ABC):
     This Section is a state machine, with transitions after each group.  The
     purpose is to find and process the first group (if any) with a Process
         condition and skip all following groups.  Groups before this first
-        Process group are:
-            skipped if the condition is Skip, or passed through if the
-            condition is Passthru.
+        Process group are skipped if the condition is Skip, or passed through
+        if the condition is Passthru.
 
     For each group, as it is encountered, there are two steps:
 
@@ -138,7 +137,10 @@ class Section(abc.ABC):
 
     @property
     def iftrigger(self) -> bool:
-        """ Legacy property, meaning group is enabled or an earlier group is enabled. """
+        """
+        Legacy property, meaning group is enabled or an earlier group is
+        enabled.
+        """
         return self.state in (SectionState.Active, SectionState.Closed)
 
     @TokIter.from_generator
@@ -192,15 +194,17 @@ class Section(abc.ABC):
 
 class GroupState(Enum):
     """ Designates how lines are handled in a group.
-    Exactly one of three attributes is true: process, skip, passthru.
-    The get() method returns the member corresponding to a directive condition,
-        possibly inverted.
+    Exactly one of three attributes is true: process, skip, passthru.  The
+    get() method returns the member corresponding to a directive condition,
+    possibly inverted.
     """
-    Process = dict(process=True)    # Entire group will be processed.
-                                    # Nested sections will start in the Initial state.
-    Skip = dict(skip=True)          # Entire group will be skipped.
-                                    # Same for nested sections at any level.
-    Passthru = dict(passthru=True)  # All lines not in nested section will be passed through.
+    # Entire group will be processed.  Nested sections will start in the
+    # Initial state.
+    Process = dict(process=True)
+    # Entire group will be skipped.  Same for nested sections at any level.
+    Skip = dict(skip=True)          
+    # All lines not in nested section will be passed through.
+    Passthru = dict(passthru=True)
 
     def __init__(self, attrs: dict):
         self.skip = self.process = self.passthru = False
@@ -220,10 +224,11 @@ del e
 
 
 class SectionState(Enum):
-    """ Enum for current state of a NestedSection.
-    It reflects the status (class GroupState) of the current group and
-    has a class method to determine the starting state of the section,
-    and a method to move to another group after a #else or #elif*.
+    """
+    Enum for current state of a NestedSection.  It reflects the status (class
+    GroupState) of the current group and has a class method to determine the
+    starting state of the section, and a method to move to another group after
+    a #else or #elif*.
 
     The state has the same three bool attributes as the GroupState class,
     which tell how lines within the current group are to be handled.
@@ -234,14 +239,15 @@ class SectionState(Enum):
                 directives which define nested sections.
 
     passthru    Text lines and directives are normally written to
-                the output file unchanged.  This occurs when the
-                current group or an earlier group involves undefined
-                macros and the preprocessor chooses not to supply
-                a true or false value for the directive's condition.
+                the output file unchanged.  This occurs when the current group
+                or an earlier group involves undefined macros and the
+                preprocessor chooses not to supply a true or false value for
+                the directive's condition.
 
 
     self.groupstate: GroupState = state of the current group.
-    self.next(cond): SectionState = new state for a new group with given condition.
+    self.next(cond): SectionState = new state for a new group with given
+    condition.
     """
 
     Top = Process, None
@@ -251,8 +257,8 @@ class SectionState(Enum):
     # This and all preceding groups are in Skip state.
     Open = Skip, lambda cond: nextOpen[cond]
 
-    # Current group is the only group in Process state.
-    # All preceding groups are in Skip state
+    # Current group is the only group in Process state.  
+    # All preceding groups are in Skip state.  
     # All remaining groups will be in Skip state.
     Active = Process, lambda cond: Closed
 
@@ -263,13 +269,13 @@ class SectionState(Enum):
     # All remaining groups will be in either Skip or Passthru state.
     Undefined = Passthru, lambda cond: nextUndefined[cond]
 
-    # Current group is in Skip state.
-    # Some earlier group is in Passthru state.
+    # Current group is in Skip state.  
+    # Some earlier group is in Passthru state.  
     # All remaining groups will be in either Skip or Passthru state.
     UndefSkip = Skip, lambda cond: nextUndefined[cond]
 
-    # Current group is in Skip state.  It had a True condition.
-    # Some earlier group is in Passthru state.
+    # Current group is in Skip state.  It had a True condition.  
+    # Some earlier group is in Passthru state.  
     # All remaining groups will be in Skip state.
     UndefLast = Skip, lambda cond: Closed
 

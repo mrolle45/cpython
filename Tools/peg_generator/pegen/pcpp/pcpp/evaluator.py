@@ -25,7 +25,6 @@ INTMAXBITS = 64
 # Some Python 3 compatibility shims
 INTBASETYPE = int
 
-
 # Precompile the regular expression for correctly expanding unicode escape
 # sequences.
 _expand_escape_sequences_pat = re.compile(r'''
@@ -442,7 +441,6 @@ class EvalParser:
         self.prep = prep
         self.yacc = yacc.yacc(module=self,
             optimize=in_production, tabmodule='ctrlexpr',
-            #optimize=in_production, tabmodule='ctrlexpr',
             debug=not in_production, write_tables=not in_production)
 
 
@@ -501,7 +499,8 @@ class EvalParser:
     def p_expression_number(self, p: YaccProduction):
         'expression : CPP_INTEGER'
         # Evaluate the token's numeric value and unsignedness.
-        m: re.Match = p.slice[1].type.patt.match(p[1])
+        tok: PpTok = p.slice[1]
+        m: re.Match = tok.type.patt.match(p[1])
         num = m['num']  # the spelling of the token without the suffix
         # Octal constant needs '0o' in front of it.
         if m['oct']: num = '0o' + num
@@ -514,6 +513,17 @@ class EvalParser:
         unsigned = sfx and 'u' in sfx.lower()
         #if m['hex']
         p[0] = Value(numval, unsigned=unsigned)
+        # Ignore, but diagnose, invalid suffix.
+        sfx = m['ud_sfx']
+        if sfx:
+            msg = (
+                f'Invalid suffix on numeric constant in control expression: '
+                f'{sfx!r}.')
+            self.prep.on_error_token(tok, msg)
+            # clang diagnoses error and the ignores a valid ud-suffix.
+            if not sfx.startswith('_') or not self.prep.lang.clang:
+                if self.set_exception(p, msg):
+                    return
 
     def p_expression_character(
             self, p: YaccProduction, *,
@@ -592,6 +602,18 @@ class EvalParser:
                 return
             num = 0
 
+        # Ignore, but diagnose, invalid suffix.
+        m: re.Match = tok.type.patt.match(p[1])
+        sfx = m['ud_sfx']
+        if sfx:
+            msg = (
+                f'Invalid suffix on char constant in control expression: '
+                f'{sfx!r}.')
+            self.prep.on_error_token(tok, msg)
+            # clang diagnoses error and then ignores a valid ud-suffix.
+            if not sfx.startswith('_') or not self.prep.lang.clang:
+                if self.set_exception(p, msg):
+                    return
         p[0] = Value(num)
 
     def p_expression_string(self, p: YaccProduction):
@@ -750,6 +772,11 @@ class EvalExpr:
         exptoks: TokIter = self.prep.macros.expand(self.initer)
         try:
             repltoks = Tokens(self.replacements(exptoks))
+            # Check for exceptions
+            for tok in repltoks:
+                if isinstance(tok, Exception):
+                    raise tok
+                
             # Call the yacc parser.
             result = self.evaluator(repltoks,
                                     functions = self.evalfuncts,
@@ -761,7 +788,7 @@ class EvalExpr:
             if not self.partial_expansion:
                 self.prep.on_error_token(
                     intoks[0],
-                    f"Could not evaluate expression due to {e!r} "
+                    f"Could not evaluate expression due to {e} "
                     f"(passed to evaluator: {str(intoks)!r})"
                     )
             result = False
@@ -789,7 +816,7 @@ class EvalExpr:
                 name = self.defined_expr_name(exptoks)
                 if not name:
                     # Malformed expression
-                    raise self.DefinedMacroError(
+                    yield self.DefinedMacroError(
                         "Malformed 'defined' in control expression"   
                         )
                 elif name.value in self.prep.macros:

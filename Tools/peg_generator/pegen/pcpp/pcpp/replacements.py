@@ -296,9 +296,6 @@ class ReplMgr(list, abc.ABC):
         else:
             # Translate this to the lexer src_data.
             old_pos += self.old_start_pos
-            #if self.lexer.brk():
-            #    name = self.stage.name[:3]
-            #    print(f'{name} src {old_pos}')
             return old_pos
 
     def src_tok_new_pos(self, new_pos: int) -> int:
@@ -308,18 +305,11 @@ class ReplMgr(list, abc.ABC):
         old_data.
         """
         pos = new_pos
-        #if self.lexer.brk():
-        #    name = self.stage.name[:3]
-        #    print(f'{name} new {new_pos}')
         for repl in self.repls:
             if new_pos < repl.old_pos:
                 break
-            #if self.lexer.brk():
-            #    print(f'{name} {repl!r}')
             pos -= repl.delta_len
 
-        #if self.lexer.brk():
-        #    print(f'{name} old {pos}')
         return self.src_tok_old_pos(pos)
 
     @property
@@ -379,14 +369,10 @@ class ReplMgr(list, abc.ABC):
 
         old_start_pos = old_range.start
         if not self.prev:
-            #print(f"{self!r} {old_start_pos}")
             self.old_start_pos = old_start_pos
         if repls:
             group = ReplGroup(tok, self, repls)
             self.delta_pos += group.delta_len
-            #if tok.type.id and self.stage is ReplStage.ESCAPE:
-            #    if self.repls.lang.clang and not tok.repl_err:
-            #        group.skip_id = True
             new_start_pos = new_range.start
             for repl in group:
                 old_pos = repl.old_pos
@@ -394,38 +380,13 @@ class ReplMgr(list, abc.ABC):
                 #repl.old_pos -= old_range.start
                 new_pos = repl.new_pos
                 repl.new_pos = new_pos - new_start_pos
-                #if self.stage is ReplStage.SPLICE:
-                #    self.lexer.newphys(self.src_tok_new_pos(repl.new_end))
-                #if repl.msg:
-                #    self.lexer.prep.on_error_token(tok, repl.msg,
-                #                                   warn=not repl.err)
-                #    if repl.err:
-                #        tok.repl_err = True
             old_range = old_range.extend(- group.delta_len)
-
-        #if tok.brk():
-        #    name = self.stage.name[:3]
-        #    print(f'{name} {old_range!r} <- {old_range.get_from(self.old_data)!r}')
 
         groups: list[ReplGroup] = self.prev_movetopos(
             old_range, tok)
 
         if repls:
-            #group = ReplGroup(tok, self, repls)
-            #self.delta_pos += group.delta_len
-            #if tok.type.id and self.stage is ReplStage.ESCAPE:
-            #    if self.prep.lang.clang:
-            #        group.skip_id = True
-            #new_start_pos = new_range.start
             for repl in repls:
-                #old_pos = repl.old_pos
-                #repl.old_pos = old_pos - old_start_pos
-                ##repl.old_pos -= old_range.start
-                #new_pos = repl.new_pos
-                #repl.new_pos = new_pos - new_start_pos
-                #if self.stage is ReplStage.SPLICE:
-                #    self.lexer.newphys(self.src_tok_new_pos(repl.new_end) + 2)
-
                 msg = repl.msg
                 if msg:
                     # Usually an error.  In a CHAR token with ASCII codepoint,
@@ -443,15 +404,6 @@ class ReplMgr(list, abc.ABC):
             if tok.type.id and self.stage is ReplStage.ESCAPE:
                 if self.repls.lang.clang and not tok.repl_err:
                     group.skip_id = True
-            #old_range = old_range.extend(- group.delta_len)
-        #if tok.brk():
-        #    for repl in repls:
-        #        if repl.msg: continue
-        #        oldr = Range(repl.old_pos + old_start_pos, len=len(repl.old_val))
-        #        print(f'{name} {oldr!r} {oldr.get_from(self.old_data)!r}')
-        #        newr = Range(repl.new_pos + new_start_pos, len=len(repl.new_val))
-        #        print(f'{name} {newr!r} {newr.get_from(self.new_data)!r}')
-        #    print(f'{name} {new_range!r} -> {new_range.get_from(self.new_data)!r}')
 
         if repls: groups.append(group)
         return groups
@@ -544,8 +496,6 @@ class ReplMgrSplice(ReplMgr):
     def _testpos(pos: int) -> Callable[[int], bool]:
        return pos.__ge__
 
-
-
     @functools.cached_property
     def repl_pat(self) -> re.Pattern:
         return re.compile(self.REs.repl_splice)
@@ -569,10 +519,6 @@ class ReplMgrEscape(ReplMgr):
 
     esc_eval: EscapeFactory
 
-    # Table of invalid codepoints and what to do with them.  Each range is
-    # mapped to a handler function.
-    invalid_codepoints: RangeMap
-
     @functools.cached_property
     def repl_pat(self) -> re.Pattern:
         return re.compile(self.escapes.regex)
@@ -595,9 +541,6 @@ class ReplMgrEscape(ReplMgr):
         #
         # GCC changes \u escapes to lowercase \U escapes, but only in
         # identifiers.  It does not recognize \N escapes.
-        #old = r'\Ud800'
-        #old = r'\N{DIGIT zero}'
-        #m = re.match(self.escapes.regex, old)
         e = self.escapes(old, m)
         new = e.repl
         if e.diag:
@@ -607,55 +550,6 @@ class ReplMgrEscape(ReplMgr):
         else:
             self.add(old, new, m)
         return new
-
-    @functools.cached_property
-    def invalid_codepoints(self):
-        return RangeMap(
-            (Range(0x00, 0x20), self.codepoint_control),
-            (Range(0x20, 0x7F), self.codepoint_ascii),
-            (Range(0x7F, 0xA0), self.codepoint_control),
-            (Range(0xD800, 0xE000), self.codepoint_invalid),
-            (Range(sys.maxunicode + 1, 0x100000000), self.codepoint_invalid),
-            )
-
-    def codepoint_control(self, old: str, m: re.Match, codepoint: int) -> str:
-        """ Handle a codepoint which is a control code.  Return new value. """
-        self.note(m,
-                  f"Universal character name refers to a control character: "
-                  f"{old}",
-                  err=True, quoted=False,
-                  )
-        #return chr(codepoint)
-        return self.codepoint_escape(codepoint)
-
-    def codepoint_ascii(self, old: str, m: re.Match, codepoint: int) -> str:
-        """ Handle a codepoint which is a control code.  Return new value. """
-        char = chr(codepoint)
-        self.note(m,
-                  f"Character {char!r} cannot be universal character name ",
-                  err=True, quoted=False,
-                  )
-        return self.codepoint_escape(codepoint)
-
-    def codepoint_invalid(self, old: str, m: re.Match, codepoint: int) -> str:
-        """ Handle a codepoint which is a control code.  Return new value. """
-        self.note(m,
-                  f"Invalid universal character: "
-                  f"{old}",
-                  err=True)
-        return self.codepoint_escape(codepoint)
-
-    def codepoint_escape(self, codepoint: int) -> str:
-        """ Make a unicode escape string for the codepoint. """
-        return rf'\{{{codepoint:x}}}'
-        #if codepoint > 0xFFFF:
-        #    return rf'\U{codepoint:08x}'
-        #else:
-        #    return rf'\u{codepoint:04x}'
-
-    def special_clang_id(self, tok: PpTok) -> bool:
-        """ True if special handling of revert() by clang. """
-        return self.prep.lang.clang and tok.type.id
 
 
 class Replacer(list[ReplMgr]):
@@ -684,8 +578,8 @@ class Replacer(list[ReplMgr]):
         old_data        |                                       |
 
         repl changes    |   old_pos ->  | ...old_val... |       |
-            into        |       new_pos ->  | .....new_val..... |       | 
-                              delta_pos |-->|
+            into        |   new_pos ->  | .....new_val..... |       | 
+                            delta_pos   |-->                    |
         Note, delta_pos = sum (len(new_val) - len(old_val) over previous
         repls.  Thus, new_pos can be computed from old_pos by adding
         delta_pos.  So the Repl will just store the old_pos, old_val, and
@@ -749,10 +643,6 @@ class Replacer(list[ReplMgr]):
         # next mgr's new_data.
         tokrange: Range = tok.datarange
 
-        #prevgroup: ReplGroup = None
-        # cumulative shift in position of groups to lex_data.
-        #lex_delta_pos: int = 0
-
         # Recursive movetopos(), in reverse stage order.
         groups: list[ReplGroup] = self[-1].movetopos(tokrange, tok)
 
@@ -776,7 +666,6 @@ class Replacer(list[ReplMgr]):
                 ...
 
         mgr = next(mgrs)
-
 
     def brk(self) -> bool: return brk(self)
 
@@ -843,10 +732,6 @@ class Repl:
     @property
     def change(self) -> bool:
         return self.new_val != self.old_val
-
-    def nuc(self) -> bool:
-        """ old_val is a named unicode escape. """
-        return self.old_val.startswith('\\N')
 
     def revert(self, replval: str) -> str:
         """
@@ -982,7 +867,8 @@ class Repls(tuple[ReplGroup, ...]):
                 break
         return tok.copy(value=val, repls=Repls(tok, *groups))
 
-break_lens: list[int] = [0, 1, 2]
+# For setting breakpoints in the debugger...
+break_lens: list[int] = []      # If not empty, break when len(obj) in here.
 
 def brk(obj) -> bool:
     if break_lens and len(obj) not in break_lens:

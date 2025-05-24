@@ -128,19 +128,18 @@ class LexerFactory:
         # We need to have the lextab module name be specific to the same
         # parameters that govern the content of the lexer, i.e.,
         # 
-        # lang.cplus_ver selects C or C++ as the language, standard version
-        # doesn't matter.  C++ enables the extra punctuators
+        # lang.std selects C or C++ standard version, as used by gcc and
+        # clang.  This reflects the c/c++ language, the version, and the
+        # optional gnu extensions.
         #
-        # prep.emulate includes ` @ and $ as literals..
+        # lang.clang or lang.gcc.
         #
-        # prep.gnu enables R-strings for all languages.
         # pasting provides alternate regular expressions for pasted values.
         lextab = f"""\
-            lextab\
-            {'_c _cplusplus'.split()[bool(lang.cplus_ver)]}\
+            pcpp.lextab.\
+            {lang.std.replace('++', 'pp')}\
             {'_clang' * bool(lang.clang)}\
             {'_gcc' * bool(lang.gcc)}\
-            {'_gnu' * bool(lang.gnu)}\
             {'_pasting' * bool(pasting)}\
             """
         self.lextab = lextab.replace(' ', '')
@@ -391,7 +390,6 @@ class LexerFactory:
             punc('CPP_AT',          '@')
             punc('CPP_GRAVE',       '`')
 
-        punc('CPP_DELTA', r'\u03b4')
 
     def rules(self) -> None:
         """ Create all the lexer rules as class attributes. """
@@ -453,7 +451,7 @@ class LexerFactory:
         # Terminating matching delimiter required, possibly on later logical
         # line.  Only tokenized if C++ or (GCC with GNU extensions) or clang.
 
-        if lang.cplus_ver or lang.emulate:
+        if lang.raw_strings:
             self.makefunc(REs.rstring, 'CPP_RSTRING')
 
         # h-type and q-type header names.  Only used in INCLUDE state.  
@@ -553,9 +551,16 @@ class LexerFactory:
         Create the PpLex from attributes of self.  Optionally create a pasting
         version.
         """
-        # TODO: Build with optimize=True if the lextab is up to date.  The
-        # lexer might use anything in the pcpp package.
-        lexer = self.build(self.__dict__, lextab=self.lextab)
+        # See if the lextab module is up to date.  If so, optimize the lexer.
+        import pcpp
+        pcppdir = os.path.dirname(pcpp.__file__)
+        lextabfile = f'{pcppdir}/lextab/{self.lextab.split(".")[-1]}.py'
+        try:
+            lextabtime = os.path.getmtime(lextabfile)
+            pcpptime = os.path.getmtime(pcppdir)
+            opt = lextabtime >= pcpptime
+        except OSError: opt = False
+        lexer = self.build(self.__dict__, lextab=self.lextab, optimize=opt)
         lexer.prep = self.prep
         lexer.TokType = self.TokType
         lexer.REs = self.REs

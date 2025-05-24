@@ -43,41 +43,26 @@ container of ints.
 '''
 
 # Specific line numbers, if non-empty:
-break_lines: Container[int] = (111)
-#break_lines = range(116, 125)
+break_lines: Container[int] = ()
+#break_lines = range(start, stop)
 
-# Column number in tuple, if non-empty.
+# Specific column number, if non-empty.
 break_cols: Container[int] = ()
-#break_cols = range(26, 43)
+#break_cols = range(start, stop)
 
-# File name in tuple, if non-empty.  Matches the base name of given filename.
-break_files: tuple[str, ...] = ()
-break_files += ('test.c', )
-#break_files += ('cat.h', )
-#break_files += ('cond.h', )
-#break_files += ('defs.h', )
-#break_files += ('dummy.h', )
-#break_files += ('hide.h', )
-#break_files += ('macro_helpers.h', )
-#break_files += ('macro_sequence_for.h', )
-#break_files += ('outloc.h', )
-#break_files += ('sep.h', )
-#break_files += ('t.c', )
-#break_files += ('testgen.h', )
-#break_files += ('< top level >', )
-#break_files += ('unicode.h', )
-#break_files += ('x1.h', )
-#break_files += ('y.h', )
+# File name in list, if non-empty.  Matches the base name of given filename.
+break_files: list[str] = []
+#break_files += ['basename']
 
-# lexer position in container or empty tuple
-break_pos: Container[int] = ()
+# lexer position in list, if non-empty
+break_pos: Container[int] = []
 
 # Specific counter values, if non-empty:
-break_counts: Container[int] = (44, 818)
+break_counts: Container[int] = []
 
-# Value in tuple or empty tuple.
+# Value in list, if non-empty.
 # Use this for some miscellaneous value other than the above.
-break_others: Container[int] = ()
+break_others: Container[int] = []
 
 def add(**kwds) -> None:
     """ Add a Condition initialized by the keyword arguments. """
@@ -97,7 +82,8 @@ class Condition:
     """
     Define criteria for a break match.  The default values will always match
     their corresponding parameters.  All tuples match any value if they are
-    empty, and they may be a single value rather than a tuple.  Any Container[int] value can be a range object.
+    empty, and they may be a single value rather than a container.  Any
+    Container[int] value can be a range object.
     """
     lines: Container[int] = ()      # line numbers
     cols: Container[int] = ()       # column numbers
@@ -121,7 +107,8 @@ class Condition:
 add(lines=break_lines, cols=break_cols, pos=break_pos, files=break_files,
     others=break_others)
 
-#add(lines=95, files='defs.h')
+# More conditions...
+#add(keywords)
 
 T = typing.TypeVar('T')
 
@@ -129,12 +116,15 @@ T = typing.TypeVar('T')
 def break_in_values(values: Tuple[T, ...] | T | None,
                     value: T = None) -> bool:
     return (value is None
-            or isinstance(values, typing.Container) and (not values or value in values)
+            or (
+                isinstance(values, typing.Container)
+                and (not values or value in values))
             or value == values)
 
 def break_match(**kwds) -> bool:
-    """ General routine to evaluate a break condition based on various
-    parameters.  Only parameters which are provided are tested.
+    """
+    General routine to evaluate a break condition based on various parameters.
+    Only parameters which are provided are tested.
     """
     return any(map(operator.methodcaller('match', **kwds), conditions))
     return (break_in_values(break_lines, line)
@@ -168,5 +158,3 @@ def dbg_count() -> int:
     return _count
 def break_count() -> bool:
     return break_in_values(break_counts, _count)
-
-x=0

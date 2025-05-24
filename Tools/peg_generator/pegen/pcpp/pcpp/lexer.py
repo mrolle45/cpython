@@ -23,7 +23,6 @@ from pcpp.ply import lex
 from pcpp.ply.lex import LexToken, Lexer, LexError, TOKEN
 
 from pcpp.common import *
-#from pcpp.dfltlexer import *
 from pcpp.regexes import *
 from pcpp.replacements import *
 from pcpp.tokens import (PpTok, RawTok, Tokens, TokIter, TokLoc, TokenSep,
@@ -152,8 +151,7 @@ class RawLexer:
     which might be the contents of a source file, or otherwise artificially
     constructed.
 
-    It performs translation phases 1 and 2 on the input data.  The input data
-    is provided separately by the input() method.
+    The input data is provided separately by the input() method.
 
     Produces raw tokens serially from the data.  Also provides an iterator to
     do this.  The raw token does not have complete PpTok information.  It does
@@ -168,8 +166,6 @@ class RawLexer:
 
     # Original data with replacements, which is what is actually lexed.
     lex_data: str
-
-    # orig: 
 
     def __init__(self, lex: Lexer, *args, **kwds):
         self.prep = prep = lex.prep
@@ -281,6 +277,9 @@ class PpLex(Lines, RawLexer):
 
     # Set while scanning macro argument list.
     _in_macro: MacroArgs = None
+
+    # Previous token lexed.
+    prev: PpTok = None
 
     def __new__(cls, *, from_lexer: Lexer = None,
                 **kwds
@@ -415,6 +414,7 @@ class PpLex(Lines, RawLexer):
             tok.loc = loc
             repls = self.repls.movetotoken(tok)
             self.src_range = tok.src_range
+            tok.pos = loc.source.position_at(self.src_range.start)
             self.update_lines(tok)
             if repls:
                 if tok.type.revert:
@@ -432,29 +432,10 @@ class PpLex(Lines, RawLexer):
                 break
 
         tok.sep = TokenSep.create(spacing=ws)
-        #if not ws:
-        #    tok.prev = prev
+        if not ws:
+            tok.prev = self.prev
+        self.prev = tok.pos
         return tok
-
-    def peek(self) -> PpTok | None:
-        """
-        Get the next token without advancing the lexer or doing any special
-        action that self.tokens() will do.
-        """
-        tok: PpTok = self.lookahead
-        if not tok:
-            tok = self.nexttok()
-            self.lookahead = tok
-        return tok
-    
-    def parse_tokens(self, data: str) -> Iterator[PpTok]:
-        """
-        Iterate over the tokens in given data, using a clone of self.  
-        """
-        lex: PpLexer
-        with self.cloned(errors=False) as lex:
-            lex.input(data)
-            yield from lex.tokens()
 
     @TokIter.from_generator
     def tokens(self, errors: bool = True
@@ -473,8 +454,8 @@ class PpLex(Lines, RawLexer):
         while True:
             tok = self.nexttok()
             if not tok: break
-            if not tok.sep:
-                tok.prev = prev
+            #if not tok.sep:
+            #    tok.prev = prev
             prev = tok
             #if self._in_macro:
             #    tok.in_macro = True

@@ -15,10 +15,8 @@ from typing import Iterator
 from pcpp.common import *
 from pcpp.replacements import ReplStage
 from pcpp.tokens import (PpTok, Tokens, TokIter, Hide,
-                         TokenSep, TokenSepSpace, TokenSepPad,
+                         TokenSep, TokenSepSpace,
                          )
-
-NEW = 0x0000
 
 ''' The following is modeled after David Prosser's algorithm, which can be found at
 https://www.spinellis.gr/blog/20060626/cpp.algo.pdf
@@ -26,8 +24,6 @@ The expand() function is performed by the Macros.expand() method.
 The subst() function is performed by the TokSubstMgr.__call__() method.
     This incorporates the hsadd() call in that method.
 '''
-
-dumpme: bool = False
 
 # ------------------------------------------------------------------
 # Macro object
@@ -114,7 +110,8 @@ class Macro:
                      ) -> Iterator[PpTok]:
         """
         Generate the substitutions, preceded and followed by padding (only if
-        not a nested __VA_OPT).
+        not a nested __VA_OPT).  The first token, if any, takes its separation
+        from the macro name token.
         """
         top: bool = self is mgr.m
         name: PpTok = nametok or mgr.call.nametok
@@ -122,20 +119,18 @@ class Macro:
         if not top:
             yield from toks
             return
-        #tokens = toks.copy_tokens()
         # First substitute token, or placemarker.
         for tok in toks:
             break
         else:
             # No tokens from substitution.  Make a placemarker.
             tok = name.make_marker()
-        tok = tok.sep_before(name.sep)
+        tok = tok.add_sep(name.sep)
         # Remaining subst tokens.
         prev = tok
         for tok in toks:
             yield prev
             prev = tok
-        prev = prev.add_seps_after()
         yield prev
 
     @property
@@ -145,11 +140,6 @@ class Macro:
     def set_error(self, tok: PpTok, msg: str) -> None:
         self.prep.on_error_token(tok, msg)
         self.error = msg
-
-    def dynamic(self) -> None:
-        """ Initialize a dynamic Macro. """
-
-        self.substs.append(dynamic_substs_tab[self.name](self.nametok))
 
     def sameas(self, other: Self) -> bool:
         """ True if the two definitions are the same, per (C99 6.10.3p2). """
@@ -192,17 +182,9 @@ class ObjMacro(Macro):
         """
         Do all substitution operations except for pasting.  Object macros have
         no parameters to substitute, so this method is a pass-through of the
-        replacement intoks themselves.
+        replacement tokens themselves.
         """
         yield from self.value
-
-    @TokIter.from_generator
-    def fix_paste_substs(self) -> Iterator[PpTok]:
-        for tok in self.value:
-            if tok.type.dhash:
-                yield tok.copy(type=self.prep.TokType.CPP_PASTE)
-            else:
-                yield tok
 
     def __repr__(self):
         return f"{self.name}={self.value!r}"
@@ -264,10 +246,6 @@ class FuncMacro(Macro):
                 return TokSubstPaste(tok)
             elif typ.stringize:
                 # Stringize.  Get following param name or __VA_OPT__.
-
-                # The '#' gets • if it does NOT follow π.
-                #if not after_paste:
-                #    tok = tok.with_sep(TokenSepSpace())
 
                 try:
                     param = next(repltoks)
@@ -507,6 +485,7 @@ class MacroExp:
         self.prep = macros.prep
         self.repltoks = repltoks
         self.top = top
+        #print("MacroExp", macros.depth, top)
 
     @TokIter.from_generator
     def __call__(self) -> Iterable[PpTok]:
@@ -558,8 +537,6 @@ class MacroExp:
                 # any passthru repltoks from the input, followed by first
                 # unexpanded token (if any).
                 for repltok in self.replace_and_rescan(repltok):
-                    global dumpme
-                    #if repltok.brk(): dumpme = True
                     if not repltok.type.norm:
                         yield repltok
                         continue
@@ -605,35 +582,6 @@ class MacroExp:
 
                 orig = None
                 yield repltok
-
-    #def repl_undefined(self, repltok: PpTok) -> PpTok:
-    #    """
-    #    Replace an undefined identifier with
-    #    '0', with special treatment for 'defined' expressions.
-    #    """
-    #    prep = self.prep
-    #    prep.log.eval_ctrl(repltok)
-    #    if repltok.value == 'defined':
-
-    #        # Undefined behavior (C99 6.10.1).
-    #        if prep.lang.clang:
-    #            # clang evaluates the expression in the usual way.
-    #            # Replace 'defined' in repltok + rest of repltoks, then get
-    #            # the first result token, which should be 0 or 1.
-    #            repltok = self._replace_defined_expr(repltok)
-    #            return repltok
-    #        else:
-    #            # pcpp will issue a warning and treat it as any
-    #            # other undefined identifier.
-    #            prep.on_warn_token(
-    #                repltok,
-    #                "Macro expansion of control expression "
-    #                "contains 'defined'.  "
-    #                "This is being interpreted as '0'.",
-    #                )
-
-    #    return repltok.copy(value='0', type=prep.t_INTEGER)
-        # end of repl_undefined()
 
     @TokIter.from_generator
     def replace_and_rescan(self, repltok: PpTok) -> Iterator[PpTok]:
@@ -718,21 +666,13 @@ class MacroExp:
 
             if call.expanding:
                 log.expand(repltok, m, True, hide, call=call)
-                if dumpme:
-                    call.dump("  " * self.macros.depth)
                 new = call.subst()
                 if new is None:
                     break
                 if __debug__ and 0000:
                     # Useful for debugging.
                     newtokens: Tokens = new.copy_tokens()
-                    if dumpme:
-                        leader = "  " * self.macros.depth
-                        print(f"{leader}Expansion =")
-                        for tok in newtokens:
-                            print(f"{leader}  {tok!r}")
 
-                    newtokens
                 # If there are no replacement repltoks, then
                 # quit, with repltok = the first token in the
                 # remaining input (if any) or None.  This
@@ -774,6 +714,24 @@ class MacroExp:
 
         yield repltok
 
+    def __repr__(self) -> str:
+        return f'< Expander {self.top} >'
+
+class Expanders(Stack[MacroExp]):
+    def __init__(self, macros: Macros):
+        self.prep = macros.prep
+        self.log = self.prep.log
+        super().__init__()
+
+    def append(self, exp: MacroExp) -> None:
+        super().append(exp)
+        self.log.write(f'Push expander {exp}, depth {self.depth}')
+
+    def pop(self) -> MacroExp:
+        exp: MacroExp = super().pop()
+        self.log.write(f'Pop expander {exp}, depth {self.depth + 1}')
+        return exp
+
  
 class Macros(dict[PpTok, 'Macro']):
     """
@@ -809,6 +767,7 @@ class Macros(dict[PpTok, 'Macro']):
         self.lexer = prep.lexer
         self.log = prep.log
         self.TokType = prep.TokType
+        self.expanders = Expanders(self)
 
     def define(self, defn: TokIter,
                _bad_names = set('defined __VA_ARGS__ __VA_OPT__'.split()),
@@ -820,12 +779,10 @@ class Macros(dict[PpTok, 'Macro']):
         prep = self.prep
         try:
             # Name is first token, skipping whitespace.
-            #x = next(defn)
             defn = defn.strip()
             name = next(defn)
             # Validate the macro name.
             if not name.type.id:
-            #if not name.type.id or name.repl_err:
                 self.prep.on_error_token(
                     name,
                     f"Macro definition {name.value!r} requires an identifier")
@@ -931,7 +888,7 @@ class Macros(dict[PpTok, 'Macro']):
         to a function macro.
         """
         expander = MacroExp(self, intoks, **kwds)
-        with self.expanders.nest():
+        with self.expanders.nest(expander):
             return expander()
 
     @property
@@ -1267,9 +1224,6 @@ class MacroArgs:
             Handle token that is part of an arg.  Spacing and indent may
             be modified.
             """
-            if tok.indent:
-                # Remove indent and add spacing.
-                tok = tok.set_spacing()
             if not arg:
                 # First token.  Remove spacing
                 tok = tok.without_spacing()
@@ -1435,13 +1389,12 @@ class TokSubst(abc.ABC):
         try: tok = next(toks)
         except StopIteration: tok = ref.make_marker()
         # First token, or new marker.  Gets sep before itself.
-        tok = tok.add_seps_before(ref.seps_before)
+        tok = tok.add_sep(ref.sep)
         prev = tok
         for tok in toks:
             yield prev
             prev = tok
         # Last token.  Gets sep after itself.
-        tok = tok.add_seps_after()
         yield tok
 
     def __repr__(self) -> str:
@@ -1460,13 +1413,8 @@ class TokSubstPadded(TokSubst):
         """
 
         toks = self.toks(mgr)
-        if True:
-        #if not self.after_paste:
-            toks = self.frame_pads(self.tok, toks)
-            #toks = toks.frame_pads(self.tok)
-        #tokens = toks.copy_tokens()
-        for tok in toks:
-            yield tok
+        toks = self.frame_pads(self.tok, toks)
+        yield from toks
 
 
 class TokSubstLiteral(TokSubst):
@@ -1534,13 +1482,9 @@ class TokSubstParam(TokSubstPadded):
         #  
         # If not after_paste: Get spacing from the parameter name token.  
         # 
-        #toks = res.copy_tokens()
         if self.tok.sep and not self.after_paste:
-        #if not self.after_paste and mgr.m.substs[0] is not self:
             res = mgr.add_sep_first(self.tok.sep, res)
-        #toks = res.copy_tokens()
-        for tok in res:
-            yield tok
+        yield from res
 
 
 class TokSubstPaste(TokSubst):
@@ -1593,15 +1537,14 @@ class TokSubstString(TokSubst):
             # clang carries the separation of the σ over to whatever is next.
             # If value is empty, clang also carries the separation of the VO
             # over to whatever is next.
-            argseps: list[TokenSep] = self.tok.seps_before[:]
+            argsep: TokenSep = self.tok.sep
             if not value:
-                argseps += self.arg.tok.seps_before
-                tok = tok.add_seps_after(argseps)
+                argsep += self.arg.tok.sep
+                if argsep: tok = tok.spacing_after()
         else:
             # clang ignores separation of the Param
             pass
         yield from self.frame_pads(tok, iter([tok]))
-        #yield self.tok.make_string(value, sep=self.sep)
 
 
 class TokSubstVaOpt(TokSubstPadded):
@@ -1624,12 +1567,8 @@ class TokSubstVaOpt(TokSubstPadded):
     def toks(self, mgr: TokSubstMgr) -> Iterator[PpTok]:
         """ Generates new token(s) for this subst. """
         res = TokIter(mgr.expand_va_opt(self.repl))
-        #if not self.after_paste:
-        #    res = mgr.add_sep_first(self.tok.sep, res)
-        #tokens = res.copy_tokens()
         yield from res
-        #for tok in res:
-        #    yield tok
+
 
 # The following classes are for dynamic macros, such as __LINE__, 
 #   whose replacement varies with where and when they are called ...
@@ -1752,11 +1691,6 @@ class TokSubstMgr:
 
         # First pass.
         intoks = TokIter(m.subst_padded(self, nametok))
-        #
-        #if self.call.nametok.brk(): print(intoks, *intoks.copy_tokens())
-        # Second pass, merge pad tokens.
-        #intoks = intoks.apply_pads()
-        #intoks = self.merge_pads(intoks)
 
         prev: PpTok
 
@@ -1771,23 +1705,15 @@ class TokSubstMgr:
 
             if self.prep.lang.clang:
                 toks = self.filt_pastes_clang(toks)
-            #if self.call.nametok.brk():
-            #    print(*toks.copy_tokens())
 
             # Third pass.  Perform pastes.
             toks = self.do_pastes(toks)
-            #toks = self.detach_pads(toks)
 
         # Finally, augment the hide sets of all results.
         hide = self.call.hide
-        #tokens = toks.copy_tokens()
         for tok in toks:
             tok = tok.add_hide(hide)
-            #if self.call.nametok.brk():
-            #    print(f"-> {str(tok)!r}")
             yield tok
-
-
 
     @TokIter.from_generator
     def filt_pastes_clang(self, toks: TokIter) -> Iterator[PpTok]:
@@ -1805,12 +1731,9 @@ class TokSubstMgr:
         pend_lhs: PpTok = None
 
         for lhs in toks:
-            #self.log(lhs, "filter lhs")
-            #if self.call.nametok.brk(): print('filt', self.m.name, repr(lhs))
             ltype: TokType = lhs.type
             if ltype.paste:
                 rhs = next(toks)
-                #self.log(rhs, "filter rhs")
                 rtype: TokType = rhs.type
                 # π rhs
                 if rtype.marker:
@@ -1846,7 +1769,6 @@ class TokSubstMgr:
                     npastes += 1
                 else:
                     npastes = 0
-                #self.log(lhs, "filter -->")
                 if pend_lhs:
                     yield pend_lhs
                 pend_lhs = lhs
@@ -1908,53 +1830,28 @@ class TokSubstMgr:
             return
         #self.log(lhs, "pastes lhs")
 
-        fail_paste: bool = False
-        prev_fail_paste: bool
         # First lhs involved in a paste.
         pasting: PpTok = None
-
-        #def paste_expr() -> PpTok:
-        #    """
-        #    Calculate paste expression = lhs (π rhs) +, after getting lhs π.
-        #    Gets remaining expression tokens.  The next tok (if any) is not π
-        #    and is put back onto I.  If any (π rhs) fails, set closure
-        #    fail_paste = True and the rhs is put back onto I.
-
-        #    Current state O • lhs π • rhs (π rhs) * tok ? I.
-        #    """
-        #    # O • lhs π • I
-        #    rhs = next(toks)
-            # O • lhs π rhs • I
-
-            # Try pasting lhs with rhs.
-
 
         # Handle remaining tokens one at a time.  lhs gets updated sometimes.
 
         # O • lhs • I
 
-
         for rhs in toks:
 
             # O • lhs rhs • I
 
-            prev_fail_paste = fail_paste
-            fail_paste = False
             rtype: TokType = rhs.type
-            #self.log(rhs, "pastes rhs")
 
             if rtype.paste:
                 # O • lhs π • rhs I
                 op = rhs
                 rhs = next(toks, None)
                 assert rhs, "Paste operator at the end of macro."
-                #self.log(rhs, "pastes rhs")
                 if not pasting:
                     # First time, emit a padding for lhs, including pads (if
                     # any) attached to lhs already.
                     pasting = lhs
-                    if lhs.seps_after:
-                        lhs.seps_after = [TokenSepPad.instance]
 
                 # O • lhs π rhs • I
 
@@ -1963,8 +1860,6 @@ class TokSubstMgr:
                 t: PpTok | None
                 # clang removes leading space from lhs if it came from failed
                 # paste the last time.
-                #if prev_fail_paste:
-                #    lhs = lhs.without_spacing()
                 if lhs.type.id and rhs.type.id:
                     # Fast track for a common use case.
                     t = lhs.copy(value=lhs.value + rhs.value,
@@ -1985,66 +1880,18 @@ class TokSubstMgr:
                     lhs = t
                     continue
                 # Paste failed.
-                #if lhs.seps_after:
-                #    del lhs.seps_after
-                fail_paste = True
-                pasting = None
-
-            elif pasting:
-                # End of series of pastes.  lhs = the pasted result.
-
-                # lhs needs pads with both of its neighbors.1
-                lhs = lhs.add_seps_before(None).add_seps_after()
+                if lhs.sep_after:
+                    del lhs.sep_after
                 pasting = None
 
             # Either lhs rhs or failed lhs π rhs.
-            #if not lhs.type.marker:
-            #    ## clang uses MSVC compatibility and removes spacing from x π
-            #    ## π.
-            #    #if lhs.type.dhash:
-            #    #    lhs = lhs.without_spacing()
-            #    #self.log(lhs, "pastes -->")
-            #    yield lhs
-            #else:
-            #    # TODO: Handle lhs, which may carry some seps.
-            #    rhs = rhs.add_sep(lhs.sep)
             yield lhs
             lhs = rhs
 
         # End of rhs in toks loop.
         # The last token.
-        #self.log(lhs, "pastes -->")
-        #yield from lhs.gen()
         yield lhs
 
-    #class Token:
-    #    """
-    #    A non-pad token and all preceding pads.  Consumes from iterator
-    #    until first non-pad.
-    #    """
-    #    pads: list[PpTok] = []
-    #    tok: PpTok
-    #    def __init__ (self, toks: TokIter):
-    #        for tok in toks:
-    #            if tok.type.pad:
-    #                self.pad(tok)
-    #            else:
-    #                self.tok = tok
-    #                break
-    #        else:
-    #            self.tok = None
-
-    #    def pad(self, pad: PpTok) -> None:
-    #        self.pads = self.pads + [pad]
-
-    #    def gen(self) -> Iterator[PpTok]:
-    #        if self.pads:
-    #            yield from self.pads
-    #        if self.tok:
-    #            yield self.tok
-
-    #    def __repr__(self) -> str:
-    #        return repr(self.tok)
 
     # Helper methods used by the TokSubst's ...
 
@@ -2133,5 +1980,5 @@ class TokSubstMgr:
         return f"<{ser}{self.call}>"
         return f"<{self.call}>"
 
-from pcpp.prosser import Prosser
+#from pcpp.prosser import Prosser
 

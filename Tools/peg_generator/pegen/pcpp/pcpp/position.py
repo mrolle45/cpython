@@ -38,7 +38,7 @@ from pcpp.tokens import TokLocMoveBase, TokLocMove
 # all files in the prep.  Values are limited to those in an unsigned long C
 # type.
 
-Position = int
+class Position(int): pass
 
 @dataclasses.dataclass
 class PosRange:

@@ -1,13 +1,18 @@
-#!/usr/bin/python
-# Python C99 conforming preprocessor useful for generating single include files
-# (C) 2017-2021 Niall Douglas http://www.nedproductions.biz/
-# and (C) 2007-2017 David Beazley http://www.dabeaz.com/
-# Started: Feb 2017
+#!/usr/bin/python Python C99 conforming preprocessor useful for generating
+# single include files  
+# (C) 2017-2021 Niall Douglas http://www.nedproductions.biz/ and  
+# (C) 2007-2017 David Beazley http://www.dabeaz.com/ Started: Feb 2017
 #
-# This C preprocessor was originally written by David Beazley and the
-# original can be found at https://github.com/dabeaz/ply/blob/master/ply/cpp.py
-# This edition substantially improves on standards conforming output,
-# getting quite close to what clang or GCC outputs.
+# This C preprocessor was originally written by David Beazley and the original
+# can be found at https://github.com/dabeaz/ply/blob/master/ply/cpp.py  This
+# edition substantially improves on standards conforming output, getting quite
+# close to what clang or GCC outputs.
+#
+# Updated 2025 by Michael Rolle.
+# Clang and GCC emulation are command line options.
+# Handles languages up to C23 and C++23, with optional GNU extensions.
+# Clang emulation now exactly matches clang 20.0 (without -C switch).
+
 
 from __future__ import annotations
 from __future__ import generators, print_function, absolute_import, division
@@ -47,7 +52,7 @@ and so is called the ".i file".
 
 It is analogous to running the command "gcc <input> -E > <output>".  In fact,
 PCPP can be tested by running with a "-gcc" command line switch and comparing
-the .i file with the <output> produced by gcc.
+the .i file with the <output> produced by gcc.  Same for "-clang" and clang.
 
 PCPP follows the ISO C or C++ Standard for preprocessing, which consists of
 translation phases 1 through 4.  The result is a sequence of
@@ -159,7 +164,7 @@ Tokens.
         cannot be one of the other specified types of token is a token by
         itself.
 
-Lines.
+    Lines.
 
     In the data, a line, sometimes called a logical line, is the result of
     splitting the data by newline characters, including the terminating
@@ -344,10 +349,6 @@ Lines.
 # directories, and other information
 # ------------------------------------------------------------------
 
-class X:
-    "..."
-    def foo(): pass
-
 class Preprocessor(PreprocessorHooks):
     """
     Generic preprocessor object, which accepts various arguments, and
@@ -379,6 +380,9 @@ class Preprocessor(PreprocessorHooks):
 
     # Don't generate tokens of these types.  Legacy parse() method can also
     # set this.
+
+    # A file is skipped if its name is in this dict and the object has a
+    # true value.
     ignore: Collection[TokType] = {}
 
     # Language options.
@@ -396,10 +400,11 @@ class Preprocessor(PreprocessorHooks):
         # Set one but not both of them.
         c_ver: int = 0          # 1999, 2011, 2017, or 2023
         cplus_ver: int = 0      # 2011, 2014, 2017, 2020, or 2023
+        later_versions: bool    # C++ or C23
 
         # Pass comments to the generated output.  With emulation, these are
-        # ordinary tokens.  A comment before a directive causes the leading '#' to
-        # be a regular token, not a directive.
+        # ordinary tokens.  A comment before a directive causes the leading
+        # '#' to be a regular token, not a directive.
         comments: bool = False
 
         # Handle trigraph sequences.  Either set explicitly (as in from
@@ -418,6 +423,11 @@ class Preprocessor(PreprocessorHooks):
         # Use GNU extensions.  Doesn't require gcc or clang.
         gnu: bool = False
 
+        # Enable raw strings?
+        @property
+        def raw_strings(self) -> bool:
+            return (self.cplus_ver or (self.c_ver and self.gnu))
+
         def __init__(self, prep: Preprocessor,
                      args: Namespace = None, **kwds):
             """
@@ -427,7 +437,7 @@ class Preprocessor(PreprocessorHooks):
             if args:
                 if args.cplusplus:
                     self.cplus_ver = args.cplusplus + 2000
-
+                    std = f'c++{self.cplus_ver % 100}'
                 if args.c_ver:
                     self.c_ver = {
                                         99: 1999,
@@ -435,7 +445,13 @@ class Preprocessor(PreprocessorHooks):
                                         17: 2017,
                                         23: 2023,
                                         }[args.c_ver]
+                    std = f'c{self.c_ver % 100}'
 
+                self.later_versions =  self.c_ver >= 2023 or self.cplus_ver
+                self.gnu = args.gnu
+                if self.gnu:
+                    std = std.replace('c', 'gnu')
+                self.std = std
                 self.clang = args.clang
                 self.gcc = args.gcc
                 self.comments = args.passthru_comments
@@ -567,6 +583,7 @@ class Preprocessor(PreprocessorHooks):
         self.positions = PosMgr(self)
 
         self.log = DebugLog(self)
+
         if lexer is None:
             from pcpp.dfltlexer import default_lexer as dfltlex
             lexer = dfltlex(self)
@@ -614,8 +631,6 @@ class Preprocessor(PreprocessorHooks):
         self.path = ['.']           # list of -I formal search paths for includes
         self.files_active = Stack[SourceFile]()
         self.passthru_includes = None
-        # A file is skipped if its name is in this dict and the object has a
-        # true value.
         self.debugout = None
         self.auto_pragma_once_enabled = True
 
@@ -630,7 +645,7 @@ class Preprocessor(PreprocessorHooks):
                     2011 : '201103L',
                     2014 : '201402L',
                     2017 : '201703L',
-                    2020 : lang.emulate and '201709L' or '202002L',
+                    2020 : lang.gcc and '201709L' or '202002L',
                     2023 : '202302L',
                 }
             startup_define(f"__cplusplus {modes[lang.cplus_ver]}")
@@ -640,7 +655,7 @@ class Preprocessor(PreprocessorHooks):
                     1999 : '199901L',
                     2011 : '201112L',
                     2017 : '201710L',
-                    2023 : lang.emulate and '202000L' or '202311L',
+                    2023 : lang.gcc and '202000L' or '202311L',
                 }
             startup_define(f"__STDC_VERSION__ {modes[lang.c_ver]}")
         # Go to the end, so that subclass can add more stuff.
@@ -687,7 +702,6 @@ class Preprocessor(PreprocessorHooks):
 
         # Create SourceFile for the input file.
         top : SourceFile = SourceFile.openfile(input, self)
-        #top = SourceFile.openfile(input, self, dirname='.')
         self.files_active.append(top)
         self.parser = self.parsegen(top)
         return self.parser
@@ -756,48 +770,24 @@ class Preprocessor(PreprocessorHooks):
     @TokIter.from_generator
     def parsegen(
             self,
-            #input: str, # Contents of the file
-            #*,
             file: SourceFile,
             dir: PpTok = None,         # Start of the #include directive
-            #filename: str,
-            #source: str = None,
-            #abssource: str = None,
-            #hdr_name: str = None,
-            #path: str = None,
-            #once: IncludeOnce = None,
-            #parentlineno: int = 1,
             ) -> TokIter:
         """ Parse an input string.  Generate PpTok objects. """
         self.file = file
         source = file.filename
-        #rewritten_source = source
         abspath = file.abspath
-        #if abspath:
-        #    rewritten_source = abspath
-        #    for rewrite in self.rewrite_paths:
-        #        temp = re.sub(rewrite[0], rewrite[1], rewritten_source)
-        #        if temp != abspath:
-        #            # rewrite[0] was found.
-        #            rewritten_source = temp
-        #            break
 
-        #if not source:
-        #    source = ""
-        #if not rewritten_source:
-        #    rewritten_source = ""
         if self.verbose < 2:
             source = os.path.basename(source)
         src = Source(file)
-        #src = Source(self, source, abspath, hdr_name, rewritten_source,
-        #             once=file.once)
 
         if dir:
             yield dir.make_pos(poscls=OutPosEnter, source=src)
         with self.sources_active.nest(src):
             yield from src.parsegen(dir=dir)
         if dir and dir.source.parent:
-            tok = dir.make_pos(poscls=OutPosLeave)
+            tok = dir.make_pos(poscls=OutPosLeave, lineno=dir.lexer.move.out_lineno(dir.lexer.src_lineno))
             yield tok
 
 
@@ -900,8 +890,6 @@ class Preprocessor(PreprocessorHooks):
             # GCC preserves the separators, but doubles single backslashes.
             if os.sep == '\\':
                 path = re.sub(r'\\',r'\\\\', path)
-                #path = re.sub(r'\\\\?',r'\\\\', path)
-                #path = path.replace(os.sep, '\\\\')
         elif os.sep != sep:
             path = path.replace(os.sep, sep)
         return path
@@ -1064,8 +1052,9 @@ class Preprocessor(PreprocessorHooks):
 
     def _error_msg(self, source: Source, msg: str, line: int = 0, col: int = 0,
                     warn: bool = False):
-        """ Prints error or warning message to diagnostic output
-        and increments the return code or warning count.
+        """
+        Prints error or warning message to diagnostic output and increments
+        the return code or warning count.
         """
         if not source: return
         file = source.filename

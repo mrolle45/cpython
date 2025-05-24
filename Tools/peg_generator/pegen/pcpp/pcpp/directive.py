@@ -11,13 +11,12 @@ from operator import attrgetter, methodcaller
 import traceback
 
 from pcpp.common import *
-from pcpp.tokens import (Tokens, TokIter, TokenSep, TokLocMove,
-                         tokenstrip, filt_line)
+from pcpp.tokens import (Tokens, TokIter, TokenSep, TokLocMove, tokenstrip)
 from pcpp.dircondition import FileSection
 
 class Directive:
     """ A single directive in a source file.
-    Will consume the tokens in the entire source line.
+    Will consume the tokens in the entire logical source line.
     Conditional inclusion directives will consume an entire if-section.
     Can execute the directive, generating any tokens to be passed through.
     """
@@ -29,13 +28,10 @@ class Directive:
                  ):
         self.source = source = dirtok.source
         self.prep = prep = source.prep
-        #self.line = line = Tokens(line)
-        #self.moretoks = moretoks
         self.line = dirtok.line
         self.TokType = prep.TokType
         self.dirtok = dirtok
         # Parse the line into # (name args?)?
-        #print(line)
         self.precedingtoks, self.nametok, self.args = self.parse()
         if not self.nametok:
             # Null directive.  Do nothing.
@@ -95,10 +91,6 @@ class Directive:
             if e.action == Action.AbortAll:
                 pass
                 raise prep.Abort(self.dirtok, *e.args)
-        except BaseException as e:
-            raise
-            #traceback.print_exc()
-            #print("Ignoring the exception.\a")
         return None
 
     def parse(self) -> Tuple[Tokens, PpTok | None, Tokens]:
@@ -108,9 +100,7 @@ class Directive:
         3. Args: the rest of the line, stripped.
             Includes the name token if it is an integer.
         """
-        #tokiter = TokIter(self.line)
         tok: PpTok = None
-        #next(tokiter)               # Skip past the #.
         precedingtoks: Tokens = Tokens()
         line = TokIter(self.line[1:])
         for nametok in line:
@@ -129,11 +119,11 @@ class Directive:
             args[1] = args[1].add_spacing()
         return precedingtoks, nametok, args
 
-    ### Methods for all the different directive names, in alphabetical order...
-    # They all generate any tokens to be passed through (mostly just newline).
-    # Or possibly raise an OutputDirective exception.
+    ## Methods for all the different directive names, in alphabetical order...
+    # They all generate any tokens to be passed through (mostly just newline),
+    # or else return None.  Or possibly raise an OutputDirective exception.
 
-    def on_define(self, check_once: bool = False) -> Iterator[PpTok]:
+    def on_define(self, check_once: bool = False) -> Iterator[PpTok] | None:
         if check_once:
             if self.source.once.guard == self.args[0].value:
                 self.source.define_guard(self.dirtok)
@@ -141,60 +131,39 @@ class Directive:
         self.prep.define(TokIter(self.args))
         if self.handling is None:
             return iter(self.line)
-        ## Make this an empty iterator
-        #return
-        #yield
 
-    def on_elif(self) -> Iterator[PpTok]:
+    def on_elif(self) -> None:
         # Start the next group.
         result = self.evalexpr()
         self.condition(result)
-        ## Make this an empty iterator
-        #return
-        #yield
 
-    def on_elifdef(self) -> Iterator[PpTok]:
+    def on_elifdef(self) -> None:
         # Start the next group.
         res = self.defined(self.args[0])
         self.condition(res)
-        ## Make this an empty iterator
-        #return
-        #yield
 
-    def on_elifndef(self) -> Iterator[PpTok]:
+    def on_elifndef(self) -> None:
         # Start the next group.
         res = self.defined(self.args[0])
         self.condition(res, invert=True)
-        # Make this an empty iterator
-        return
-        yield
 
-    def on_else(self) -> Iterator[PpTok]:
+    def on_else(self) -> None:
         """ #else directive, equivalent to #elif True,
         must be the last group.
         """
         self.ifsect.else_group(self)
-        ## Make this an empty iterator
-        #return
-        #yield
 
-    def on_endif(self) -> Iterator[PpTok]:
+    def on_endif(self) -> None:
         oldstate = self.ifsect
         self.prep.skip_auto_pragma_once_possible_check = True
         if oldstate.passthru:
             raise OutputDirective(Action.IgnoreAndPassThrough)
-        ## Make this an empty iterator
-        #return
-        #yield
 
-    def on_error(self) -> Iterator[PpTok]:
+    def on_error(self) -> None:
         self.prep.on_error_token(self.line[0], str(self.line).rstrip())
         self.prep.return_code += 1
-        ## Make this an empty iterator
-        #return
-        #yield
 
-    def on_if(self, check_once: bool = False) -> Iterator[PpTok]:
+    def on_if(self, check_once: bool = False) -> Iterator[PpTok] | None:
         # Check for potential include guard.
         if check_once and self.args[0].value == '!':
             expr: Tokens = Tokens(self.args[1:])
@@ -252,13 +221,13 @@ class Directive:
         #   1. Don't change anything in the Source's lexer.  It will continue
         #      to generate tokens using line numbers in the source file,
         #      regardless of any #line directives in the file.
-        #   2. Generate a location marker token.  This will reference an
+        #   2. Generate a CPP_LOCMOVE token.  This will reference an
         #      OutLoc object with the presumed line number and (possibly) file
         #      name.  This will be passed on, ultimately, to the
         #      Preprocessor's Writer.
         #   3. The Writer will see the marker before the next token is seen,
         #      adjust its idea of the current location, and (possibly) output
-        #      a line directive.
+        #      a line directive before that token.
 
         args = self.expand_args()
         args = Tokens(args)
@@ -289,8 +258,8 @@ class Directive:
         tok: PpTok = self.nametok
         move: MoveTok = tok.make_pos(
             TokLocMove, dir=tok, lineno=lineno, filename=filename)
-        lexer.move = move.pos
-        lexer.source.set_move(move.pos)
+        lexer.move = move.newpos
+        lexer.source.set_move(move.newpos)
         yield move
 
     def on_pragma(self) -> Iterator[PpTok]:
@@ -305,7 +274,7 @@ class Directive:
             if not prep.lang.emulate:
                 return
             # GCC writes spaces up to the 'once' arg, minus one.
-            #if prep.emulate:
+            #if prep.gcc:
             #    arg = self.args[0]
             #    yield arg.copy(
             #        type=self.TokType.CPP_GROUP, value='',
@@ -325,21 +294,14 @@ class Directive:
             line[0] = line[0].with_indent(line[0].loc)
 
             yield self.dirtok.make_passthru(line)
-            #yield from line
 
-    def on_undef(self) -> Iterator[PpTok]:
+    def on_undef(self) -> None:
         self.prep.undef(self.args)
         if self.handling is None:
             return iter(self.line)
-        ## Make this an empty iterator
-        #return
-        #yield
 
-    def on_warning(self) -> Iterator[PpTok]:
+    def on_warning(self) -> None:
         self.prep.on_warning_token(self.line[0], str(self.line).rstrip())
-        ## Make this an empty iterator
-        #return
-        #yield
 
 
     ### Other methods...
@@ -534,9 +496,6 @@ class Handler:
         if self.args and not dir.args_reqd(self.args):
             if not self.always: return
         prep.log.directive(dir, nest=self.nestme)
-        #if self.section_reqd and section.top:
-        #    dir.error(f"#{dir.name} without earlier matching #if*.")
-        #    return
         if nest:
             prep.nesting += nest
         kwds = {}
